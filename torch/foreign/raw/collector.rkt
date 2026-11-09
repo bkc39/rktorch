@@ -17,7 +17,6 @@
          on-main-os-thread?
          wake-after-collection!)
 
-;; Bumped by every release of a dead handle, by a reaper or a drain.
 (define runs (box 0))
 
 (define (note-finalizer-run!)
@@ -58,8 +57,6 @@
 (define (rearm-latch!)
   (thread-cell-set! collection-latch (make-weak-box (box 0))))
 
-;; Outside the main place there are no reapers: ffi's finalizer thread
-;; releases, and it runs only when the place's main OS thread yields.
 (define (wake-after-collection!)
   (cond
     [(weak-box-value (thread-cell-ref collection-latch)) (void)]

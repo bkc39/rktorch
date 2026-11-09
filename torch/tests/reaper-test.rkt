@@ -7,7 +7,6 @@
            (only-in racket/match match)
            (only-in racket/os getpid)
            (only-in racket/runtime-path #%datum define-runtime-path)
-           (only-in racket/string string-split)
            rackunit
            (only-in "../foreign/raw/cas.rkt" cas-add!)
            (only-in "../runtime/reaper.rkt"
@@ -115,10 +114,8 @@
 
   (define (main-cpu-ms)
     (define stat (file->string (format "/proc/self/task/~a/stat" (getpid))))
-    (match (regexp-match #px"\\) (.*)$" stat)
-      [(list _ rest)
-       (define fields (string-split rest))
-       (* 10 (+ (string->number (list-ref fields 11)) (string->number (list-ref fields 12))))]))
+    (match (regexp-match #px"\\) (?:\\S+ ){11}(\\d+) (\\d+) " stat)
+      [(list _ utime stime) (* 10 (+ (string->number utime) (string->number stime)))]))
 
   (define wake-count 1000)
 
@@ -291,6 +288,28 @@
 
   (test-case "with its one reaper held mid-batch, the first op after a collection releases what it found"
     (check-equal? (with-reapers 1 (lambda () (exit-status-of held-reaper-program #:within 60))) 0))
+
+  (define raise-under-the-take-lock-program
+    '(begin
+       (require (only-in torch/foreign/raw/regions with-uninterruptible)
+                (only-in (submod torch/runtime/reaper private) with-take-lock)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (call-with-process-deadline
+        30
+        (lambda ()
+          (define raised
+            (with-handlers ([symbol? values])
+              (with-uninterruptible
+                (with-take-lock
+                  (raise 'inside)))))
+          (define other
+            (thread (lambda () (with-uninterruptible (with-take-lock (void)))) #:pool 'own))
+          (define free? (and (sync/timeout 5 other) #t))
+          (eprintf "raised ~s, another thread then took the lock ~a\n" raised free?)
+          (exit (if (and (eq? raised 'inside) free?) 0 1))))))
+
+  (test-case "a raise under the take lock leaves the lock free"
+    (check-equal? (exit-status-of raise-under-the-take-lock-program #:within 60) 0))
 
   (test-case "L15: a process exits with status 0 while its reapers are parked"
     (check-equal? (exit-status-of '(begin

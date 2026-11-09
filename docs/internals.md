@@ -117,9 +117,11 @@ Racket starts a finalizer thread at the first registration in each
 namespace (each instance of `ffi/unsafe`'s finalizer module, so each
 module registry and each place), and parallel threads that race that
 registration can each start one (`torch/tests/finalizer-thread-test.rkt`).
-Tensors no longer use it, but the loader's workers, scope guards and user
-code do, so `torch/runtime/reaper.rkt` registers its canary (below) as it
-is instantiated. Every finalizer then runs on one thread, provided `torch`
+Tensors no longer use it in the main place, but the loader's workers, scope
+guards and user code do, so `torch/runtime/reaper.rkt` registers a
+finalizer as it is instantiated, in every place: its canary (below) in the
+main place, and a no-op in any other, where tensors are released on that
+thread. Every finalizer then runs on one thread per place, provided `torch`
 is required before any parallel thread registers a finalizer in that
 namespace; a program whose parallel threads register through another FFI
 library first can already have several.
@@ -136,7 +138,9 @@ own "reaper" in `torch/data/workers.rkt` is unrelated.
 in prose: `(-> reaped? heap-object/c void?)`, where `heap-object/c` rejects
 fixnums, characters, booleans, `'()`, `#<void>` and `eof`. It is one
 guardian registration, a push onto the calling thread's own list, with no
-representative, no closure and no lock.
+representative, no closure and no lock. `wake-reapers!` and
+`reap-after-collection!` run on accounting ops too, and carry none either:
+each is `(-> void?)`.
 
 - **Ordered, with no representative.** An ordered guardian reports an
   object only when nothing it reaches is reachable from another pending
@@ -156,12 +160,17 @@ representative, no closure and no lock.
   without a lock faulted with `invalid memory reference`. Every take holds
   `make-uninterruptible-lock` for at most a batch of 32 primitive takes
   and nothing else; the lock order is the take lock, then the ledger lock.
-- **Batches and tickets.** Under the lock a reaper takes up to 32 objects
-  across the kinds, numbers them from a ticket counter, and sets its
-  `held` box to the batch's first ticket with a CAS at site `'reaper`. It
-  releases the batch, then sets `held` back to `#f` with a second CAS, so
-  on arm64 no drain sees `#f` before the frees. Taking and releasing are
-  one uninterruptible region, so a kill waits for the whole batch. A
+- **Batches and tickets.** Under the lock a thread takes up to 32 objects
+  across the kinds, numbers them from a ticket counter, and adds the
+  batch's first ticket to the in-flight list with a CAS at site
+  `'reaper`. It releases the batch, then removes the ticket with a second
+  CAS, so on arm64 no drain sees it gone before the frees. Every taker
+  publishes its batch this way: a reaper, a thread's first accounting
+  after a collection, and a drainer helping, so a drain sees every batch
+  taken before it began, whichever thread holds it. Taking and releasing
+  are one uninterruptible region, so a kill waits for the whole batch; the
+  take lock's release (`with-take-lock`) and the ticket's removal run on a
+  raise too, though nothing under either raises today but a test's CAS. A
   reaper that took a full batch while another is parked wakes one more.
 - **Parking.** A reaper marks itself parked with a CAS, takes once more,
   and if that finds nothing waits on its own OS semaphore outside any
@@ -427,9 +436,8 @@ the last defence when a trough collection is not yet due:
   across collections. The drainer then helps, taking and releasing
   batches on its own thread until it sees every fence taken (by itself,
   or by a reaper, which writes the fence's ticket and drops it) or finds
-  the guardians empty. That gives the ticket D₀; it then waits until
-  every reaper's `held` is `#f`, at least D₀, or belongs to a dead
-  thread, yielding with `(sleep 0)` on main's OS thread and spinning
+  the guardians empty. That gives the ticket D₀; it then waits until no
+  ticket on the in-flight list is below D₀, yielding with `(sleep 0)` on main's OS thread and spinning
   elsewhere. `#t` means everything any collection had found before the
   drain began has been released, however fast workers allocate; `#f`
   comes only at `drain-deadline` (2000 ms), which now guards against a
@@ -620,9 +628,16 @@ than a second wrapper over the same storage.
   them reclaiming. In any other place `reaped` returns a kind whose
   `reap-when-dead!` is `register-finalizer` with one finalizer per kind,
   no reaper thread starts, a drain settles ffi's finalizer thread by quiet
-  turns, `collect-and-wait!` first waits for a canary will, and an op
-  after a collection yields on the place's main OS thread, all as before
-  F1. `'own` reaper threads do not survive a place's exit on Racket CS: a
+  turns, since that thread runs only while the draining one yields, and
+  `collect-and-wait!` first waits for a canary will, since a will
+  executor is polled by the finalizer thread rather than filled by the
+  collection; an op after a collection yields on the place's main OS
+  thread, all as before F1. `main-place?` (`torch/runtime/main-thread.rkt`)
+  asks whether green threads run on OS thread 0: Chez numbers the
+  process's first OS thread 0, and only the main place runs its green
+  threads there. The module finds that thread by running a green thread as
+  it is instantiated, which lands on the place's main OS thread whichever
+  thread instantiates it. `'own` reaper threads do not survive a place's exit on Racket CS: a
   place whose reapers park on OS semaphores crashed its parent process
   within a few exits (`application: not a procedure; given:
   [?error-value->string-handler not ready?]`), whether a plumber flush

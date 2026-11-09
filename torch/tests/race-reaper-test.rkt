@@ -5,7 +5,9 @@
            (only-in "../foreign.rkt" + @ sum zeros)
            (only-in "../foreign/raw/cas.rkt" cas-claim!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! on-main-os-thread?)
-           (only-in "../runtime/reaper.rkt" drain-reapers! wake-reapers!)
+           (only-in "../foreign/raw/regions.rkt" with-cleanup)
+           (only-in "../runtime/reaper.rkt"
+                    drain-reapers! reap-after-collection! reap-when-dead! reaped wake-reapers!)
            (only-in (submod "../runtime/reaper.rkt" private) reaper-statistics reaper-threads)
            (only-in "private/race-harness.rkt"
                     check-ledger churn-once! hooks join-all ledger-snapshot
@@ -42,15 +44,13 @@
     (define held (box #f))
     (define go (box #f))
     (with-race-hook (holding-one-reaper held go)
-      (dynamic-wind
-       void
-       (lambda ()
-         (garbage! 256)
-         (collect-garbage)
-         (wake-reapers!)
-         (check-true (thread? (await-box held)) "no reaper took a batch")
-         (observe))
-       (lambda () (set-box! go #t))))
+      (with-cleanup
+        (garbage! 256)
+        (collect-garbage)
+        (wake-reapers!)
+        (check-true (thread? (await-box held)) "no reaper took a batch")
+        (observe)
+        #:finally (set-box! go #t)))
     (check-true (drain-reapers!))
     (settle!)
     (check-ledger base #f))
@@ -76,6 +76,69 @@
                     (define started (current-inexact-milliseconds))
                     (check-false (drain-reapers! #:deadline-ms 200))
                     (check-true (>= (- (current-inexact-milliseconds) started) 200)))))))
+
+  (define (busy-for ms)
+    (define until (+ (current-inexact-milliseconds) ms))
+    (let spin ()
+      (when (< (current-inexact-milliseconds) until)
+        (spin))))
+
+  (define reaper-pool (reaper-threads))
+
+  (define slow-on-reapers
+    (reaped 'slow-on-reapers
+            (lambda (_v)
+              (when (memq (current-thread) reaper-pool)
+                (busy-for 1)))))
+
+  (define ((holding target took go) name subject)
+    (when (and (eq? name 'reaper-taken) (eq? subject (unbox target)))
+      (set-box! took #t)
+      (define until (+ (current-inexact-milliseconds) 20000))
+      (let spin ()
+        (unless (or (unbox go) (> (current-inexact-milliseconds) until))
+          (spin)))))
+
+  (define (drains-while-another-thread-holds-a-batch take!)
+    (let attempt ([tries 20])
+      (define target (box #f))
+      (define took (box #f))
+      (define go (box #f))
+      (for ([_ (in-range 4096)])
+        (reap-when-dead! slow-on-reapers (make-vector 1 0)))
+      (collect-garbage)
+      (define outcome
+        (with-race-hook (holding target took go)
+          (with-cleanup
+            (define taker
+              (thread (lambda () (set-box! target (current-thread)) (take!)) #:pool 'own))
+            (let wait ()
+              (unless (or (unbox took) (thread-dead? taker))
+                (sleep 0.001)
+                (wait)))
+            (and (unbox took)
+                 (let ([while-held (drain-reapers! #:deadline-ms 200)])
+                   (set-box! go #t)
+                   (thread-wait taker)
+                   (list while-held (drain-reapers!))))
+            #:finally (set-box! go #t))))
+      (cond
+        [outcome outcome]
+        [(positive? tries) (check-true (drain-reapers!)) (attempt (sub1 tries))]
+        [else (fail "the other thread never took a batch")])))
+
+  (test-case "R5: a drain waits for a batch an op's first accounting took before it began"
+    (within 60 (lambda ()
+                 (check-equal? (drains-while-another-thread-holds-a-batch reap-after-collection!)
+                               '(#f #t)
+                               "(drained while the batch was held, drained after)"))))
+
+  (test-case "R5: a drain waits for a batch a second drainer took before it began"
+    (within 60 (lambda ()
+                 (check-equal? (drains-while-another-thread-holds-a-batch
+                                (lambda () (drain-reapers! #:deadline-ms 10000)))
+                               '(#f #t)
+                               "(drained while the batch was held, drained after)"))))
 
   (test-case "L13: a spurious CAS failure at 'reaper still releases each handle once"
     (within 60

@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe register-finalizer)
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic
                   make-uninterruptible-lock uninterruptible-lock-acquire
                   uninterruptible-lock-release)
@@ -10,21 +11,26 @@
          (only-in ffi/unsafe/vm vm-eval)
          (only-in racket/contract/base
                   -> ->* and/c any any/c flat-named-contract not/c)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign/raw/cas.rkt" cas-add! cas-claim! cas-update!)
          (only-in "../foreign/raw/pressure-settings.rkt" reaper-count-from-env)
          (only-in "../foreign/raw/race-points.rkt" race-point)
-         (only-in "../foreign/raw/regions.rkt" with-uninterruptible)
+         (only-in "../foreign/raw/regions.rkt" with-cleanup with-uninterruptible)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "main-thread.rkt" main-place? on-main-os-thread?))
 
 (provide drain-deadline
+         reap-after-collection!
          reap-when-dead!
-         reaper-count)
+         reaper-count
+         wake-reapers!)
 
 (module+ private
-  (provide heap-object/c
+  (provide call-with-canary-off
+           heap-object/c
            reaper-statistics
-           reaper-threads))
+           reaper-threads
+           with-take-lock))
 
 (define heap-object/c
   (flat-named-contract 'heap-object/c
@@ -32,12 +38,16 @@
                          (void? v) (eof-object? v))))))
 
 (struct reaped (name release guardian register) ;; noqa
-  #:constructor-name reaped/guardian
+  #:constructor-name make-reaped
   #:omit-define-syntaxes)
 
 (struct reaper-fence (ticket))
 
-(struct reaper (held wake parked [thread #:mutable]))
+(struct reaper (wake parked [thread #:mutable]))
+
+(struct slots (kinds objects))
+
+(struct help (fences [after #:mutable] [fenced? #:mutable]))
 
 (define batch-size 32)
 
@@ -47,10 +57,9 @@
 
 (define kinds (box '()))
 
-;; The guardian's take is an unsynchronized read-modify-write, so every
-;; take holds this lock, and nothing else is ever taken while holding it.
 (define take-lock (make-uninterruptible-lock))
 (define tickets (box 0))
+(define in-flight (box '()))
 
 (define taken (box 0))
 (define released (box 0))
@@ -58,22 +67,34 @@
 (define wakes (box 0))
 (define escapes (box 0))
 
+(define canary-wakes? (box #t))
+
+(define-syntax-parse-rule (with-take-lock body:expr ...+)
+  (begin
+    (uninterruptible-lock-acquire take-lock)
+    (with-cleanup body ... #:finally (uninterruptible-lock-release take-lock))))
+
 (define/contract-out (reaped name release) ;; noqa
   (-> symbol? (-> any/c any) reaped?)
   (cond
     [(main-place?)
      (define guardian (vm-eval '(make-guardian #t)))
-     (define kind (reaped/guardian name release guardian guardian))
+     (define kind (make-reaped name release guardian guardian))
      (cas-update! kinds (lambda (known) (append known (list kind))))
      kind]
     [else
      (define finalize (finalizing release))
-     (reaped/guardian name release #f (lambda (v) (register-finalizer v finalize)))]))
+     (make-reaped name release #f (lambda (v) (register-finalizer v finalize)))]))
 
 (define (reap-when-dead! kind v)
   ((reaped-register kind) v))
 
-(define (take-into! slots)
+(define (fresh-slots)
+  (slots (make-vector batch-size #f) (make-vector batch-size #f)))
+
+(define (take-into! s)
+  (define kinds-of (slots-kinds s))
+  (define objects (slots-objects s))
   (let loop ([known (unbox kinds)] [n 0])
     (cond
       [(or (null? known) (= n batch-size)) n]
@@ -81,19 +102,19 @@
        => (lambda (v)
             (when (reaper-fence? v)
               (set-box! (reaper-fence-ticket v) (+ (unbox tickets) n)))
-            (vector-set! slots (* 2 n) (car known))
-            (vector-set! slots (add1 (* 2 n)) v)
+            (vector-set! kinds-of n (car known))
+            (vector-set! objects n v)
             (loop known (add1 n)))]
       [else (loop (cdr known) n)])))
 
 (define (note-escape! _e)
   (cas-add! escapes 1))
 
-(define (release-slot! slots i)
-  (define kind (vector-ref slots (* 2 i)))
-  (define v (vector-ref slots (add1 (* 2 i))))
-  (vector-set! slots (* 2 i) #f)
-  (vector-set! slots (add1 (* 2 i)) #f)
+(define (release-slot! s i)
+  (define kind (vector-ref (slots-kinds s) i))
+  (define v (vector-ref (slots-objects s) i))
+  (vector-set! (slots-kinds s) i #f)
+  (vector-set! (slots-objects s) i #f)
   (cond
     [(reaper-fence? v) 0]
     [else
@@ -108,45 +129,46 @@
   (cas-add! taken 1)
   (cas-add! released 1))
 
-(define (release-batch! slots n)
+(define (release-batch! s n)
   (define objects
     (for/sum ([i (in-range n)])
-      (release-slot! slots i)))
+      (release-slot! s i)))
   (cas-add! taken objects)
   (cas-add! released objects))
 
-;; Taking and releasing are one region, so a kill waits for the whole batch.
-(define (reap-batch! slots held fences)
-  (with-uninterruptible
-    (uninterruptible-lock-acquire take-lock)
+(define (take-batch! s h)
+  (with-take-lock
     (define first (unbox tickets))
-    (define n (take-into! slots))
-    (set-box! tickets (+ first n))
-    (when (and held (positive? n))
-      (cas-claim! held #f first #:site 'reaper))
-    (define fenced? (and fences (andmap unbox fences)))
-    (uninterruptible-lock-release take-lock)
+    (define n (take-into! s))
+    (define after (+ first n))
+    (set-box! tickets after)
+    (when h
+      (set-help-after! h after)
+      (set-help-fenced?! h (andmap unbox (help-fences h))))
     (when (positive? n)
-      (race-point reaper-taken (current-thread))
-      (release-batch! slots n)
-      (when held
-        (cas-claim! held first #f #:site 'reaper)))
-    (values n (+ first n) fenced?)))
+      (cas-update! in-flight (lambda (firsts) (cons first firsts)) #:site 'reaper))
+    (values first n)))
 
-;; Each reaper parks on its own semaphore: Racket's OS semaphore signals
-;; only when its count was 0, so two posts to one shared semaphore can wake
-;; one of two waiters. A waker claims a parked reaper before posting it.
+(define (reap-batch! s [h #f])
+  (with-uninterruptible
+    (define-values (first n) (take-batch! s h))
+    (when (positive? n)
+      (with-cleanup
+        (race-point reaper-taken (current-thread))
+        (release-batch! s n)
+        #:finally (cas-update! in-flight (lambda (firsts) (remv first firsts)) #:site 'reaper)))
+    n))
+
 (define (wake-one!)
   (for/or ([r (in-list reapers)])
     (and (cas-claim! (reaper-parked r) #t #f #:site 'reaper)
          (begin (os-semaphore-post (reaper-wake r)) #t))))
 
-(define (park! r slots)
+(define (park! r s)
   (define parked (reaper-parked r))
   (cas-claim! parked #f #t #:site 'reaper)
-  (define-values (n _d _fenced?) (reap-batch! slots (reaper-held r) #f))
   (cond
-    [(positive? n) (void (cas-claim! parked #t #f #:site 'reaper))]
+    [(positive? (reap-batch! s)) (void (cas-claim! parked #t #f #:site 'reaper))]
     [else
      (race-point reaper-parking (current-thread))
      (cas-add! parks 1)
@@ -156,24 +178,21 @@
      (cas-add! wakes 1)]))
 
 (define (reap! r)
-  (define slots (make-vector (* 2 batch-size) #f))
+  (define s (fresh-slots))
   (let loop ()
-    (define-values (n _d _fenced?) (reap-batch! slots (reaper-held r) #f))
+    (define n (reap-batch! s))
     (cond
       [(= n batch-size) (wake-one!)]
-      [(zero? n) (park! r slots)]
+      [(zero? n) (park! r s)]
       [else (void)])
     (loop)))
 
-(define/contract-out (wake-reapers!) (-> void?)
+(define (wake-reapers!)
   (void (wake-one!)))
 
-;; The thread first to account after a collection releases one batch of
-;; what it found before it wakes a reaper: a reaper woken first can take the
-;; batch and then lose its CPU while holding it.
-(define/contract-out (reap-after-collection!) (-> void?)
+(define (reap-after-collection!)
   (unless (null? reapers)
-    (define-values (_n _d _fenced?) (reap-batch! (make-vector (* 2 batch-size) #f) #f #f))
+    (reap-batch! (fresh-slots))
     (wake-one!))
   (void))
 
@@ -182,22 +201,19 @@
   (reap-when-dead! kind (reaper-fence ticket))
   ticket)
 
-(define (help! slots fences deadline)
+(define (help! s fences deadline)
+  (define h (help fences #f #f))
   (let loop ()
     (cond
       [(>= (current-inexact-milliseconds) deadline) #f]
       [else
-       (define-values (n after fenced?) (reap-batch! slots #f fences))
-       (if (or fenced? (< n batch-size)) after (loop))])))
+       (define n (reap-batch! s h))
+       (if (or (help-fenced? h) (< n batch-size)) (help-after h) (loop))])))
 
-(define (settled? r d0)
-  (define ticket (unbox (reaper-held r)))
-  (or (not ticket) (>= ticket d0) (thread-dead? (reaper-thread r))))
-
-(define (await-batches d0 deadline)
+(define (await-batches d₀ deadline)
   (let loop ()
     (cond
-      [(andmap (lambda (r) (settled? r d0)) reapers) #t]
+      [(andmap (lambda (first) (>= first d₀)) (unbox in-flight)) #t]
       [(>= (current-inexact-milliseconds) deadline) #f]
       [else
        (when (on-main-os-thread?)
@@ -207,16 +223,13 @@
 (define (drain-fenced! deadline)
   (wake-reapers!)
   (define fences (map plant-fence! (unbox kinds)))
-  (define d0 (help! (make-vector (* 2 batch-size) #f) fences deadline))
+  (define d₀ (help! (fresh-slots) fences deadline))
   (cond
-    [d0
-     (race-point drain-fenced d0)
-     (await-batches d0 deadline)]
+    [d₀
+     (race-point drain-fenced d₀)
+     (await-batches d₀ deadline)]
     [else #f]))
 
-;; Outside the main place, releases run on ffi's finalizer thread, which
-;; runs only while this one yields: so yield until the release count has
-;; stood still for a few turns.
 (define quiet-turns 3)
 
 (define (settle-finalizers! deadline)
@@ -229,16 +242,13 @@
       [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
       [else #t])))
 
-(define/contract-out (drain-reapers! #:deadline-ms [ms (drain-deadline)]) ;; noqa
+(define/contract-out (drain-reapers! #:deadline-ms [ms (drain-deadline)])
   (->* [] [#:deadline-ms (and/c real? (not/c negative?))] boolean?)
   (define deadline (+ (current-inexact-milliseconds) ms))
   (if (main-place?)
       (drain-fenced! deadline)
       (settle-finalizers! deadline)))
 
-;; A will executor is polled by the finalizer thread, not filled by the
-;; collection, so outside the main place a canary shows that thread has
-;; started on this collection's batch before the release count settles.
 (define/contract-out (collect-and-drain-reapers!) ;; noqa
   (-> boolean?)
   (cond
@@ -257,20 +267,27 @@
     (set-reaper-thread! r (thread (lambda () (reap! r)) #:pool 'own))))
 
 (define (arm-canary!)
-  (register-finalizer (box 0) (lambda (_) (wake-reapers!) (arm-canary!))))
+  (register-finalizer (box 0)
+                      (lambda (_)
+                        (when (unbox canary-wakes?)
+                          (wake-reapers!))
+                        (arm-canary!))))
 
-;; Reapers run only in the main place, and nothing stops them: a process
-;; exits cleanly with its reapers parked, but an `'own` thread that wakes
-;; from an OS wait while its place is torn down crashes the whole process.
+(define (call-with-canary-off thunk)
+  (set-box! canary-wakes? #f)
+  (with-cleanup (thunk) #:finally (set-box! canary-wakes? #t)))
+
 (define reapers
   (if (main-place?)
       (for/list ([_ (in-range reaper-count)])
-        (reaper (box #f) (make-os-semaphore) (box #f) #f))
+        (reaper (make-os-semaphore) (box #f) #f))
       '()))
 
-(unless (null? reapers)
-  (for-each start-reaper! reapers)
-  (arm-canary!))
+(cond
+  [(null? reapers) (register-finalizer (box 0) void)]
+  [else
+   (for-each start-reaper! reapers)
+   (arm-canary!)])
 
 (define (reaper-threads)
   (map reaper-thread reapers))

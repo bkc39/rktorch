@@ -9,7 +9,8 @@
            (only-in "../foreign.rkt" conv2d cpu-device cuda-device native-memory-use randn zeros)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! finalizer-runs)
-           (only-in (submod "../runtime/reaper.rkt" private) reaper-statistics)
+           (only-in (submod "../runtime/reaper.rkt" private)
+                    call-with-canary-off reaper-statistics)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/wedge.rkt" exit-status-of)
            (only-in "private/within.rkt" within))
@@ -85,13 +86,15 @@
     (count values (for/list ([_ (in-range trials)])
                     (op-after-a-collection-wakes-a-reaper?))))
 
-  (test-case "L20: an op after a collection wakes a parked reaper, on main and off it"
+  (test-case "L20: with the canary off, an op after a collection wakes a parked reaper, on main and off it"
     (within 60
             (lambda ()
-              (check-equal? (woken-after 20) 20 "on main")
-              (define off-main (box #f))
-              (thread-wait (thread (lambda () (set-box! off-main (woken-after 20))) #:pool 'own))
-              (check-equal? (unbox off-main) 20 "on a parallel thread"))))
+              (call-with-canary-off
+               (lambda ()
+                 (check-equal? (woken-after 20) 20 "on main")
+                 (define off-main (box #f))
+                 (thread-wait (thread (lambda () (set-box! off-main (woken-after 20))) #:pool 'own))
+                 (check-equal? (unbox off-main) 20 "on a parallel thread"))))))
 
   (define-runtime-path place-turn "private/place-turn.rkt")
 
