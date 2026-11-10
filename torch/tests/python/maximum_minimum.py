@@ -35,7 +35,7 @@ CASES = [
      ([0.5, NAN, -3.0, NAN], [4], "bfloat16")),
     ("bfloat16-int64", ([1.5, -4.0, NAN], [3], "bfloat16"),
      ([2, -5, 0], [3], "int64")),
-    ("zero-dim-float64-int64", ([5, -2, 3], [3], "int64"),
+    ("zero-dim-float64-float16", ([1.5, -2.0, 3.0], [3], "float16"),
      ([2.5], [], "float64")),
     ("zero-dim-nan-float64-float32", ([1.0, 2.0], [2], "float32"),
      ([NAN], [], "float64")),
