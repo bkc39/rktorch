@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe/atomic in-atomic-mode?)
+         (only-in ffi/unsafe/vm vm-eval)
          (only-in "../../runtime/main-thread.rkt" main-place? on-main-os-thread?)
          (only-in "../../runtime/reaper.rkt"
                   collect-and-drain-reapers! drain-deadline drain-reapers!
@@ -57,7 +58,11 @@
 (define (rearm-latch!)
   (thread-cell-set! collection-latch (make-weak-box (box 0))))
 
+(define run-pending-events! (vm-eval '($primitive $event)))
+
 (define (wake-after-collection!)
+  (unless (in-atomic-mode?)
+    (run-pending-events!))
   (cond
     [(weak-box-value (thread-cell-ref collection-latch)) (void)]
     [(main-place?)

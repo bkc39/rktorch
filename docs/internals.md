@@ -200,6 +200,19 @@ each is `(-> void?)`.
   main blocked and only workers collecting, the canary woke the reapers
   once in 1695 collections. A tensor op no longer yields after a
   collection.
+- **The op's own collection.** The collection an accounting's charge
+  makes due is still pending when the latch is read: Chez performs it at
+  the thread's next event check, which lands after the op has returned.
+  So `wake-after-collection!` first runs Chez's `$event` (outside atomic
+  mode), which performs a pending collection on the spot, and the latch
+  then sees it. Without it an op never released what its own collection
+  found: on 9.1 the #377 loop ended with that cycle's results untaken or
+  in flight on a reaper in 4 runs of 10 on two pinned CPUs, against 0 of
+  10 when the latch still slept: its `sleep 0` entered the scheduler,
+  which performed the pending collection and ran the finalizer thread
+  before the op went on. `$event` costs about 40 ns an accounting
+  (`torch/tests/reaper-test.rkt`, "an op whose charge makes a collection
+  due").
 - **Count and lifetime.** `RKTORCH_REAPERS` (1 to 16, default 2) reapers,
   read once at load, start as `#:pool 'own` threads under
   `make-custodian-at-root`, so a user's `custodian-shutdown-all` leaves

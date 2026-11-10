@@ -289,6 +289,56 @@
   (test-case "with its one reaper held mid-batch, the first op after a collection releases what it found"
     (check-equal? (with-reapers 1 (lambda () (exit-status-of held-reaper-program #:within 60))) 0))
 
+  (define collecting-op-program
+    '(begin
+       (require (only-in ffi/unsafe/vm vm-eval)
+                (only-in torch zeros)
+                (only-in torch/foreign/raw/cas cas-add! cas-claim!)
+                (only-in torch/foreign/raw/race-points race-hook)
+                (only-in torch/runtime/reaper reap-when-dead! reaped wake-reapers!)
+                (only-in (submod torch/runtime/reaper private) reaper-threads)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (define collections (vm-eval '(lambda () (collections))))
+       (define holding (box #f))
+       (define go (box #f))
+       (set-box! race-hook
+                 (lambda (name subject)
+                   (when (and (eq? name 'reaper-taken)
+                              (memq subject (reaper-threads))
+                              (cas-claim! holding #f subject #:site 'gate))
+                     (let spin () (unless (unbox go) (spin))))))
+       (define registered (box 0))
+       (define released (box 0))
+       (define kind (reaped 'counted (lambda (_v) (cas-add! released 1))))
+       (define (drop! n)
+         (for ([_ (in-range n)]) (reap-when-dead! kind (make-vector 1 0)))
+         (set-box! registered (+ (unbox registered) n)))
+       (define (collecting-op-leaves held)
+         (drop! 5)
+         (define before (collections))
+         (zeros (* 2 1024 1024))
+         (and (> (collections) before) (- (unbox registered) (unbox released) held)))
+       (call-with-process-deadline
+        50
+        (lambda ()
+          (let hold ()
+            (unless (unbox holding)
+              (drop! 1)
+              (collect-garbage)
+              (wake-reapers!)
+              (sleep 0.01)
+              (hold)))
+          (zeros 1)
+          (define held (- (unbox registered) (unbox released)))
+          (define left
+            (filter values (for/list ([_ (in-range 400)]) (collecting-op-leaves held))))
+          (set-box! go #t)
+          (eprintf "unreleased after each of ~a ops that collected: ~s\n" (length left) left)
+          (exit (if (and (>= (length left) 20) (andmap zero? left)) 0 1))))))
+
+  (test-case "with its one reaper held mid-batch, an op whose charge makes a collection due releases what that collection found before it returns"
+    (check-equal? (with-reapers 1 (lambda () (exit-status-of collecting-op-program #:within 60))) 0))
+
   (define raise-under-the-take-lock-program
     '(begin
        (require (only-in torch/foreign/raw/regions with-uninterruptible)
