@@ -3,10 +3,10 @@
 (require (for-syntax racket/base
                      (only-in racket/syntax format-id)
                      (only-in syntax/parse/pre
-                              define-syntax-class expr id pattern))
+                              define-syntax-class id pattern))
          (only-in ffi/unsafe prop:cpointer)
          (only-in racket/contract/base
-                  -> ->* ->i and/c flat-contract? flat-named-contract
+                  -> ->* ->i >=/c flat-contract? flat-named-contract
                   integer-in or/c parameter/c)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
@@ -15,6 +15,7 @@
          (only-in "ops.rkt"
                   default-device
                   device->type+index
+                  float-dtype-max
                   tensor-device
                   tensor-dtype
                   tensor-shape
@@ -32,8 +33,10 @@
          (only-in "raw/tensor.rkt" tr-tensor-copy-bytes/raw)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
-(provide generator?
-         generator-on?)
+(provide check-generator-on!
+         generator?
+         generator-on?
+         uniform-range?)
 
 (struct generator (handle)
   #:property prop:cpointer 0
@@ -160,15 +163,44 @@
   (check-ok (tr-generator-set-state!/raw g state) 'set-generator-state!)
   (void))
 
-(define-syntax-parse-rule (define-fill! name:id raw:id first:id second:id
-                                        second/c:expr)
-  (define/contract-out (name t first second) ;; noqa
-    (->i ([t tensor?] [first real?] [second second/c])
-         #:pre/name (t) "the generator lives on the tensor's device"
-         (generator-on? #f (tensor-device t))
-         [result void?])
-    (check-ok (raw t (exact->inexact first) (exact->inexact second) #f) 'name)
-    (void)))
+(define float-tensor/c
+  (flat-named-contract
+   'float-tensor
+   (lambda (t)
+     (and (tensor? t) (hash-has-key? float-dtype-max (tensor-dtype t))))))
 
-(define-fill! uniform! tr-tensor-uniform!/raw low high real?)
-(define-fill! normal! tr-tensor-normal!/raw mean std (and/c real? positive?))
+(define (uniform-range? dtype low high)
+  (error 'uniform-range? "not implemented"))
+
+(define (check-generator-on! who generator target
+                             #:noun [noun "target"] #:label [label noun])
+  (error 'check-generator-on! "not implemented"))
+
+(define/contract-out (uniform! t [low 0.0] [high 1.0] ;; noqa
+                               #:generator [generator #f])
+  (->i ([t float-tensor/c])
+       ([low real?]
+        [high real?]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (t generator) "the generator lives on the tensor's device"
+       (generator-on? (supplied-or generator) (tensor-device t))
+       #:pre/name (t low high)
+       "low is at most high, both within the dtype's finite range and at most its largest value apart"
+       (uniform-range? (tensor-dtype t) (supplied-or low 0.0) (supplied-or high 1.0))
+       [result void?])
+  (check-ok (tr-tensor-uniform!/raw t (exact->inexact low) (exact->inexact high) #f)
+            'uniform!)
+  (void))
+
+(define/contract-out (normal! t [mean 0.0] [std 1.0] ;; noqa
+                              #:generator [generator #f])
+  (->i ([t float-tensor/c])
+       ([mean real?]
+        [std (>=/c 0)]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (t generator) "the generator lives on the tensor's device"
+       (generator-on? (supplied-or generator) (tensor-device t))
+       [result void?])
+  (check-ok (tr-tensor-normal!/raw t (exact->inexact mean) (exact->inexact std) #f)
+            'normal!)
+  (void))

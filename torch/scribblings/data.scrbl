@@ -2,7 +2,9 @@
 
 @(require torch/scribblings/common
           torch/scribblings/labels
-          (for-label torch/data/loader))
+          (for-label torch/data/loader
+                     torch/vision/augment
+                     torch/vision/transforms))
 
 @title{Datasets and loaders}
 
@@ -338,14 +340,21 @@ One int64 drawn from @racket[generator] or else from @racket[(current-generator)
 
 @defparam[current-generator generator (or/c generator? #f)]{
 The generator a random operation draws from when its @racket[#:generator]
-is @racket[#f]: @racket[rand], @racket[randn], @racket[rand-like],
-@racket[randn-like], @racket[randperm], @racket[draw-seed],
-@racket[multinomial], the random transforms, the seeds a loader draws, and
-the initializers (@racket[uniform-init], @racket[kaiming-uniform],
-@racket[trunc-normal-init]). @racket[#f], the default, is the global stream
-seeded by @racket[manual-seed!]. An explicit @racket[#:generator] wins. Each
-loader worker sets it to its own generator. Dropout draws from the global
-stream whatever it holds.
+is @racket[#f]. @racket[#f], the default, means the target device's default
+stream, which @racket[manual-seed!] seeds. An explicit @racket[#:generator]
+wins. Each loader worker sets it to its own generator. @Secref["streams"]
+lists every random operation and the stream it uses.
+
+A generator draws only on its own device, and PyTorch raises when one meets a
+tensor on another device. The parameter follows the same rule. When a draw's
+generator, given or taken from @racket[current-generator], lives on another
+device than the tensor it fills or builds, the call is a contract violation
+blamed on its caller, and no stream advances. So a CPU generator installed
+with @racket[parameterize] makes a CUDA @racket[rand] fail; it does not fall
+back to the CUDA default stream, which would make a run impossible to replay.
+To draw for another device, pass that device's generator or wrap the call in
+@racket[(parameterize ([current-generator #f]) ...)]. Devices compare by type
+and index.
 @torch-examples[
 (parameterize ([current-generator (make-generator 0)])
   (randperm 5))
@@ -391,3 +400,62 @@ stream's state may be set on a generator, and back.
 (set-generator-state! h s)
 (equal? (tensor->list drawn) (tensor->list (randperm 5 #:generator h)))
 ]}
+
+@subsection[#:tag "streams"]{Which stream each draw uses}
+
+@(define fallback
+   @elem{@racket[(current-generator)], else the target's default stream})
+
+The target is the device a generator must live on.
+
+@tabular[#:sep @hspace[2]
+         #:style 'boxed
+         (list (list @bold{operation} @bold{without a generator}
+                     @bold{@racket[#:generator]} @bold{target})
+               (list @elem{@racket[rand] @racket[randn]} fallback "yes"
+                     @elem{@racket[#:device], else @racket[(default-device)]})
+               (list @elem{@racket[rand-like] @racket[randn-like]} fallback "yes"
+                     @elem{@racket[#:device], else @racket[t]'s})
+               (list @elem{@racket[uniform!] @racket[normal!]} fallback "yes"
+                     @elem{@racket[t]'s device})
+               (list @racket[multinomial] fallback "yes" "the input's device")
+               (list @racket[randperm] fallback "yes" "the CPU")
+               (list @racket[draw-seed]
+                     @elem{@racket[(current-generator)], else the CPU's default stream}
+                     "yes" "none: it draws on the generator's device")
+               (list @elem{@racket[uniform-init] @racket[kaiming-uniform]
+                           @racket[normal-init] @racket[trunc-normal-init]}
+                     fallback "yes" @racket[(default-device)])
+               (list @elem{the layers that draw their parameters (@racket[Linear],
+                           @racket[Conv1d], @racket[Conv2d], @racket[ConvTranspose2d],
+                           @racket[Embedding], @racket[LSTM], @racket[GRU],
+                           @racket[MultiheadAttention]) and every layer built on them}
+                     fallback "no, as in PyTorch" @racket[(default-device)])
+               (list @racket[Dropout]
+                     @elem{the input's device's default stream, whatever
+                           @racket[current-generator] holds}
+                     "no" "none")
+               (list @elem{the dropout inside @racket[scaled-dot-product-attention],
+                           @racket[MultiheadAttention], @racket[LSTM] and @racket[GRU]}
+                     @elem{the device's default stream, whatever
+                           @racket[current-generator] holds}
+                     "no, as in PyTorch" "none")
+               (list @elem{@racket[random-affine-crop] @racket[random-color-jitter]
+                           @racket[random-grayscale] @racket[random-solarize]
+                           @racket[crop-view] @racket[multi-crop]}
+                     fallback "yes" "the batch's device")
+               (list @elem{@racket[random-horizontal-flip] @racket[random-crop]
+                           @racket[random-resized-crop]}
+                     @elem{one @racket[draw-seed], then a Racket generator
+                           seeded from it}
+                     "yes, a CPU one" "none")
+               (list @racket[dataloader]
+                     @elem{its seeds by @racket[draw-seed]; a shuffled traversal's
+                           permutations from a generator seeded by one}
+                     "yes, a CPU one" "the CPU")
+               (list "a loader worker"
+                     @elem{sets @racket[current-generator] to
+                           @racket[(make-generator (+ s k))] and seeds
+                           @racket[current-pseudo-random-generator] from the
+                           same number}
+                     "" ""))]

@@ -2,6 +2,7 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/contract/combinator exn:fail:contract:blame?)
            (only-in racket/match match-define)
            (only-in racket/sequence sequence->list)
            (only-in threading ~>)
@@ -9,10 +10,14 @@
            (only-in "../main.rkt"
                     arange cpu-device cpu-generator/c cuda-available?
                     cuda-device current-generator device draw-seed
-                    generator-device in-flattened-tensor make-generator
-                    mps-available? mps-device multinomial rand rand-like randn
-                    randn-like randperm reshape tensor to uniform! zeros)
-           (only-in "../nn.rkt" kaiming-uniform trunc-normal-init uniform-init)
+                    generator-device generator-state in-flattened-tensor
+                    make-generator mps-available? mps-device multinomial
+                    normal! rand rand-like randn randn-like randperm reshape
+                    rng-state tensor tensor->bytes to uniform! zeros)
+           (only-in "../foreign/generator.rkt" check-generator-on!)
+           (only-in "../nn.rkt"
+                    Embedding LSTM Linear MultiheadAttention kaiming-uniform
+                    normal-init trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blames-caller?)
@@ -72,6 +77,26 @@
     (rand-4)
     (zeros-4)
     (check-equal? (op-calls-of rand-4) (op-calls-of zeros-4)))
+
+  (define (explicit-rows accelerator elsewhere)
+    (list (cons "uniform! on the accelerator, cpu generator"
+                (lambda ()
+                  (uniform! (zeros 3 #:device accelerator)
+                            #:generator (make-generator 1))))
+          (cons "normal! on cpu, accelerator generator"
+                (lambda () (normal! (zeros 3) #:generator elsewhere)))
+          (cons "uniform-init, accelerator generator"
+                (lambda () (uniform-init '(3) 0.0 1.0 #:generator elsewhere)))
+          (cons "kaiming-uniform, accelerator generator"
+                (lambda () (kaiming-uniform '(3 2) #:generator elsewhere)))
+          (cons "normal-init, accelerator generator"
+                (lambda () (normal-init '(3) #:generator elsewhere)))
+          (cons "trunc-normal-init, accelerator generator"
+                (lambda () (trunc-normal-init '(3) #:generator elsewhere)))
+          (cons "trunc-normal-init's uniform branch, accelerator generator"
+                (lambda ()
+                  (trunc-normal-init '(3) #:a 1.0 #:b 1.5
+                                     #:generator elsewhere)))))
 
   (define (blamed-on accelerator)
     (define elsewhere (make-generator 1 #:device accelerator))
@@ -140,6 +165,14 @@
           (cons "random-resized-crop, accelerator generator"
                 (lambda ()
                   (random-resized-crop images 4 #:generator elsewhere)))
+          (cons "normal! through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (normal! (zeros 3)))))
+          (cons "normal-init through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (normal-init '(3)))))
           (cons "multinomial on the accelerator, cpu generator"
                 (lambda ()
                   (multinomial probabilities 2
@@ -154,11 +187,44 @@
                                      #:generator (make-generator 1)))))])
       (check-exn (blames-caller? "generator-device-test") thunk)))
 
+  (bounded-test "check-generator-on! names the generator's device and the target's"
+    (check-equal? (check-generator-on! 'w (make-generator 1) 'cpu) (void))
+    (check-equal? (check-generator-on! 'w #f #f) (void))
+    (define (raised? rx)
+      (lambda (e)
+        (and (exn:fail:contract? e)
+             (not (exn:fail:contract:blame? e))
+             (regexp-match? rx (exn-message e)))))
+    (define target
+      (string-append "^w: contract violation;\n"
+                     " the generator lives on the target device\n"
+                     "  generator device: #<device cpu>\n"
+                     "  target device: #<device cuda"))
+    (check-exn (raised? (regexp target))
+               (lambda () (check-generator-on! 'w (make-generator 1) 'cuda)))
+    (check-exn (raised? (regexp target))
+               (lambda ()
+                 (parameterize ([current-generator (make-generator 1)])
+                   (check-generator-on! 'w #f 'cuda))))
+    (check-exn (raised?
+                (regexp
+                 (string-append "^dropout: contract violation;\n"
+                                " the generator lives on the tensor's device\n"
+                                "  generator device: #<device cpu>\n"
+                                "  tensor device: #<device cuda")))
+               (lambda ()
+                 (check-generator-on! 'dropout (make-generator 1) 'cuda
+                                      #:noun "tensor's" #:label "tensor"))))
+
   (cond
     [(pair? accelerators)
      (bounded-test "R4: a generator on another device blames the caller"
        (for* ([accelerator (in-list accelerators)]
-              [row (in-list (blamed-on accelerator))])
+              [row (in-list
+                    (append (blamed-on accelerator)
+                            (explicit-rows
+                             accelerator
+                             (make-generator 1 #:device accelerator))))])
          (match-define (cons label thunk) row)
          (check-exn (blames-caller? "generator-device-test") thunk
                     (format "~a: ~a" accelerator label))))
@@ -169,7 +235,53 @@
                            (rand-like #:device 'cpu
                                       #:generator (make-generator 1))
                            device)
-                       (cpu-device))))]
+                       (cpu-device))))
+     (bounded-test "G7: a refused draw advances no stream"
+       (for* ([accelerator (in-list accelerators)]
+              [k (in-range (length (explicit-rows accelerator #f)))])
+         (define elsewhere (make-generator 1 #:device accelerator))
+         (match-define (cons label thunk)
+           (list-ref (explicit-rows accelerator elsewhere) k))
+         (define (states)
+           (list (tensor->bytes (generator-state elsewhere))
+                 (tensor->bytes (rng-state))
+                 (tensor->bytes (rng-state #:device accelerator))))
+         (define before (states))
+         (check-exn exn:fail:contract? thunk)
+         (check-equal? (states) before (format "~a: ~a" accelerator label))))
+     (bounded-test "G7b: an explicit generator wins in the device check too"
+       (for ([accelerator (in-list accelerators)])
+         (define t (zeros 3))
+         (parameterize ([current-generator
+                         (make-generator 1 #:device accelerator)])
+           (uniform! t #:generator (make-generator 1)))
+         (check-equal? (host t) (let ([u (zeros 3)])
+                                  (uniform! u #:generator (make-generator 1))
+                                  (host u)))))
+     (bounded-test "G8: a layer built under a generator elsewhere names both devices"
+       (for* ([accelerator (in-list accelerators)]
+              [build (in-list (list (lambda () (Linear 3 2))
+                                    (lambda () (Embedding 4 3))
+                                    (lambda () (LSTM 3 4))
+                                    (lambda () (MultiheadAttention 4 #:heads 2))))])
+         (define (mismatch? e)
+           (define message (exn-message e))
+           (and (exn:fail:contract? e)
+                (not ((blames-caller? "init.rkt") e))
+                (regexp-match? #rx"the generator lives on the target device"
+                               message)
+                (regexp-match? (regexp-quote
+                                (format "generator device: ~a" accelerator))
+                               message)
+                (regexp-match? (regexp-quote
+                                (format "target device: ~a" (cpu-device)))
+                               message)))
+         (check-exn mismatch?
+                    (lambda ()
+                      (parameterize ([current-generator
+                                      (make-generator 1 #:device accelerator)])
+                        (build)))
+                    (format "~a" accelerator))))]
     [else
      (printf "[generator-device-test] skipped R4 rows: needs an ~a\n"
              "accelerator (CUDA or MPS) for a generator on another device")])

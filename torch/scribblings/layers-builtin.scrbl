@@ -262,29 +262,43 @@ PascalCase per PyTorch's.}
 @section{Initializers}
 
 The functions the constructors use to draw their initial parameters,
-exposed for a layer written with @racket[define-layer]. Each answers a
-fresh tensor on the default device, consuming the random stream exactly as
-PyTorch's counterpart does, so seeded initialization matches. The stream is
-@racket[current-generator]'s when that is set, and it must then live on the
-default device; otherwise the global one.
+@tt{torch.nn.init}'s, exposed for a layer written with @racket[define-layer].
+Each answers a fresh float32 tensor on the default device. It uses the stream
+exactly as its PyTorch counterpart does on @tt{torch.empty(dims)}, so a seed
+gives PyTorch's values. Each draws from @racket[generator], else from
+@racket[(current-generator)], else from the default device's default stream,
+and that generator must live on the default device. The constructors take no
+generator, as in PyTorch; they draw from @racket[(current-generator)].
 
 @defproc[(uniform-init [dims (listof exact-nonnegative-integer?)]
-                       [low real?] [high real?])
+                       [low real?] [high real?]
+                       [#:generator generator (or/c generator? #f) #f])
          tensor?]{
-Uniform on @tt{[low, high)}.}
+@tt{nn.init.uniform_}: uniform on @tt{[low, high)}, with @racket[uniform!]'s
+bounds for float32.}
+
+@defproc[(normal-init [dims (listof exact-nonnegative-integer?)]
+                      [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+@tt{nn.init.normal_} with mean 0 and std 1, the draw @racket[Embedding] makes.}
 
 @defproc[(kaiming-uniform [dims (listof exact-nonnegative-integer?)]
-                          [#:a a real? (sqrt 5.0)])
+                          [#:a a real? (sqrt 5.0)]
+                          [#:generator generator (or/c generator? #f) #f])
          tensor?]{
-Kaiming's uniform initialization with the bound PyTorch's
-@tt{nn.Linear} and @tt{nn.Conv2d} use by default, the fan-in read from
-@racket[dims].}
+@tt{nn.init.kaiming_uniform_} with the bound PyTorch's @tt{nn.Linear} and
+@tt{nn.Conv2d} use by default, the fan-in read from @racket[dims], which has
+at least two dimensions. Dims holding a 0 answer zeros and draw nothing.
+@torch-examples[
+(define (weights) (kaiming-uniform '(2 3) #:generator (make-generator 0)))
+(equal? (tensor->list (weights)) (tensor->list (weights)))]}
 
 @defproc[(trunc-normal-init [dims (listof exact-nonnegative-integer?)]
                             [#:mean mean real? 0.0]
                             [#:std std (and/c real? positive?) 1.0]
                             [#:a a real? -2.0]
-                            [#:b b real? 2.0])
+                            [#:b b real? 2.0]
+                            [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 @tt{nn.init.trunc_normal_}: a normal of @racket[mean] and @racket[std]
 truncated to @tt{[a, b]}, which are absolute bounds, not multiples of
@@ -292,7 +306,7 @@ truncated to @tt{[a, b]}, which are absolute bounds, not multiples of
 2.14 does, bit for bit, so a seed gives its values: a normal redrawn where
 it falls outside @tt{[a, b]} when that interval holds more than 0.3 of the
 mass, otherwise uniform candidates on @tt{[a, b]} accepted by the density,
-for which both bounds must be finite.
+for which both bounds must lie within float32's finite range.
 
 @torch-examples[
 (manual-seed! 0)

@@ -110,6 +110,29 @@ It stays @racket['float32] by default, so
          tensor?]{
 As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
 
+@defproc[(uniform! [t tensor?] [low real? 0.0] [high real? 1.0]
+                   [#:generator generator (or/c generator? #f) #f])
+         void?]{
+@tt{Tensor.uniform_(low, high, generator=g)}: fills @racket[t] in place with
+draws uniform on @tt{[low, high)}. They come from @racket[generator], else from
+@racket[(current-generator)], else from @racket[t]'s device's default stream,
+and that generator must live on @racket[t]'s device (see
+@secref["streams"]). @racket[t] is floating point. @racket[low] is at most
+@racket[high], both lie within @racket[t]'s dtype's finite range, and they are
+at most its largest value apart, as libtorch requires.
+@torch-examples[
+(define t (zeros 4))
+(uniform! t -1 1 #:generator (make-generator 0))
+t]}
+
+@defproc[(normal! [t tensor?] [mean real? 0.0] [std (>=/c 0) 1.0]
+                  [#:generator generator (or/c generator? #f) #f])
+         void?]{
+@tt{Tensor.normal_(mean, std, generator=g)}: fills @racket[t] in place with
+normal draws, from the stream @racket[uniform!] would use. @racket[t] is
+floating point. A @racket[std] of 0 fills @racket[mean] and still advances the
+stream, as PyTorch's does.}
+
 @defproc[(full [value real?] [dim exact-nonnegative-integer?] ...
                [#:device device device/c #f]
                [#:dtype dtype dtype/c #f]
