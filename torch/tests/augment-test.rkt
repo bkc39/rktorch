@@ -158,18 +158,28 @@
       (check-true (<= small (hash-ref golden-op-calls name))
                   (format "~a [~a]: ~a calls" name on small))))
 
-  (define ((crossing reading) dev)
+  (define ((crossing reading samples) dev)
+    (set-box! samples (add1 (unbox samples)))
     (tr-cuda-is-available/raw)
     (reading dev))
 
+  (define (sampled-op-calls kind run n on)
+    (define samples (box 0))
+    (define calls
+      (parameterize ([allocator-reading (crossing (allocator-reading) samples)])
+        (op-calls kind run n on)))
+    (values calls (unbox samples)))
+
   (bounded-test "A1: the backstop's allocator samples are not the op's native calls"
     (match-define (list _ kind run) (assoc "multi-crop 2+6" cases))
-    (parameterize ([native-memory-limit (* 8 1024 1024)]
-                   [allocator-reading (crossing (allocator-reading))])
+    (parameterize ([native-memory-limit (* 8 1024 1024)])
       (for ([on (in-list devices)])
-        (define small (op-calls kind run 2 on))
-        (define large (op-calls kind run 128 on))
-        (check-equal? large small (format "[~a]: ~a at 2, ~a at 128"
+        (define-values (small small-samples) (sampled-op-calls kind run 2 on))
+        (define-values (large large-samples) (sampled-op-calls kind run 8 on))
+        (check-true (> large-samples small-samples)
+                    (format "[~a]: ~a samples at 2, ~a at 8"
+                            on small-samples large-samples))
+        (check-equal? large small (format "[~a]: ~a at 2, ~a at 8"
                                           on small large)))))
 
   (define (draws-after run n on)
