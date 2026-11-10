@@ -2,24 +2,14 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/05-mnist.rkt.
 
-;; the noqa'd requires are used only in the main and test submodules,
-;; which raco review's unused-require check does not see
-(require (except-in racket/list argmax flatten take) ;; noqa
-         (only-in racket/math nan?) ;; noqa
-         torch ;; noqa
-         torch/data/loader ;; noqa
-         torch/nn ;; noqa
-         torch/scribblings/examples/05-mnist ;; noqa
-         (only-in torch/train fit run-metric) ;; noqa
-         (only-in torch/vision/mnist load-mnist-fixture)) ;; noqa
-
 (module twin racket/base
   (require (only-in racket/runtime-path #%datum define-runtime-path))
   (provide mnist-twin)
   (define-runtime-path mnist-twin "../python/05_mnist.py"))
 
 (module+ main
-  (require (only-in "private/env.rkt" env-number))
+  (require torch/scribblings/examples/05-mnist
+           (only-in "private/env.rkt" env-number))
   ;; The headline run: full MNIST (downloads + caches), ~98% on a GPU. Pass
   ;; EPOCHS to override. Use run-example for the quick offline smoke instead.
   (define epochs (env-number "EPOCHS" 3))
@@ -27,7 +17,15 @@
   (printf "test acc ~a\n" (train-mnist #:epochs epochs)))
 
 (module+ test
-  (require rackunit)
+  (require (except-in racket/list argmax flatten take)
+           (only-in racket/math nan?)
+           rackunit
+           torch
+           torch/data/loader
+           torch/nn
+           torch/scribblings/examples/05-mnist
+           (only-in torch/train fit run-metric)
+           (only-in torch/vision/mnist load-mnist-fixture))
   ;; Deterministic, offline: 5 full-batch steps on the committed fixture.
   (define-values (losses classifier trained-on) (run-example #:device 'cpu))
   (check-equal? trained-on 'cpu)

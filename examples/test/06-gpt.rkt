@@ -2,18 +2,9 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/06-gpt.rkt.
 
-;; the noqa'd requires are used only in the main and test submodules,
-;; which raco review's unused-require check does not see
-(require (only-in racket/list first last) ;; noqa
-         (only-in racket/math nan?) ;; noqa
-         (only-in racket/string string-contains? string-prefix?) ;; noqa
-         torch ;; noqa
-         torch/nn ;; noqa
-         torch/scribblings/examples/06-gpt ;; noqa
-         (only-in torch/text/data encode)) ;; noqa
-
 (module+ main
-  (require (only-in "private/env.rkt" env-number))
+  (require torch/scribblings/examples/06-gpt
+           (only-in "private/env.rkt" env-number))
   ;; EXCERPT=1: the offline middle path — train on the committed Part I
   ;; excerpt (no network), then sample. Otherwise the headline run: full
   ;; Heart of Darkness (downloads + caches), 2000 minibatch steps, then a
@@ -28,7 +19,14 @@
   (displayln (generate net vocab "The " #:steps 400)))
 
 (module+ test
-  (require rackunit)
+  (require (only-in racket/list first last)
+           (only-in racket/math nan?)
+           (only-in racket/string string-contains? string-prefix?)
+           rackunit
+           torch
+           torch/nn
+           torch/scribblings/examples/06-gpt
+           (only-in torch/text/data encode))
   ;; Deterministic, offline: 5 full-batch steps on the committed fixture.
   (define-values (losses net vocab trained-on) (run-example #:device 'cpu))
   (check-equal? trained-on 'cpu)
