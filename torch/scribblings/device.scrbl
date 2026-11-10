@@ -188,39 +188,26 @@ Equivalent to @racket[(to t dtype)].
 
 @section[#:tag "determinism"]{Determinism}
 
-A seeded run replays bit for bit only if every kernel it runs is
-deterministic. On CUDA some are not: @racketidfont{index-add!} and the backward of
-@racket[index-select] add atomically in whatever order threads arrive, and
-cuDNN may pick convolution algorithms that do the same. These switches are
-PyTorch's. Each is a flag of libtorch's process-wide context, seen by every
-thread and place from the next op on, libtorch's autograd threads included,
-so they are setters rather than parameters: set them at the top of a
-program, before other threads run ops. All are off by default, as in
-libtorch.
+PyTorch's determinism switches, all off by default. Each is a flag of
+libtorch's process-wide context, seen by every thread and place from the
+next op on, so they are setters rather than parameters: set them at the top
+of a program.
 
 @racketblock[
 (manual-seed! 0)
 (use-deterministic-algorithms! #t)
 ]
 
-PyTorch's reproducibility notes also ask for
-@tt{CUBLAS_WORKSPACE_CONFIG=:4096:8} in the environment before the process
-starts. libtorch 2.14 runs a matmul under the switch without it, and the
-matmul repeats bit for bit.
-
 @defproc[(use-deterministic-algorithms! [on? boolean?]
                                         [#:warn-only? warn-only? boolean? #f])
          void?]{
-@tt{torch.use_deterministic_algorithms}. While @racket[on?] holds, an op
-with a deterministic implementation uses it, and an op without one raises
-@racket[exn:fail] naming the kernel: on CUDA, the backwards of
-@racketidfont{adaptive-avg-pool2d}, @racket[ctc-loss], @racket[grid-sample] and
-@racket[upsample-bicubic2d]. No op refuses on the CPU. With
-@racket[warn-only?] such an op runs anyway, and libtorch prints a warning to
-the process's standard error, not to @racket[current-error-port].
-@racket[warn-only?] is stored as given even when @racket[on?] is
-@racket[#f]. While the switch is on, libtorch fills new memory with NaN, or
-an integer dtype's largest value, before an op writes it.}
+@tt{torch.use_deterministic_algorithms}. With @racket[on?], an op uses its
+deterministic implementation, and an op with none, such as the CUDA
+backward of @racketidfont{adaptive-avg-pool2d}, raises @racket[exn:fail]
+with libtorch's message. With @racket[warn-only?] as well, such an op runs,
+and libtorch warns on the process's standard error, not on
+@racket[current-error-port]. @racket[warn-only?] is stored even when
+@racket[on?] is @racket[#f]. Both start off.}
 
 @deftogether[(@defproc[(deterministic-algorithms-enabled?) boolean?]
               @defproc[(deterministic-algorithms-warn-only?) boolean?])]{
@@ -239,10 +226,8 @@ left as it was. Without CUDA the flag is stored and changes nothing.}
 @deftogether[(@defproc[(cudnn-benchmark?) boolean?]
               @defproc[(set-cudnn-benchmark! [on? boolean?]) void?])]{
 @tt{torch.backends.cudnn.benchmark}: cuDNN times its candidate algorithms
-for each new convolution shape and keeps the fastest, a choice that can
-differ between runs. Without CUDA the flag is stored and changes nothing.
-
-@torch-examples[(cudnn-benchmark?)]}
+for each new convolution shape and keeps the fastest. Without CUDA the flag
+is stored and changes nothing.}
 
 @section{Choosing a device}
 

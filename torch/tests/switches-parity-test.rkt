@@ -10,10 +10,11 @@
                     call-with-python-env python-check python-cuda-available?
                     python-torch-available?)
            (only-in "private/switches.rkt"
-                    determinism-rows switch-values with-switches-restored)
-           (only-in "private/within.rkt" bounded-test))
+                    bounded-switches-test default-switches determinism-rows
+                    switch-values))
 
-  (define ours-at-start (switch-values))
+  (check-equal? (switch-values) default-switches
+                "no flag leaked from an earlier file")
 
   (define kernel-rx #rx"([a-z0-9_]+) does not have a deterministic implementation")
 
@@ -30,49 +31,49 @@
       "ok"))
 
   (define (outcomes on #:warn-only? warn-only?)
-    (with-switches-restored
-      (use-deterministic-algorithms! #t #:warn-only? warn-only?)
-      (manual-seed! 0)
-      (for/hash ([(name run) (in-dict determinism-rows)])
-        (values name (outcome run on)))))
+    (use-deterministic-algorithms! #t #:warn-only? warn-only?)
+    (manual-seed! 0)
+    (for/hasheq ([(name run) (in-dict determinism-rows)])
+      (values name (outcome run on))))
 
   (define (twin on)
     (call-with-python-env
      #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string on)))
      (lambda () (python-check "switches.py"))))
 
-  (define (as-hash j)
-    (for/hash ([(k v) (in-hash j)])
-      (values k v)))
-
   (define (warned->ok s)
     (if (regexp-match? #rx"^(ok|warn)" s) "ok" s))
 
-  (cond
-    [(python-torch-available?)
-     (bounded-test "P1: PyTorch's fresh defaults are rktorch's"
-       (check-equal? ours-at-start (as-hash (hash-ref (twin 'cpu) 'defaults))))
-     (bounded-test "P3: no row refuses or warns on the CPU, in either"
-       (define j (twin 'cpu))
-       (for* ([key (in-list '(strict warn_only))]
-              [(name o) (in-hash (hash-ref j key))])
-         (check-equal? o "ok" (format "PyTorch ~a ~a" key name)))
-       (for* ([warn-only? (in-list '(#f #t))]
-              [(name o) (in-hash (outcomes 'cpu #:warn-only? warn-only?))])
-         (check-equal? o "ok" (format "rktorch warn-only ~a ~a" warn-only? name))))]
-    [else
-     (displayln "[switches-parity-test] skipped the CPU rows: needs python3 `torch`")])
+  (define (cpu-tests)
+    (bounded-switches-test "P1: PyTorch's fresh defaults are rktorch's"
+      (check-equal? (switch-values) (hash-ref (twin 'cpu) 'defaults)))
+    (bounded-switches-test "P3: no row refuses or warns on the CPU, in either"
+      (define j (twin 'cpu))
+      (for* ([key (in-list '(strict warn_only))]
+             [(name o) (in-hash (hash-ref j key))])
+        (check-equal? o "ok" (format "PyTorch ~a ~a" key name)))
+      (for* ([warn-only? (in-list '(#f #t))]
+             [(name o) (in-hash (outcomes 'cpu #:warn-only? warn-only?))])
+        (check-equal? o "ok" (format "rktorch warn-only ~a ~a" warn-only? name)))))
+
+  (define (cuda-tests)
+    (bounded-switches-test "P2: on CUDA rktorch refuses exactly where PyTorch does"
+      (define j (twin 'cuda))
+      (check-equal? (outcomes 'cuda #:warn-only? #f) (hash-ref j 'strict))
+      (check-equal? (outcomes 'cuda #:warn-only? #t)
+                    (for/hasheq ([(name o) (in-hash (hash-ref j 'warn_only))])
+                      (values name (warned->ok o))))))
+
+  (define python-torch? (python-torch-available?))
+  (define cuda-twins? (and python-torch? (cuda-available?) (python-cuda-available?)))
 
   (cond
-    [(and (cuda-available?) (python-torch-available?) (python-cuda-available?))
-     (bounded-test "P2: on CUDA rktorch refuses exactly where PyTorch does"
-       (define j (twin 'cuda))
-       (define strict (as-hash (hash-ref j 'strict)))
-       (define warned (as-hash (hash-ref j 'warn_only)))
-       (check-equal? (outcomes 'cuda #:warn-only? #f) strict)
-       (check-equal? (outcomes 'cuda #:warn-only? #t)
-                     (for/hash ([(name o) (in-hash warned)])
-                       (values name (warned->ok o)))))]
-    [else
+    [(not python-torch?)
+     (displayln "[switches-parity-test] skipped: needs python3 `torch`")]
+    [(not cuda-twins?)
+     (cpu-tests)
      (printf "[switches-parity-test] skipped the CUDA rows: needs CUDA and ~a\n"
-             "python3 `torch` with CUDA (run inside `nix develop .#cuda`)")]))
+             "python3 `torch` with CUDA (run inside `nix develop .#cuda`)")]
+    [else
+     (cpu-tests)
+     (cuda-tests)]))

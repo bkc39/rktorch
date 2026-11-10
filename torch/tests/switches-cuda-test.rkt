@@ -2,24 +2,21 @@
 
 (module+ test
   (require rackunit
-           (only-in racket/list remove-duplicates)
+           (only-in compiler/find-exe find-exe)
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/system system*/exit-code)
            (only-in "../main.rkt"
                     * @ ~> adaptive-avg-pool2d backward! conv2d cuda-available?
                     deterministic-algorithms-enabled? detach exn:fail:rktorch:oom?
                     grad index-add! index-select manual-seed! mean rand randn
                     requires-grad! reshape set-cudnn-benchmark! set-cudnn-deterministic! sub!
-                    sum tensor->bytes to to-dtype use-deterministic-algorithms!
-                    with-no-grad zeros)
-           (only-in "private/host.rkt" host)
+                    sum to to-dtype use-deterministic-algorithms! with-no-grad zeros)
+           (only-in "private/host.rkt" bytes-of distinct-runs host)
            (only-in "private/switches.rkt"
-                    default-switches switch-values with-switches-restored)
-           (only-in "private/within.rkt" bounded-test))
+                    bounded-switches-test default-switches switch-values))
 
-  (define (bytes-of t)
-    (tensor->bytes (to t 'cpu)))
-
-  (define (distinct-runs n run)
-    (length (remove-duplicates (for/list ([_ (in-range n)]) (run)))))
+  (check-equal? (switch-values) default-switches
+                "no flag leaked from an earlier file")
 
   (define (pooled-backward! x)
     (~> x (adaptive-avg-pool2d '(3 3)) sum backward!))
@@ -67,70 +64,110 @@
     (backward! (sum out))
     (list (bytes-of out) (bytes-of (grad a)) (bytes-of (grad b))))
 
+  (define-runtime-path main-module "../main.rkt")
+
+  (define warn-only-program
+    `(begin
+       (require (only-in (file ,(path->string main-module))
+                         ~> adaptive-avg-pool2d backward! randn sum
+                         use-deterministic-algorithms!))
+       (define captured (open-output-string))
+       (use-deterministic-algorithms! #t #:warn-only? #t)
+       (parameterize ([current-error-port captured])
+         (~> (randn 1 2 5 5 #:device 'cuda #:requires-grad? #t)
+             (adaptive-avg-pool2d '(3 3))
+             sum
+             backward!))
+       (exit (if (string=? (get-output-string captured) "") 0 3))))
+
+  (define warning
+    #rx"adaptive_avg_pool2d_backward_cuda does not have a deterministic implementation")
+
+  (define (cuda-tests)
+    (bounded-switches-test "C1: the switch refuses a CUDA backward with no deterministic kernel"
+      (define x (randn 1 2 5 5 #:device 'cuda #:requires-grad? #t))
+      (use-deterministic-algorithms! #t)
+      (define e
+        (with-handlers ([exn:fail? values])
+          (pooled-backward! x)
+          #f))
+      (check-pred exn:fail? e)
+      (check-false (exn:fail:contract? e))
+      (check-false (exn:fail:rktorch:oom? e))
+      (check-regexp-match refusal (exn-message e))
+      (check-true (deterministic-algorithms-enabled?))
+      (use-deterministic-algorithms! #f)
+      (check-not-exn (lambda () (pooled-backward! x))))
+
+    (bounded-switches-test "C2: warn-only runs the nondeterministic kernel"
+      (use-deterministic-algorithms! #t #:warn-only? #t)
+      (define x-cpu (randn 1 2 5 5 #:requires-grad? #t))
+      (define x-cuda (~> x-cpu detach (to 'cuda) requires-grad!))
+      (define racket-err (open-output-string))
+      (parameterize ([current-error-port racket-err])
+        (pooled-backward! x-cuda))
+      (pooled-backward! x-cpu)
+      (check-equal? (get-output-string racket-err) ""
+                    "the warning does not go to current-error-port")
+      (for ([g (in-list (host (grad x-cuda)))]
+            [want (in-list (host (grad x-cpu)))])
+        (check-within g want 1e-6)))
+
+    (bounded-switches-test "C2: warn-only's warning goes to the process's standard error"
+      #:seconds 120
+      (define os-err (open-output-string))
+      (define status
+        (parameterize ([current-error-port os-err])
+          (system*/exit-code (find-exe) "-e" (format "~s" warn-only-program))))
+      (check-equal? status 0
+                    (format "~a; stderr:\n~a"
+                            "exit 3 means the warning reached current-error-port"
+                            (get-output-string os-err)))
+      (check-regexp-match warning (get-output-string os-err)))
+
+    (bounded-switches-test "C3: index-add! repeats bit for bit only under the switch"
+      (check-true (< 1 (distinct-runs 20 (index-add-run)))
+                  "the witness: runs differ with the switch off")
+      (set-cudnn-deterministic! #t)
+      (check-true (< 1 (distinct-runs 20 (index-add-run)))
+                  "runs still differ with only the cuDNN flag on")
+      (set-cudnn-deterministic! #f)
+      (use-deterministic-algorithms! #t)
+      (check-equal? (distinct-runs 20 (index-add-run)) 1))
+
+    (bounded-switches-test "C4: a seeded step repeats bit for bit only under the switch"
+      (check-true (< 1 (distinct-runs 10 seeded-step))
+                  "the witness: runs differ with the switch off")
+      (use-deterministic-algorithms! #t)
+      (check-equal? (distinct-runs 10 seeded-step) 1))
+
+    (bounded-switches-test "C5: cuDNN's flag makes a convolution's weight gradient repeat"
+      (check-true (< 1 (distinct-runs 10 conv-weight-grad))
+                  (string-append
+                   "the witness: runs differ with the flag off, so long as cuDNN's "
+                   "heuristic picks a nondeterministic weight-gradient algorithm here; "
+                   "another GPU or cuDNN may pick a deterministic one, and a larger "
+                   "input would not change that"))
+      (set-cudnn-deterministic! #t)
+      (check-equal? (distinct-runs 10 conv-weight-grad) 1)
+      (set-cudnn-benchmark! #t)
+      (check-equal? (distinct-runs 10 conv-weight-grad) 1
+                    "also with benchmark on")))
+
+  (define (matmul-test)
+    (bounded-switches-test "C6: without CUBLAS_WORKSPACE_CONFIG a matmul repeats under the switch"
+      (use-deterministic-algorithms! #t)
+      (check-equal? (distinct-runs 10 matmul-run) 1)))
+
+  (define cuda? (cuda-available?))
+  (define cublas-config (getenv "CUBLAS_WORKSPACE_CONFIG"))
+
   (cond
-    [(cuda-available?)
-     (check-equal? (switch-values) default-switches
-                   "no flag leaked from an earlier file")
-
-     (bounded-test "C1: the switch refuses a CUDA backward with no deterministic kernel"
-       (with-switches-restored
-         (define x (randn 1 2 5 5 #:device 'cuda #:requires-grad? #t))
-         (use-deterministic-algorithms! #t)
-         (define e
-           (with-handlers ([exn:fail? values])
-             (pooled-backward! x)
-             #f))
-         (check-pred exn:fail? e)
-         (check-false (exn:fail:contract? e))
-         (check-false (exn:fail:rktorch:oom? e))
-         (check-regexp-match refusal (exn-message e))
-         (check-true (deterministic-algorithms-enabled?))
-         (use-deterministic-algorithms! #f)
-         (check-not-exn (lambda () (pooled-backward! x)))))
-
-     (bounded-test "C2: warn-only runs the nondeterministic kernel"
-       (with-switches-restored
-         (use-deterministic-algorithms! #t #:warn-only? #t)
-         (define x-cpu (randn 1 2 5 5 #:requires-grad? #t))
-         (define x-cuda (~> x-cpu detach (to 'cuda) requires-grad!))
-         (pooled-backward! x-cuda)
-         (pooled-backward! x-cpu)
-         (for ([g (in-list (host (grad x-cuda)))]
-               [want (in-list (host (grad x-cpu)))])
-           (check-within g want 1e-6))))
-
-     (bounded-test "C3: index-add! repeats bit for bit only under the switch"
-       (with-switches-restored
-         (define off (index-add-run))
-         (check-true (< 1 (distinct-runs 20 off))
-                     "the witness: runs differ with the switch off")
-         (use-deterministic-algorithms! #t)
-         (check-equal? (distinct-runs 20 (index-add-run)) 1)))
-
-     (bounded-test "C4: a seeded step repeats bit for bit only under the switch"
-       (with-switches-restored
-         (check-true (< 1 (distinct-runs 10 seeded-step))
-                     "the witness: runs differ with the switch off")
-         (use-deterministic-algorithms! #t)
-         (check-equal? (distinct-runs 10 seeded-step) 1)))
-
-     (bounded-test "C5: cuDNN's flag makes a convolution's weight gradient repeat"
-       (with-switches-restored
-         (check-true (< 1 (distinct-runs 10 conv-weight-grad))
-                     "the witness: runs differ with the flag off")
-         (set-cudnn-deterministic! #t)
-         (check-equal? (distinct-runs 10 conv-weight-grad) 1)
-         (set-cudnn-benchmark! #t)
-         (check-equal? (distinct-runs 10 conv-weight-grad) 1
-                       "also with benchmark on")))
-
-     (cond
-       [(getenv "CUBLAS_WORKSPACE_CONFIG")
-        (displayln "[switches-cuda-test] skipped C6: CUBLAS_WORKSPACE_CONFIG is set")]
-       [else
-        (bounded-test "C6: without CUBLAS_WORKSPACE_CONFIG a matmul repeats under the switch"
-          (with-switches-restored
-            (use-deterministic-algorithms! #t)
-            (check-equal? (distinct-runs 10 matmul-run) 1)))])]
+    [(not cuda?)
+     (displayln "[switches-cuda-test] skipped: needs CUDA (run inside `nix develop .#cuda`)")]
+    [cublas-config
+     (cuda-tests)
+     (displayln "[switches-cuda-test] skipped C6: CUBLAS_WORKSPACE_CONFIG is set")]
     [else
-     (displayln "[switches-cuda-test] skipped: needs CUDA (run inside `nix develop .#cuda`)")]))
+     (cuda-tests)
+     (matmul-test)]))

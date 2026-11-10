@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base syntax/parse/pre)
+         (only-in rackunit test-case)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../main.rkt"
                   * - ~> adaptive-avg-pool2d backward! conv2d embedding
@@ -10,39 +11,55 @@
                   index-select log-softmax rand randn scaled-dot-product-attention
                   scatter-add! set-cudnn-benchmark! set-cudnn-deterministic! sum
                   tensor upsample-bicubic2d use-deterministic-algorithms! zeros)
-         (only-in "../../nn.rkt" ctc-loss nll-loss))
+         (only-in "../../nn.rkt" ctc-loss nll-loss)
+         (only-in "within.rkt" within))
 
-(provide call-with-switches-restored
+(provide bounded-switches-test
          default-switches
          determinism-rows
          set-switches!
          switch-values
-         with-switches-restored)
+         within/switches-restored)
+
+(struct switch (key read write! default))
+
+(define switches
+  (list (switch 'deterministic-algorithms deterministic-algorithms-enabled?
+                (lambda (on?)
+                  (use-deterministic-algorithms!
+                   on? #:warn-only? (deterministic-algorithms-warn-only?)))
+                #f)
+        (switch 'warn-only deterministic-algorithms-warn-only?
+                (lambda (warn-only?)
+                  (use-deterministic-algorithms!
+                   (deterministic-algorithms-enabled?) #:warn-only? warn-only?))
+                #f)
+        (switch 'cudnn-deterministic cudnn-deterministic? set-cudnn-deterministic! #f)
+        (switch 'cudnn-benchmark cudnn-benchmark? set-cudnn-benchmark! #f)))
 
 (define (switch-values)
-  (hash 'deterministic-algorithms (deterministic-algorithms-enabled?)
-        'warn-only (deterministic-algorithms-warn-only?)
-        'cudnn-deterministic (cudnn-deterministic?)
-        'cudnn-benchmark (cudnn-benchmark?)))
+  (for/hasheq ([s (in-list switches)])
+    (values (switch-key s) ((switch-read s)))))
 
 (define default-switches
-  (hash 'deterministic-algorithms #f
-        'warn-only #f
-        'cudnn-deterministic #f
-        'cudnn-benchmark #f))
+  (for/hasheq ([s (in-list switches)])
+    (values (switch-key s) (switch-default s))))
 
-(define (set-switches! switches)
-  (use-deterministic-algorithms! (hash-ref switches 'deterministic-algorithms)
-                                 #:warn-only? (hash-ref switches 'warn-only))
-  (set-cudnn-deterministic! (hash-ref switches 'cudnn-deterministic))
-  (set-cudnn-benchmark! (hash-ref switches 'cudnn-benchmark)))
+(define (set-switches! flags)
+  (for ([s (in-list switches)])
+    ((switch-write! s) (hash-ref flags (switch-key s)))))
 
-(define (call-with-switches-restored thunk)
+(define (within/switches-restored seconds thunk)
   (define saved (switch-values))
-  (dynamic-wind void thunk (lambda () (set-switches! saved))))
+  (dynamic-wind void
+                (lambda () (within seconds thunk))
+                (lambda () (set-switches! saved))))
 
-(define-syntax-parse-rule (with-switches-restored body:expr ...+)
-  (call-with-switches-restored (lambda () body ...)))
+(define-syntax-parse-rule (bounded-switches-test name:expr
+                            (~optional (~seq #:seconds seconds:expr)
+                                       #:defaults ([seconds #'60]))
+                            body:expr ...+)
+  (test-case name (within/switches-restored seconds (lambda () body ...))))
 
 (define (bins on)
   (tensor '(0 3 1 3 7 2 3 0 5 3 6 1 4 3 2 7) #:dtype 'int64 #:device on))
@@ -92,8 +109,9 @@
                backward!)))
    (cons 'nll-loss-forward
          (lambda (on)
-           (nll-loss (log-softmax (randn 4 5 #:device on) 1)
-                     (tensor '(0 1 2 3) #:dtype 'int64 #:device on))))
+           (~> (randn 4 5 #:device on)
+               (log-softmax 1)
+               (nll-loss (tensor '(0 1 2 3) #:dtype 'int64 #:device on)))))
    (cons 'scaled-dot-product-attention-backward
          (lambda (on)
            (~> (scaled-dot-product-attention (leaf on 1 2 8 16)
