@@ -4,8 +4,8 @@
                   f32vector-set! f64vector-set! make-f32vector make-f64vector
                   make-s64vector s64vector-set!)
          (only-in racket/contract/base
-                  -> ->* ->i and/c flat-named-contract list/c listof or/c
-                  real-in)
+                  -> ->* ->i and/c flat-contract-predicate flat-named-contract
+                  list/c listof or/c real-in)
          (only-in racket/match match-define)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in threading ~>)
@@ -142,19 +142,26 @@
 (define (size->hw size)
   (if (pair? size) (values (car size) (cadr size)) (values size size)))
 
+(define image-size? (flat-contract-predicate size/c))
+
+(define (fits? size h w)
+  (define-values (ch cw) (size->hw size))
+  (and (<= ch h) (<= cw w)))
+
 (define (crop-size/c x)
   (define-values (h w) (spatial-size x))
   (flat-named-contract
-   'crop-size-within-the-image
-   (and/c size/c
-          (lambda (size)
-            (define-values (ch cw) (size->hw size))
-            (and (<= ch h) (<= cw w))))))
+   'crop-size-within-image
+   (lambda (size) (and (image-size? size) (fits? size h w)))))
 
-(define (channel-values/c x [element/c real?])
+(define (positive-real? v)
+  (and (real? v) (positive? v)))
+
+(define (channel-values/c x [element? real?])
   (flat-named-contract
    'one-value-per-channel
-   (and/c (listof element/c) (lambda (vs) (= (length vs) (channels x))))))
+   (lambda (vs)
+     (and (list? vs) (andmap element? vs) (= (length vs) (channels x))))))
 
 ;; torchvision: an int is the short side's new length and the long side is
 ;; truncated to keep the aspect ratio
@@ -240,7 +247,7 @@
 (define/contract-out (normalize x mean std) ;; noqa
   (->i ([x float-image/c]
         [mean (x) (channel-values/c x)]
-        [std (x) (channel-values/c x (and/c real? positive?))])
+        [std (x) (channel-values/c x positive-real?)])
        [result tensor?])
   (define (per-channel vs)
     (reshape (tensor (map exact->inexact vs)

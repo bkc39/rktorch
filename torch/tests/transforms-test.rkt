@@ -109,8 +109,9 @@
     (check-equal? (tensor->list (center-crop x '(4 1))) '(2.0 7.0 12.0 17.0))
     (check-equal? (tensor-shape (center-crop (rand 2 3 9 7) '(5 7)))
                   '(2 3 5 7))
-    (check-exn exn:fail:contract? (lambda () (center-crop x 6)))
-    (check-exn exn:fail:contract? (lambda () (center-crop x '(2 6)))))
+    (check-exn #rx"expected: crop-size-within-image" (lambda () (center-crop x 6)))
+    (check-exn #rx"expected: crop-size-within-image" (lambda () (center-crop x '(2 6))))
+    (check-exn #rx"expected: crop-size-within-image" (lambda () (center-crop x 0))))
 
   (test-case "normalize: per channel, one mean and one positive std each"
     (define x (reshape (tensor '(1.0 2.0 3.0 4.0)) 2 1 2))
