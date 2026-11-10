@@ -14,8 +14,6 @@
            (only-in "../foreign/ops.rkt" move-generation)
            (only-in "../foreign/raw/autograd.rkt" tr-set-grad-enabled/raw)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/pressure-settings.rkt"
-                    native-collect-at-troughs)
            (only-in "../main.rkt"
                     backward! dtype grad manual-seed! ones randn sum
                     tensor->list to)
@@ -24,6 +22,7 @@
                     define-layer parameters rmsprop sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/resnet.rkt" ResNet)
+           (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/reference-optim.rkt"
                     reference-adam reference-rmsprop reference-sgd)
@@ -247,24 +246,6 @@
                        accelerator-target))
      (twin-steps mlp (randn 2 4) make-opt (make-reference)
                  #:target accelerator-target)))
-
-  (define (op-calls-of thunk)
-    (define here (current-thread))
-    (define crossings 0)
-    (define frees 0)
-    (define tensors 0)
-    (parameterize ([native-collect-at-troughs #f])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! crossings (add1 crossings))))
-        (with-race-hook (lambda (name _subject)
-                          (case (and (eq? (current-thread) here) name)
-                            [(ledger-entry-added) (set! tensors (add1 tensors))]
-                            [(free-released finalizer-releasing generator-releasing)
-                             (set! frees (add1 frees))]
-                            [else (void)]))
-          (thunk))))
-    (- crossings frees (* 2 tensors)))
 
   (define (step-op-calls net opt target)
     (~> (ones 2 3) ((placed-on target)) net sum backward!)

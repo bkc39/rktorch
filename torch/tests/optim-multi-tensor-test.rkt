@@ -7,7 +7,6 @@
            rackunit
            (only-in threading ~>)
            (only-in "../foreign.rkt" accelerator-if-available device-type)
-           (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/pressure-settings.rkt"
                     native-collect-at-troughs)
            (only-in "../main.rkt"
@@ -19,6 +18,7 @@
                     zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/resnet.rkt" ResNet)
+           (only-in "private/op-calls.rkt" crossings-of)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
@@ -102,16 +102,6 @@
     (if (eq? (device-type accelerator) 'cpu)
         (list accelerator 'float64)
         (list accelerator)))
-
-  (define (crossings-of thunk)
-    (define here (current-thread))
-    (define n 0)
-    (parameterize ([native-collect-at-troughs #f])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! n (add1 n))))
-        (thunk)))
-    n)
 
   (define (owned-balance thunk)
     (define here (current-thread))

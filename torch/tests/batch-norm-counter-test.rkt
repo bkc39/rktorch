@@ -8,42 +8,14 @@
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in (submod "../nn/batch-norm.rkt" private) counter-one)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/pressure-settings.rkt"
-                    native-collect-at-troughs)
            (only-in "../main.rkt"
                     accelerator-if-available copy! cpu-device device
                     device-type dtype item randn tensor to with-default-device)
            (only-in "../nn.rkt"
                     BatchNorm1d BatchNorm2d buffers in-eval-mode layer-copy
                     parameters state-dict)
-           (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/op-calls.rkt" crossings-of op-calls-of)
            (only-in "private/within.rkt" bounded-test))
-
-  (define (tally thunk)
-    (define here (current-thread))
-    (define crossings 0)
-    (define frees 0)
-    (define tensors 0)
-    (parameterize ([native-collect-at-troughs #f])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! crossings (add1 crossings))))
-        (with-race-hook (lambda (name _subject)
-                          (case (and (eq? (current-thread) here) name)
-                            [(ledger-entry-added) (set! tensors (add1 tensors))]
-                            [(free-released finalizer-releasing generator-releasing)
-                             (set! frees (add1 frees))]
-                            [else (void)]))
-          (thunk))))
-    (values crossings frees tensors))
-
-  (define (op-calls-of thunk)
-    (define-values (crossings frees tensors) (tally thunk))
-    (- crossings frees (* 2 tensors)))
-
-  (define (crossings-of thunk)
-    (define-values (crossings frees _tensors) (tally thunk))
-    (- crossings frees))
 
   (define norms
     (list (list "BatchNorm2d" BatchNorm2d (lambda () (randn 4 3 5 5)))

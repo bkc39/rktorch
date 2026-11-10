@@ -6,15 +6,19 @@
                   native-collect-at-troughs)
          (only-in "race-harness.rkt" with-race-hook))
 
-(provide op-calls-of)
+(provide crossings-of
+         op-calls-of)
 
 (define ((uncounted reading) dev)
   (with-crossing-hook #f
     (reading dev)))
 
-(define (op-calls-of thunk)
+;; A batched free is one crossing that raises free-released once per handle,
+;; so only op-calls-of, which never counts the thunk's frees, subtracts them.
+(define (tally thunk)
   (define here (current-thread))
   (define crossings 0)
+  (define reaped 0)
   (define frees 0)
   (define tensors 0)
   (parameterize ([native-collect-at-troughs #f]
@@ -25,8 +29,17 @@
       (with-race-hook (lambda (name _subject)
                         (case (and (eq? (current-thread) here) name)
                           [(ledger-entry-added) (set! tensors (add1 tensors))]
-                          [(free-released finalizer-releasing generator-releasing)
-                           (set! frees (add1 frees))]
+                          [(finalizer-releasing generator-releasing)
+                           (set! reaped (add1 reaped))]
+                          [(free-released) (set! frees (add1 frees))]
                           [else (void)]))
         (thunk))))
+  (values (- crossings reaped) frees tensors))
+
+(define (crossings-of thunk)
+  (define-values (crossings _frees _tensors) (tally thunk))
+  crossings)
+
+(define (op-calls-of thunk)
+  (define-values (crossings frees tensors) (tally thunk))
   (- crossings frees (* 2 tensors)))
