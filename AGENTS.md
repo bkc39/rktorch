@@ -95,10 +95,11 @@ with `backward!` outside the form as PyTorch recommends). From
 - device generators (`torch/foreign/generator.rkt`, #389):
   `make-generator #:device` is `torch.Generator(device)`, `generator-device`
   names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
-  `randn`, `rand-like`, `randn-like`, `multinomial`, `randperm` (whose
-  tensor is on the CPU) and, when it draws, `torch/nn`'s `dropout` blame a caller whose effective generator (the
+  `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
+  tensor is on the CPU) blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
-  tensor; `dataloader` and the augmentations of
+  tensor, and `torch/nn`'s `dropout` and `Dropout` raise for one when they
+  draw; `dataloader` and the augmentations of
   `torch/vision/transforms.rkt` take only a CPU generator
   (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the

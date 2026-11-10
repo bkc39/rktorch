@@ -94,11 +94,10 @@ updated in place.
 
 @racketblock[
 (define-layer Dropout (p)
-  #:contract (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
-  #:init (#:p [p 0.5])
+  #:contract (->* [] [#:p (and/c real? (>=/c 0) (<=/c 1))] dropout?)
+  #:init (#:p [p default-p])
   #:forward (x #:generator [generator #f])
-  (with-mode
-    (dropout x #:p p #:training? (training? mode) #:generator generator)))
+  (with-mode (drop 'Dropout x p (training? mode) generator)))
 ]
 
 What a field holds when @racket[init-body] finishes decides what it is:
