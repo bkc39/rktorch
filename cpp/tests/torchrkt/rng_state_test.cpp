@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -62,18 +63,32 @@ TEST(TorchrktRngState, StateCallsFailCleanly) {
       tr_from_bytes(zeros.data(), zeros.size(), &sixteen, 1, TR_DTYPE_UINT8);
   ASSERT_NE(s, nullptr) << tr_last_error();
   ASSERT_NE(cuda_shaped, nullptr) << tr_last_error();
-  const auto failed = [](bool refused) {
-    EXPECT_TRUE(refused);
-    EXPECT_STRNE(tr_last_error(), "");
+  const auto fails_naming = [](const char* who, const auto& call) {
+    EXPECT_EQ(tr_randperm(-1, nullptr), nullptr);
+    EXPECT_TRUE(call()) << who;
+    EXPECT_NE(std::strstr(tr_last_error(), who), nullptr)
+        << who << ": " << tr_last_error();
   };
-  failed(tr_generator_state(nullptr) == nullptr);
-  failed(tr_generator_set_state(nullptr, s) == 1);
-  failed(tr_generator_set_state(g, nullptr) == 1);
-  failed(tr_default_generator_set_state(TR_DEVICE_CPU, 0, nullptr) == 1);
-  failed(tr_default_generator_state(TR_DEVICE_KEEP, 0) == nullptr);
-  failed(tr_default_generator_set_state(TR_DEVICE_KEEP, 0, s) == 1);
-  failed(tr_default_generator_state(TR_DEVICE_CUDA, 99) == nullptr);
-  failed(tr_generator_set_state(g, cuda_shaped) == 1);
+  fails_naming("tr_generator_state",
+               [&] { return tr_generator_state(nullptr) == nullptr; });
+  fails_naming("tr_generator_set_state",
+               [&] { return tr_generator_set_state(nullptr, s) == 1; });
+  fails_naming("tr_generator_set_state",
+               [&] { return tr_generator_set_state(g, nullptr) == 1; });
+  fails_naming("tr_default_generator_set_state", [&] {
+    return tr_default_generator_set_state(TR_DEVICE_CPU, 0, nullptr) == 1;
+  });
+  fails_naming("tr_default_generator_state", [&] {
+    return tr_default_generator_state(TR_DEVICE_KEEP, 0) == nullptr;
+  });
+  fails_naming("tr_default_generator_set_state", [&] {
+    return tr_default_generator_set_state(TR_DEVICE_KEEP, 0, s) == 1;
+  });
+  fails_naming("tr_default_generator_state", [&] {
+    return tr_default_generator_state(TR_DEVICE_CUDA, 99) == nullptr;
+  });
+  fails_naming("tr_generator_set_state",
+               [&] { return tr_generator_set_state(g, cuda_shaped) == 1; });
   tr_tensor_free(cuda_shaped);
   tr_tensor_free(s);
   tr_generator_free(g);

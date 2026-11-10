@@ -1,6 +1,9 @@
 #lang racket/base
 
-(require (for-syntax racket/base (only-in syntax/parse/pre expr id))
+(require (for-syntax racket/base
+                     (only-in racket/syntax format-id)
+                     (only-in syntax/parse/pre
+                              define-syntax-class expr id pattern))
          (only-in ffi/unsafe prop:cpointer)
          (only-in racket/contract/base
                   -> ->* ->i and/c flat-contract? flat-named-contract
@@ -93,7 +96,7 @@
   (and bs
        (<= 1 (field bs 8 12 #t) 624)
        (not (zero? (field bs 12 16 #t)))
-       (<= (field bs 16 24 #f) 624)))
+       (<= (field bs 16 20 #f) 624)))
 
 (define (cuda-rng-state? v)
   (define seed-only? (byte-tensor-of? v 8))
@@ -104,17 +107,24 @@
     [else #f]))
 
 (define (mps-rng-state? v)
-  (byte-tensor-of? v 36))
+  (byte-tensor-of? v 44))
 
-(define cpu-rng-state/c (flat-named-contract 'cpu-rng-state cpu-rng-state?))
-(define cuda-rng-state/c (flat-named-contract 'cuda-rng-state cuda-rng-state?))
-(define mps-rng-state/c (flat-named-contract 'mps-rng-state mps-rng-state?))
+(begin-for-syntax
+  (define-syntax-class state-of
+    (pattern [type:id accepts?:id]
+             #:with name (format-id #'type "~a-rng-state" #'type))))
 
-(define (rng-state-of/c type)
-  (case type
-    [(cpu) cpu-rng-state/c]
-    [(cuda) cuda-rng-state/c]
-    [else mps-rng-state/c]))
+(define-syntax-parse-rule (define-state-of/c lookup:id row:state-of ...)
+  (define lookup
+    (let ([contracts
+           (hasheq (~@ 'row.type (flat-named-contract 'row.name row.accepts?))
+                   ...)])
+      (lambda (type) (hash-ref contracts type)))))
+
+(define-state-of/c rng-state-of/c
+  [cpu cpu-rng-state?]
+  [cuda cuda-rng-state?]
+  [mps mps-rng-state?])
 
 (define (designated-type device)
   (define d (supplied-or device 'cpu))

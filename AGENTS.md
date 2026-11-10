@@ -99,8 +99,13 @@ with `backward!` outside the form as PyTorch recommends). From
   tensor is on the CPU) blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
   tensor; `dataloader` and the augmentations of
-  `torch/vision/transforms.rkt` take only a CPU generator
-  (`tr_generator_new_on`, `tr_generator_device`)
+  `torch/vision/transforms.rkt` take only a CPU generator;
+  `rng-state` / `set-rng-state!` read and restore a device's default
+  stream and `generator-state` / `set-generator-state!` a generator's,
+  as uint8 CPU tensors (#481)
+  (`tr_generator_new_on`, `tr_generator_device`, `tr_generator_state`,
+  `tr_generator_set_state`, `tr_default_generator_state`,
+  `tr_default_generator_set_state`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied

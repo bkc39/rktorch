@@ -23,7 +23,7 @@
             (if (cuda-available?) (list (cuda-device)) '())
             (if (mps-available?) (list (mps-device)) '())))
 
-  (define state-sizes (hash 'cpu 5056 'cuda 16 'mps 36))
+  (define state-sizes (hash 'cpu 5056 'cuda 16 'mps 44))
 
   (define (state-size on) (hash-ref state-sizes (device-type on)))
 
@@ -101,8 +101,9 @@
       (define generated
         (~> (make-generator seed #:device on) generator-state tensor->bytes))
       (check-equal? default generated (format "~a ~a" on seed))
-      (unless (eq? 'mps (device-type on))
-        (check-equal? (le-uint default 0 8) seed (format "~a ~a" on seed)))
+      (define seed-at (if (eq? 'mps (device-type on)) 28 0))
+      (check-equal? (le-uint default seed-at (+ seed-at 8)) seed
+                    (format "~a ~a" on seed))
       (when (eq? 'cuda (device-type on))
         (check-equal? (le-uint default 8 16) 0 (format "~a ~a" on seed)))))
 
@@ -147,11 +148,10 @@
       (define s (read-state st))
       (define first-run (draws-of st))
       (define unrelated (make-generator 21 #:device on))
-      (define unrelated-twin (make-generator 21 #:device on))
+      (define unrelated-run (draws on (make-generator 21 #:device on)))
       (restore! st s)
       (check-equal? (draws-of st) first-run (format "~a" on))
-      (check-equal? (draws on unrelated) (draws on unrelated-twin)
-                    (format "~a" on))))
+      (check-equal? (draws on unrelated) unrelated-run (format "~a" on))))
 
   (bounded-test "L7: a state read from one stream makes another replay it"
     (for ([on (in-list devices)])
@@ -228,6 +228,9 @@
             (lambda () (set-rng-state! (zeros 5056 #:dtype 'uint8))))
       (list "e: next = 625" cpu-expected
             (lambda () (set-rng-state! (patched valid 16 24 625))))
+      (list "e: next = 625 + 2^32" cpu-expected
+            (lambda ()
+              (set-rng-state! (patched valid 16 24 (+ 625 (expt 2 32))))))
       (list "f: seeded = 0" cpu-expected
             (lambda () (set-rng-state! (patched valid 12 16 0))))
       (list "g: left = 625" cpu-expected
@@ -299,7 +302,7 @@
       (check-exn absent? (lambda () (rng-state #:device 'mps)))
       (check-exn absent?
                  (lambda ()
-                   (set-rng-state! (u8 (make-bytes 36 0)) #:device 'mps)))))
+                   (set-rng-state! (u8 (make-bytes 44 0)) #:device 'mps)))))
 
   (bounded-test "L11: a CUDA seed for a listed absent index passes the contract"
     (check-exn absent?
@@ -315,6 +318,33 @@
     (define first-run (draws (cpu-device) #f))
     (set-rng-state! s)
     (check-equal? (draws (cpu-device) #f) first-run))
+
+  (bounded-test "the default stream is the one read and set whatever current-generator holds"
+    (for ([on (in-list devices)])
+      (manual-seed! 9)
+      (rand 3 #:device on)
+      (define g (make-generator 1 #:device on))
+      (define g-state (tensor->bytes (generator-state g)))
+      (define s (rng-state #:device on))
+      (check-equal? (parameterize ([current-generator g])
+                      (tensor->bytes (rng-state #:device on)))
+                    (tensor->bytes s)
+                    (format "read ~a" on))
+      (define expected (draws on #f))
+      (parameterize ([current-generator g])
+        (set-rng-state! s #:device on))
+      (check-equal? (draws on #f) expected (format "set ~a" on))
+      (check-equal? (tensor->bytes (generator-state g)) g-state
+                    (format "set leaves current-generator ~a" on))))
+
+  (bounded-test "a CPU state's next is read as its low 32 bits, as libtorch reads it"
+    (manual-seed! 3)
+    (rand 9)
+    (define valid (rng-state))
+    (define next (le-uint (tensor->bytes valid) 16 24))
+    (define expected (draws (cpu-device) #f))
+    (set-rng-state! (patched valid 16 24 (+ next (expt 2 32))))
+    (check-equal? (draws (cpu-device) #f) expected))
 
   (define (ledger-entries thunk)
     (define here (current-thread))

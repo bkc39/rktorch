@@ -353,14 +353,10 @@ stream whatever it holds.
 ]}
 
 @defproc[(rng-state [#:device device device/c 'cpu]) tensor?]{
-A copy of the state of @racket[device]'s default generator, the stream
-@racket[manual-seed!] seeds and a draw takes when @racket[current-generator]
-is @racket[#f], as @tt{torch.get_rng_state()} and
-@tt{torch.cuda.get_rng_state(i)}. Whatever @racket[current-generator] holds,
-the default generator is the one read. The state is a uint8 tensor on the CPU
-whatever the device: 5056 bytes for the CPU, 16 for CUDA (the seed, then the
-Philox offset). Reading it draws nothing. Raises @racket[exn:fail] when
-@racket[device] is not present.
+A copy of @racket[device]'s default generator state, @tt{torch.get_rng_state()}:
+the stream @racket[manual-seed!] seeds, whatever @racket[current-generator]
+holds. A uint8 CPU tensor of 5056 bytes for the CPU, 16 for CUDA and 44 for
+MPS; raises @racket[exn:fail] when @racket[device] is not present.
 @torch-examples[
 (manual-seed! 0)
 (define s (rng-state))
@@ -372,14 +368,10 @@ Philox offset). Reading it draws nothing. Raises @racket[exn:fail] when
 
 @defproc[(set-rng-state! [state tensor?] [#:device device device/c 'cpu])
          void?]{
-Restores @racket[device]'s default generator to @racket[state], as
-@tt{torch.set_rng_state} and @tt{torch.cuda.set_rng_state}: the draws that
-follow repeat those that followed when @racket[state] was read. @racket[state]
-is copied, so changing it afterwards changes nothing. Any state of the
-device's type is accepted, from @racket[rng-state], @racket[generator-state]
-or PyTorch, and a CUDA state restores any CUDA index. A @racket[state] that is
-not a state of that type is a contract violation: not uint8 on the CPU, the
-wrong number of elements, or bytes no generator of the type can hold.}
+Restores @racket[device]'s default generator, whatever
+@racket[current-generator] holds, to a copy of @racket[state], as
+@tt{torch.set_rng_state}. A @racket[state] that is not a state of the device's
+type is a contract violation.}
 
 @defproc[(generator-state [g generator?]) tensor?]{
 A copy of @racket[g]'s state, @tt{g.get_state()}, in the form
