@@ -404,15 +404,22 @@ its own values); the stack contract rejects layer keywords or `#:norm #t`
 beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is Python's
 `copy.deepcopy` with no RNG draws: fresh tensors with the same values,
 device, dtype and requires-grad (no gradients), modes kept, sharing and
-cycles kept, over the `gen:layer` method `layer-rebuild layer child tensor`
-that `define-layer` derives (`LSTM`'s plain `entries` list is why plain
-fields are walked). Invariants of the walk:
+cycles kept, over the `gen:layer` method `layer-rebuild-method` that
+`define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
+are walked). Invariants of the walk:
 - One memo per call (`torch/nn/private/memo.rkt`), carried by `layer-copy`'s
-  `remembering` child. `layer-rebuild-in`
-  (`torch/nn/private/layer-core.rkt`) is the one dispatch, behind
-  `layer-copy`, `layer-rebuild` and the registry method. A
-  `define/generic` call into a hand-written layer bypasses it, so a cycle
-  through that layer does not terminate (#466).
+  `remembering` child. `layer-rebuild-in` (`torch/nn/private/layer-core.rkt`)
+  is the dispatch behind `layer-copy`, `layer-rebuild` and the registry
+  method. A direct `layer-rebuild` pushes its memo on a continuation mark,
+  which a nested call on `equal-always?` callbacks joins (contracts re-wrap
+  them at each call). The mark sits under a private prompt tag, so a default
+  prompt (`eval`, `call-with-continuation-prompt`) does not hide it; a new
+  thread starts without it, and `layer-copy` clears it. A `define/generic`
+  of `layer-rebuild-method` on a hand-written layer skips the memo, as a
+  direct `__deepcopy__` call does in Python; on a `define-layer` layer it
+  uses the memo. A cycle of such direct calls never terminates (Python
+  raises `RecursionError`; Racket CS grows the stack until memory runs out)
+  (#466).
 - Layers, mutable containers and mutable strings are recorded empty, then
   filled (`allocated`): a back edge gets the part-built copy, as in Python.
 - Immutable values, `Children` and `Parameters` included, copy their parts
@@ -882,7 +889,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   values (structs and mpairs are not looked inside); `torch/nn/layer.rkt` holds the
   contracted public definitions and the macros over
   `torch/nn/private/layer-core.rkt` (`gen:layer`, the registry struct,
-  moves, `call-layer`, `layer-rebuild-in`, `layer-rebuild-joined`),
+  moves, `call-layer`, `layer-rebuild-in`),
   `torch/nn/private/layer-containers.rkt` (the `Fn`, `Parameters` and
   `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`
