@@ -129,6 +129,8 @@
          silu
          leaky-relu
          clamp
+         maximum
+         minimum
          exp
          log
          sqrt

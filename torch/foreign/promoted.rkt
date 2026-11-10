@@ -26,6 +26,7 @@
                                 masked-fill-tensor!
                                 masked-scatter!
                                 masked-select
+                                maximum minimum
                                 narrow
                                 ne-scalar ne-tensor
                                 nonzero
@@ -66,6 +67,10 @@
   (-> tensor? bool-tensor/c tensor?)
   g:masked-select)
 (define/contract-out nonzero (-> tensor? tensor?) g:nonzero) ;; noqa
+
+(define extremum/c (-> tensor? tensor? tensor?))
+(define/contract-out maximum extremum/c g:maximum) ;; noqa
+(define/contract-out minimum extremum/c g:minimum) ;; noqa
 
 (define/contract-out (abs x) unary-real/c ;; noqa
   (if (tensor? x) (g:abs-tensor x) (base:abs x)))

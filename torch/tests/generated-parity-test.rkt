@@ -212,7 +212,9 @@
           'upsample-bicubic2d '((tensor 1 2 3 3) (int-array (5 4)) (bool #f)
                                 (kwarg "scales_h" none) (kwarg "scales_w" none))
           'floor-tensor '((tensor 2 3))
-          'fmod-scalar '((tensor 2 3) (double 1.0))))
+          'fmod-scalar '((tensor 2 3) (double 1.0))
+          'maximum '((tensor 2 3) (tensor 2 3))
+          'minimum '((tensor 2 3) (tensor 2 3))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -635,4 +637,12 @@
       (assq 'upsample-bicubic2d manifest)
       '((tensor 1 2 8 8) (int-array (4 4)) (bool #t) (kwarg "scales_h" none)
         (kwarg "scales_w" none))
-      "[downscale-aligned]")]))
+      "[downscale-aligned]")
+     (check-generated-parity
+      (assq 'maximum manifest)
+      '((tensor 2 1 3) (tensor 4 1))
+      "[broadcast]")
+     (check-generated-parity
+      (assq 'minimum manifest)
+      '((tensor 2 1 3) (tensor 4 1))
+      "[broadcast]")]))
