@@ -249,20 +249,27 @@ instead.}
 
 @defproc[(float32-matmul-precision) (or/c 'highest 'high 'medium)]{
 @tt{torch.get_float32_matmul_precision()}. As in PyTorch, it raises
-@racket[exn:fail] once @racket[set-cuda-matmul-allow-tf32!] has
-contradicted an earlier @racket['high] or @racket['medium]. Setting the
-precision again clears that state.
+@racket[exn:fail] in the states @racket[set-cuda-matmul-allow-tf32!]
+describes.
 
 @torch-examples[(float32-matmul-precision)]}
 
 @deftogether[(@defproc[(cuda-matmul-allow-tf32?) boolean?]
               @defproc[(set-cuda-matmul-allow-tf32! [on? boolean?]) void?])]{
 @tt{torch.backends.cuda.matmul.allow_tf32}: whether cuBLAS may use TF32
-for float32 matmuls. It holds exactly when the precision is not
-@racket['highest]. From @racket['highest], setting it sets the precision to
-@racket['high] or @racket['highest]. Turning it off after @racket['high], or
-setting it after @racket['medium], leaves @racket[float32-matmul-precision]
-raising until the precision is set again.}
+for float32 matmuls. Setting the precision turns it on for @racket['high]
+or @racket['medium] and off for @racket['highest]. From @racket['highest],
+turning it on sets the precision to @racket['high], and turning it off
+again returns it to @racket['highest]. After
+@racket[(set-float32-matmul-precision! 'high)], turning it off, or after
+@racket['medium], setting it either way, leaves the flag as set and
+@racket[float32-matmul-precision] raising until the precision is set again.
+
+@torch-examples[
+(set-cuda-matmul-allow-tf32! #t)
+(float32-matmul-precision)
+(set-cuda-matmul-allow-tf32! #f)
+(float32-matmul-precision)]}
 
 @deftogether[(@defproc[(cudnn-allow-tf32?) boolean?]
               @defproc[(set-cudnn-allow-tf32! [on? boolean?]) void?])]{

@@ -102,8 +102,8 @@
 (define refusal-rx
   (pregexp
    (string-append
-    "^float32-matmul-precision: .*tr_get_float32_matmul_precision: "
-    "PyTorch is checking the matmul precision")))
+    "^float32-matmul-precision: FFI call failed \\(rc=1\\): "
+    "tr_get_float32_matmul_precision: PyTorch is checking the matmul precision")))
 
 (define (precision-refusal? e)
   (and (exn:fail? e)

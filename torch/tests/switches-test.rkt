@@ -308,6 +308,19 @@
       (high-cudnn-off high #t #f)
       (high-matmul-off-highest highest #f #t)))
 
+  (test-case "S9: a refusal is libtorch's, through the FFI error path"
+    (define (refusal message)
+      (precision-refusal? (exn:fail message (current-continuation-marks))))
+    (define libtorch-message
+      (string-append "tr_get_float32_matmul_precision: "
+                     "PyTorch is checking the matmul precision without a specific backend"))
+    (check-true (refusal (string-append "float32-matmul-precision: FFI call failed (rc=1): "
+                                        libtorch-message)))
+    (for ([prefix (in-list '("float32-matmul-precision: "
+                             "float32-matmul-precision: FFI call failed (rc=2): "
+                             "float32-matmul-precision: wrapped: FFI call failed (rc=1): "))])
+      (check-false (refusal (string-append prefix libtorch-message)) prefix)))
+
   (bounded-switches-test "S9: the precision and the TF32 flags couple as in PyTorch"
     (check-equal? (map car precision-sequences) (map car coupling))
     (for ([(name steps) (in-dict precision-sequences)])

@@ -4,8 +4,11 @@
   (require rackunit
            (only-in compiler/find-exe find-exe)
            (only-in racket/dict in-dict)
+           (only-in racket/file delete-directory/files make-temporary-directory)
            (only-in racket/list remove-duplicates)
+           (only-in racket/match match)
            (only-in racket/port with-output-to-string)
+           (only-in racket/string string-join)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in "../main.rkt"
                     * - / @ ~> abs adaptive-avg-pool2d backward! conv2d cuda-available?
@@ -207,17 +210,27 @@
     (set-float32-matmul-precision! precision)
     (thunk))
 
-  (define (tf32-skips hardware)
+  (define tf32-half-tests '(C7 C8 C9))
+
+  (define (tf32-halves hardware)
     (cond
-      [(eq? hardware 'unknown) "C7, C8 and C9"]
-      [(not hardware) "C9"]
-      [else #f]))
+      [(eq? hardware #t) '(C7 C8 C9)]
+      [(not hardware) '(C7 C8)]
+      [else '()]))
+
+  (define (spoken names)
+    (match (map symbol->string names)
+      [(list name) name]
+      [(list names ... last) (format "~a and ~a" (string-join names ", ") last)]))
 
   (define (announce-tf32-skips hardware)
-    (define skipped (tf32-skips hardware))
-    (when skipped
+    (define skipped (remove* (tf32-halves hardware) tf32-half-tests))
+    (when (pair? skipped)
       (printf "[switches-cuda-test] skipped the TF32 halves of ~a: tf32-hardware? is ~a\n"
-              skipped hardware)))
+              (spoken skipped) hardware)))
+
+  (test-case "C7, C8, C9: which TF32 halves run on which hardware"
+    (check-equal? (map tf32-halves '(#t #f unknown)) '((C7 C8 C9) (C7 C8) ())))
 
   (test-case "C7, C8, C9: a TF32 half that cannot run prints a skip line"
     (for ([(hardware want)
@@ -255,10 +268,33 @@
                   'unknown)
     (check-true (< (- (current-inexact-milliseconds) started) 20000)))
 
+  (define (call-with-scratch proc)
+    (define dir (make-temporary-directory))
+    (dynamic-wind void (lambda () (proc dir)) (lambda () (delete-directory/files dir))))
+
+  (define (late-marker-reading marker seconds)
+    (define program `(begin (sleep 3) (with-output-to-file ,(path->string marker) void)))
+    (parameterize ([current-subprocess-custodian-mode #f])
+      (tf32-hardware? #:command (list (find-exe) "-e" (format "~s" program))
+                      #:seconds seconds)))
+
+  (bounded-switches-test "tf32-hardware?: a probe past its bound is killed, not left running"
+    #:seconds 90
+    (call-with-scratch
+     (lambda (dir)
+       (define marker (build-path dir "marker"))
+       (check-equal? (late-marker-reading marker 30) 'unknown)
+       (check-true (file-exists? marker) "the control: within its bound the probe writes")
+       (delete-file marker)
+       (check-equal? (late-marker-reading marker 1) 'unknown)
+       (sleep 8)
+       (check-false (file-exists? marker) "a probe past its bound kept running"))))
+
   (define (precision-tests hardware)
     (define tf32-on (if hardware '(1024.0) '(1024.25)))
     (define conv-on (if hardware '(576.0) '(576.140625)))
-    (define tf32-half? (not (eq? hardware 'unknown)))
+    (define halves (tf32-halves hardware))
+    (define (runs? half) (memq half halves))
     (announce-tf32-skips hardware)
 
     (bounded-switches-test "C7: a float32 matmul rounds to TF32 only when allowed"
@@ -268,7 +304,7 @@
                                      matmul-witness)
                       '(1024.25)
                       (format "'highest, cuDNN TF32 ~a" cudnn-tf32?)))
-      (when tf32-half?
+      (when (runs? 'C7)
         (for ([(label setting!) (in-dict tf32-settings)])
           (check-equal? (from-defaults setting! matmul-witness) tf32-on
                         (format "~a, tf32-hardware? ~a" label hardware)))))
@@ -284,7 +320,7 @@
                                    conv-witness)
                     '(576.140625)
                     "'high, cuDNN TF32 off")
-      (when tf32-half?
+      (when (runs? 'C8)
         (check-equal? (from-defaults void conv-witness) conv-on
                       (format "the defaults, tf32-hardware? ~a" hardware))
         (check-equal? (from-defaults (lambda () (set-float32-matmul-precision! 'highest))
@@ -302,7 +338,7 @@
                   (format "'highest: max E/S is ~a" highest-ratio))
       (check-true (<= high-ratio (+ (expt 2.0 -9) (* k (expt 2.0 -23))))
                   (format "'high: max E/S is ~a" high-ratio))
-      (when (eq? hardware #t)
+      (when (runs? 'C9)
         (check-true (< highest-ratio (/ high-ratio 10))
                     (format "TF32 hardware: 'highest's max E/S ~a is well below 'high's ~a"
                             highest-ratio high-ratio))
