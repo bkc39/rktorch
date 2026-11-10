@@ -48,4 +48,40 @@ int tr_manual_seed(uint64_t seed) {
   });
 }
 
+int tr_set_deterministic_algorithms(int enabled, int warn_only) {
+  (void)enabled;
+  (void)warn_only;
+  return torchrkt::null_arg_status("tr_set_deterministic_algorithms");
+}
+
+int tr_get_deterministic_algorithms(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_deterministic_algorithms");
+}
+
+int tr_get_deterministic_algorithms_warn_only(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_deterministic_algorithms_warn_only");
+}
+
+int tr_set_cudnn_deterministic(int enabled) {
+  (void)enabled;
+  return torchrkt::null_arg_status("tr_set_cudnn_deterministic");
+}
+
+int tr_get_cudnn_deterministic(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_cudnn_deterministic");
+}
+
+int tr_set_cudnn_benchmark(int enabled) {
+  (void)enabled;
+  return torchrkt::null_arg_status("tr_set_cudnn_benchmark");
+}
+
+int tr_get_cudnn_benchmark(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_cudnn_benchmark");
+}
+
 }  // extern "C"

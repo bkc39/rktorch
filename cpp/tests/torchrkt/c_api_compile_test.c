@@ -22,6 +22,15 @@ void torchrkt_c_api_compile_check(void) {
   const char* (*last_error)(void) = tr_last_error;
   int (*last_error_kind)(void) = tr_last_error_kind;
   int (*manual_seed)(uint64_t) = tr_manual_seed;
+  int (*set_deterministic_algorithms)(int, int) =
+      tr_set_deterministic_algorithms;
+  int (*get_deterministic_algorithms)(int*) = tr_get_deterministic_algorithms;
+  int (*get_deterministic_algorithms_warn_only)(int*) =
+      tr_get_deterministic_algorithms_warn_only;
+  int (*set_cudnn_deterministic)(int) = tr_set_cudnn_deterministic;
+  int (*get_cudnn_deterministic)(int*) = tr_get_cudnn_deterministic;
+  int (*set_cudnn_benchmark)(int) = tr_set_cudnn_benchmark;
+  int (*get_cudnn_benchmark)(int*) = tr_get_cudnn_benchmark;
   tr_tensor* (*randn)(const int64_t*, int64_t) = tr_randn;
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
   int (*numel)(const tr_tensor*, int64_t*) = tr_tensor_numel;
@@ -318,6 +327,13 @@ void torchrkt_c_api_compile_check(void) {
   (void)last_error;
   (void)last_error_kind;
   (void)manual_seed;
+  (void)set_deterministic_algorithms;
+  (void)get_deterministic_algorithms;
+  (void)get_deterministic_algorithms_warn_only;
+  (void)set_cudnn_deterministic;
+  (void)get_cudnn_deterministic;
+  (void)set_cudnn_benchmark;
+  (void)get_cudnn_benchmark;
   (void)randn;
   (void)tensor_free;
   (void)numel;

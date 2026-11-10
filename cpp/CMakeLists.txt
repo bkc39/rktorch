@@ -138,6 +138,7 @@ if(BUILD_TESTING)
     tests/torchrkt/rng_state_test.cpp
     tests/torchrkt/spectral_test.cpp
     tests/torchrkt/storage_test.cpp
+    tests/torchrkt/switches_test.cpp
     tests/torchrkt/threads_test.cpp
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
