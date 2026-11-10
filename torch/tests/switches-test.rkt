@@ -80,14 +80,23 @@
                     "a CPU convolution is unchanged by the cuDNN flags")))
 
   (bounded-test "S4: a non-boolean blames the caller and writes nothing"
-    (for ([call (in-list
-                 (list (lambda () (use-deterministic-algorithms! 1))
-                       (lambda () (use-deterministic-algorithms! #t #:warn-only? 'yes))
-                       (lambda () (set-cudnn-deterministic! "true"))
-                       (lambda () (set-cudnn-benchmark! (void)))
-                       (lambda () (cudnn-benchmark? #t))))])
+    (define blamed? (blames-caller? "switches-test.rkt"))
+    (define (arity-of? who)
+      (lambda (e)
+        (and (exn:fail:contract:arity? e)
+             (regexp-match? (regexp (string-append "^" (regexp-quote who) ": "))
+                            (exn-message e)))))
+    (for ([(call refused?)
+           (in-dict
+            (list (cons (lambda () (use-deterministic-algorithms! 1)) blamed?)
+                  (cons (lambda () (use-deterministic-algorithms! #t #:warn-only? 'yes))
+                        blamed?)
+                  (cons (lambda () (set-cudnn-deterministic! "true")) blamed?)
+                  (cons (lambda () (set-cudnn-benchmark! (void))) blamed?)
+                  (cons (lambda () (cudnn-benchmark? #t))
+                        (arity-of? "cudnn-benchmark?"))))])
       (define before (switch-values))
-      (check-exn (blames-caller? "switches-test.rkt") call)
+      (check-exn refused? call)
       (check-equal? (switch-values) before)))
 
   (bounded-test "S5: an OS thread reads main's write, and main reads the thread's"

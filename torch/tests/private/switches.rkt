@@ -3,14 +3,14 @@
 (require (for-syntax racket/base syntax/parse)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../main.rkt"
-                  * - ~> adaptive-avg-pool2d backward! conv2d
+                  * - ~> adaptive-avg-pool2d backward! conv2d embedding
                   cudnn-benchmark? cudnn-deterministic?
                   deterministic-algorithms-enabled?
                   deterministic-algorithms-warn-only? grid-sample index-add!
                   index-select log-softmax rand randn scaled-dot-product-attention
                   scatter-add! set-cudnn-benchmark! set-cudnn-deterministic! sum
                   tensor upsample-bicubic2d use-deterministic-algorithms! zeros)
-         (only-in "../../nn.rkt" ctc-loss embedding nll-loss))
+         (only-in "../../nn.rkt" ctc-loss nll-loss))
 
 (provide call-with-switches-restored
          default-switches
