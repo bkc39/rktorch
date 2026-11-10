@@ -815,6 +815,15 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
+- `torch/runtime/reaper.rkt` — the reapers: one ordered Chez guardian per
+  kind (`reaped`), `reap-when-dead!` (the hot registration, no contract),
+  `drain-reapers!`, `collect-and-drain-reapers!`, `wake-reapers!`, and
+  `RKTORCH_REAPERS` parallel threads that release dead handles off main
+  (#439), in the main place only; any other place falls back to
+  `register-finalizer`. It requires nothing from `memory`, `pressure` or
+  `collector`. `torch/runtime/main-thread.rkt` — `on-main-os-thread?`,
+  `main-place?`. The loader's own "reaper" in
+  `torch/data/workers.rkt` is unrelated.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
   rules agents must not break: every tensor-returning binding carries
@@ -828,31 +837,34 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   update twice; `tr_tensor_grad`
   carries `tensor-allocator/gradient`; a binding with several tensor
   outputs carries `tensor-allocator/outputs` (or `/outputs/no-retry`).
-  Every wrap runs the raw call and registers each handle's finalizer in one
-  `call-as-uninterruptible` region (a kill or break waits for it), then
-  charges the ledger in a second region; never a bare `register-finalizer`
-  (skips the ledger). `torch/tests/source-rules-test.rkt` enforces three
-  rules: nothing under `torch/foreign/` enters atomic mode (a parallel
-  thread's atomic section runs on the main OS thread) or requires
-  `ffi/unsafe/alloc`; nothing under `torch/` but
+  Every wrap runs the raw call and registers each handle with its kind's
+  guardian (`reap-when-dead!`) in one `call-as-uninterruptible` region (a
+  kill or break waits for it), then charges the ledger in a second region.
+  `torch/tests/source-rules-test.rkt` enforces these
+  rules: nothing under `torch/foreign/` or `torch/runtime/` enters atomic
+  mode (a parallel thread's atomic section runs on the main OS thread) or
+  requires `ffi/unsafe/alloc`; nothing under `torch/foreign/` calls
+  `register-finalizer`; no library module but `torch/runtime/reaper.rkt`
+  names `make-guardian`; nothing under `torch/` but
   `torch/foreign/raw/cas.rkt` calls `box-cas!` or `unsafe-struct*-cas!`, so
   every CAS goes through its retry loops (`cas-update!`, `cas-add!`,
   `cas-take!`, `cas-claim!`, `cas-claim-when!`, `cas-field-claim!`), whose
   `#:site` must be one of `torch/foreign/raw/cas.rkt`'s enumerated sites or the call is a
-  syntax error; and no comment under `torch/foreign/` cites an issue
-  number. The rarely touched ledger fields are written only under
+  syntax error; and no comment under `torch/foreign/` or `torch/runtime/`
+  cites an issue number. Reapers run only in the main place, and nothing
+  kills, breaks or stops one; process exit leaves them parked. The rarely touched ledger fields are written only under
   `with-ledger`, inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the
   wrapper's `state`, from `'live` to `'freeing`. A loser raises
   `exn:fail:contract`. The winner goes through the raising
   `tr-tensor-free/checked`, which claims the handle's lifetime for its
-  thread with the CAS the finalizer makes, and releases, tags and marks it
+  thread with the CAS the reaper makes, and releases, tags and marks it
   in one region; a free killed before that region leaves the handle
-  to the finalizer. OOM reaches users as
+  to the reapers. OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
   enough to catch an `invalid memory reference` either lets it through to
   the caller, which latches nothing, or, where no caller is waiting (a
-  finalizer guard, the printer, `account!`), calls `note-native-fault!`
+  reaper's release, the printer, `account!`), calls `note-native-fault!`
   when `native-fault?` holds, so that fault latches the library; never bind
   native code with `define-ffi-definer` or `get-ffi-obj` directly, which
   bypasses the latch.

@@ -15,8 +15,7 @@
            (only-in (submod "../train/logging.rkt" private) epoch-accumulators host-reads))
 
   (define (collect!)
-    (define-values (seen? drained?) (collect-and-wait!))
-    (check-true (and seen? drained?) "collection drained"))
+    (check-true (collect-and-wait!) "collection drained"))
 
   (define (cpu-bytes)
     (collect!)
