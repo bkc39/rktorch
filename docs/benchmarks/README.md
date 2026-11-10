@@ -225,11 +225,11 @@ median, quartiles and IQR, and the load average before and after.
   run. Every binding enters the fault latch, where `with-crossing-hook`
   counts the crossings. The `ledger-entry-added` race point counts the
   accounted tensors, every output of a multi-output op included, and
-  `free-released` and `finalizer-releasing` count the frees. Accounting a
-  tensor reads its size and device (two crossings), so a phase's op calls
-  are its crossings less its frees and twice its accounted tensors; a
-  tensor whose size or device cannot be read costs its two crossings
-  uncounted. A batched gradient fetch (`with-gradients`) reports every
+  `free-released`, `finalizer-releasing` and `generator-releasing` count
+  the frees. Accounting a tensor reads its size and device (two
+  crossings), so a phase's op calls are its crossings less its frees and
+  twice its accounted tensors; a tensor whose size or device cannot be
+  read costs its two crossings uncounted. A batched gradient fetch (`with-gradients`) reports every
   size and device in its one crossing, so `ledger-entry-added/batched`
   takes each of its tensors back out of the count, and a batched free
   (`frees-released/batched`) of N handles counts as one free. Counting

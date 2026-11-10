@@ -6,6 +6,7 @@
            rackunit
            (only-in threading ~>)
            (only-in "../foreign/autograd-ops.rkt" with-gradient with-gradients)
+           (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/gradients.rkt" fetched-gradient gradients-allocator)
            (only-in "../foreign/raw/memory.rkt" _tr-device-type adopted-bytes free-handles!)
@@ -24,9 +25,12 @@
 
   (define (flat t) (~> t (reshape -1) tensor->list))
 
+  ;; The first op after a collection frees a batch of earlier garbage on its
+  ;; own thread, so the window opens just after a collection and a drain.
   (define (crossings-of thunk)
     (define here (current-thread))
     (define n 0)
+    (collect-and-wait!)
     (parameterize ([native-collect-at-troughs #f])
       (with-crossing-hook (lambda ()
                             (when (eq? (current-thread) here)

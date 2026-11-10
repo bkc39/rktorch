@@ -21,7 +21,7 @@
                   unaccounted-total with-ledger)
          (only-in "collector.rkt"
                   call-as-the-collector collect-and-wait! drain-finalizers!
-                  yield-to-finalizers!)
+                  wake-after-collection!)
          (only-in "device-queries.rkt"
                   allocator-reading queried-capacity release-query)
          (only-in "pressure-settings.rkt"
@@ -172,7 +172,7 @@
     [(and gate-open? sample-due?)
      (with-ledger (end-trial! (account-of dev) base))]
     [else (void)])
-  (yield-to-finalizers!))
+  (wake-after-collection!))
 
 ;; whether the backstop looks at all, and whether that look samples
 (define (gate-state dev mark base)
@@ -210,7 +210,7 @@
 (define (pressure-collect! dev mark base)
   (define seen (checks-seen))
   (define before (pressure-reading dev))
-  (define-values (_observed drained?) (collect-and-wait!))
+  (define drained? (collect-and-wait!))
   ;; after a drain that ran out of time, finalizers still to run would
   ;; refill the cache behind the release and spend its spacing for nothing
   (define released (and drained? (release-cache! dev)))
@@ -320,9 +320,7 @@
   (trough-stage! next-full-ms
                  (lambda (s)
                    (set-stats-trough-collections! s (add1 (stats-trough-collections s))))
-                 (lambda ()
-                   (define-values (_observed drained?) (collect-and-wait!))
-                   drained?)
+                 collect-and-wait!
                  (lambda (seen)
                    (settle-floors!)
                    (reset-checks! seen))
