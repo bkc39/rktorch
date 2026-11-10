@@ -5,9 +5,10 @@
            rackunit
            (only-in "../foreign/raw/pressure-settings.rkt"
                     default-memory-fraction memory-fraction-from-env
-                    memory-limit-from-env))
+                    memory-limit-from-env reaper-count-from-env))
 
   (define-runtime-path settings-module "../foreign/raw/pressure-settings.rkt")
+  (define-runtime-path reaper-module "../runtime/reaper.rkt")
 
   (define mib (* 1024 1024))
 
@@ -22,6 +23,9 @@
 
   (define (limit-from supplied)
     (with-env "RKTORCH_MEMORY_LIMIT" supplied memory-limit-from-env))
+
+  (define (reapers-from supplied)
+    (with-env "RKTORCH_REAPERS" supplied reaper-count-from-env))
 
   (define (check-rejected read name supplied expected)
     (define message (format "~a: expected ~a, given ~s" name expected supplied))
@@ -75,4 +79,17 @@
                                         "RKTORCH_MEMORY_LIMIT" "6062"))
                   (list 2/3 (* 6062 mib)))
     (check-exn #rx"^RKTORCH_MEMORY_FRACTION: expected a number in \\(0, 1\\], given \"4/5 \"$"
-               (lambda () (initial-values (hash "RKTORCH_MEMORY_FRACTION" "4/5 "))))))
+               (lambda () (initial-values (hash "RKTORCH_MEMORY_FRACTION" "4/5 ")))))
+
+  (test-case "L17: RKTORCH_REAPERS is a whole number of reapers from 1 to 16, 2 unset"
+    (check-equal? (reapers-from #f) 2)
+    (check-equal? (reapers-from "1") 1)
+    (check-equal? (reapers-from "16") 16)
+    (for ([supplied (in-list '("0" "17" "1.5" "-2" "" "two" "+inf.0"))])
+      (check-rejected reapers-from "RKTORCH_REAPERS" supplied "an integer from 1 to 16"))
+    (check-exn #rx"^RKTORCH_REAPERS: expected an integer from 1 to 16, given \"0\"$"
+               (lambda ()
+                 (parameterize ([current-environment-variables (make-environment-variables)]
+                                [current-namespace (make-base-empty-namespace)])
+                   (putenv "RKTORCH_REAPERS" "0")
+                   (dynamic-require reaper-module 'reaper-count))))))

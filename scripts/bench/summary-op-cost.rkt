@@ -146,7 +146,8 @@
   (define raw (layer-median records "scalar-add" "raw"))
   (define crossing (crossing-us records))
   (define own (and raw crossing (- raw (* 2 crossing))))
-  (hasheq 'facade facade 'libtorch own 'value (and facade own (- facade own))))
+  (define cpu (layer-median records "scalar-add" "facade" #:key 'cpu_us_per_op))
+  (hasheq 'facade facade 'libtorch own 'cpu cpu 'value (and facade own (- facade own))))
 
 (define (k2-pytorch-ratio records)
   (for/list ([op (in-list (map symbol->string pure-overhead-ops))])
@@ -257,8 +258,9 @@
   (define gc (k6-gc-share records))
   (table '("#" "metric" "value")
          (list (list "K1" "µs/op, scalar add, 1 thread, minus libtorch's own time"
-                     (format "~a (facade ~a, libtorch ~a)" (num (ref overhead 'value) 2)
-                             (num (ref overhead 'facade) 2) (num (ref overhead 'libtorch) 2)))
+                     (format "~a (facade ~a, libtorch ~a; process CPU ~a µs/op)"
+                             (num (ref overhead 'value) 2) (num (ref overhead 'facade) 2)
+                             (num (ref overhead 'libtorch) 2) (num (ref overhead 'cpu) 2)))
                (list "K2" "rktorch ÷ PyTorch µs/op, 1 thread"
                      (string-join (for/list ([t (in-list ratios)])
                                     (format "~a: ~a× (~a / ~a µs)" (ref t 'op) (num (ref t 'value) 2)
