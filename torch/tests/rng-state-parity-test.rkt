@@ -71,7 +71,7 @@
      (bounded-test "P1-P3: CPU states pass between rktorch and PyTorch"
        (parity-rows 'cpu))]
     [else
-     (printf "[rng-state-parity-test] skipped the CPU rows: needs python3 `torch`\n")])
+     (displayln "[rng-state-parity-test] skipped the CPU rows: needs python3 `torch`")])
 
   (cond
     [(and (cuda-available?) (python-torch-available?) (python-cuda-available?))

@@ -86,12 +86,12 @@
   (define (le-uint bs start end) (integer-bytes->integer bs #f #f start end))
 
   (bounded-test "L1: a state is a uint8 CPU tensor of its device type's size"
-    (for ([on (in-list devices)])
-      (for ([s (in-list (list (rng-state #:device on)
-                              (generator-state (make-generator 0 #:device on))))])
-        (check-equal? (device s) (cpu-device) (format "~a" on))
-        (check-equal? (dtype s) 'uint8 (format "~a" on))
-        (check-equal? (shape s) (list (state-size on)) (format "~a" on)))))
+    (for* ([on (in-list devices)]
+           [s (in-list (list (rng-state #:device on)
+                             (generator-state (make-generator 0 #:device on))))])
+      (check-equal? (device s) (cpu-device) (format "~a" on))
+      (check-equal? (dtype s) 'uint8 (format "~a" on))
+      (check-equal? (shape s) (list (state-size on)) (format "~a" on))))
 
   (bounded-test "L2: a seeded default stream holds the state a seeded generator does"
     (for* ([on (in-list devices)]
@@ -99,7 +99,7 @@
       (manual-seed! seed)
       (define default (tensor->bytes (rng-state #:device on)))
       (define generated
-        (tensor->bytes (generator-state (make-generator seed #:device on))))
+        (~> (make-generator seed #:device on) generator-state tensor->bytes))
       (check-equal? default generated (format "~a ~a" on seed))
       (unless (eq? 'mps (device-type on))
         (check-equal? (le-uint default 0 8) seed (format "~a ~a" on seed)))
@@ -184,7 +184,7 @@
        (set-rng-state! cpu-state #:device 'cpu)
        (check-equal? (draws (cuda-device) #f) expected))]
     [else
-     (printf "[rng-state-test] skipped L8: needs CUDA\n")])
+     (displayln "[rng-state-test] skipped L8: needs CUDA")])
 
   (bounded-test "L9: a state seen through a view or another shape replays"
     (for ([kind (in-list kinds)])
@@ -242,7 +242,7 @@
             (lambda ()
               (set-rng-state! (patched cuda-shaped 8 16 3) #:device 'cuda)))
       (list "l: 24 bytes for CUDA" cuda-expected
-            (lambda () (set-rng-state! (u8 (make-bytes 24 0)) #:device 'cuda)))
+            (lambda () (~> (make-bytes 24 0) u8 (set-rng-state! #:device 'cuda))))
       (list "m: a byte string" cpu-expected
             (lambda () (set-rng-state! (make-bytes 5056 0))))
       (list "n: not a generator" #rx"expected: generator\\?"
@@ -276,7 +276,7 @@
                             #:seed? #f)
                      "r: the seed alone"))]
     [else
-     (printf "[rng-state-test] skipped L10 p-r: needs CUDA\n")])
+     (displayln "[rng-state-test] skipped L10 p-r: needs CUDA")])
 
   (cond
     [(mps-available?)
@@ -285,7 +285,7 @@
         (list (list "a CPU state on MPS" #rx"expected: mps-rng-state"
                     (lambda () (set-rng-state! (rng-state) #:device 'mps))))))]
     [else
-     (printf "[rng-state-test] skipped the L10 MPS row: needs MPS\n")])
+     (displayln "[rng-state-test] skipped the L10 MPS row: needs MPS")])
 
   (define (absent? e)
     (and (exn:fail? e) (not (exn:fail:contract? e))))
