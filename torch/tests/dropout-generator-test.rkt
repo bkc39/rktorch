@@ -74,7 +74,7 @@
     (define n 1000000)
     (define p 0.3)
     (define keep (- 1 p))
-    (define rate-sigma (sqrt (/ (* p keep) n)))
+    (define rate-sigma (~> (* p keep) (/ n) sqrt))
     (for ([type '(float32 float64 float16 bfloat16)]
           [scale-ulp (list (expt 2 -23) (expt 2 -52) (expt 2 -10) (expt 2 -7))])
       (define out (dropout (ones n #:dtype type) #:p p #:generator (make-generator 5)))
@@ -98,7 +98,7 @@
     (check-true (unchanged? generator 12))
     (for ([source (list #f (make-generator 2))])
       (define leaf (ones 3 #:requires-grad? #t))
-      (backward! (sum (dropout leaf #:p 1 #:generator source)))
+      (~> (dropout leaf #:p 1 #:generator source) sum backward!)
       (check-equal? (tensor->list (grad leaf)) '(0.0 0.0 0.0))))
 
   (bounded-test "an evaluating layer is the identity and draws nothing"

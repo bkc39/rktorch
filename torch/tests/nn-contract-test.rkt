@@ -76,7 +76,7 @@
     (check-exn #rx"^BatchNorm2d: arity mismatch"
                (lambda () ((BatchNorm2d 3) (randn 1 3 2 2) 'extra)))
     (check-exn #rx"^Dropout: contract violation"
-               (lambda () (Dropout #:p 1)))
+               (lambda () (Dropout #:p 1.5)))
     (check-exn #rx"^Sequential: contract violation"
                (lambda () (Sequential (Linear 2 2) 'not-a-module)))
     (check-exn blames-this-test

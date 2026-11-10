@@ -21,16 +21,14 @@
   (if (memq type '(float16 bfloat16)) 'float32 type))
 
 (define (check-source who x source)
-  (cond
-    [(not (generator? source))
-     (raise-argument-error who "(or/c generator? #f) as #:generator" source)]
-    [(not (generator-on? source (device x)))
-     (raise-arguments-error who "contract violation; the generator lives on the tensor's device"
-                            "generator device" (generator-device source)
-                            "tensor device" (device x))]
-    [(not (float-dtype? (dtype x)))
-     (raise-argument-error who "a floating-point tensor when drawing from a generator" x)]
-    [else (void)]))
+  (unless (generator? source)
+    (raise-argument-error who "(or/c generator? #f) as #:generator" source))
+  (unless (generator-on? source (device x))
+    (raise-arguments-error who "contract violation; the generator lives on the tensor's device"
+                           "generator device" (generator-device source)
+                           "tensor device" (device x)))
+  (unless (float-dtype? (dtype x))
+    (raise-argument-error who "a floating-point tensor when drawing from a generator" x)))
 
 (define (masked who x rate source)
   (check-source who x source)
