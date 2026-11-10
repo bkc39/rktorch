@@ -7,14 +7,13 @@
                     check-eq? check-equal? check-false check-true)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in (submod "../nn/batch-norm.rkt" private) counter-one)
-           (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../main.rkt"
                     accelerator-if-available copy! cpu-device device
                     device-type dtype item randn tensor to with-default-device)
            (only-in "../nn.rkt"
                     BatchNorm1d BatchNorm2d buffers in-eval-mode layer-copy
                     parameters state-dict)
-           (only-in "private/op-calls.rkt" crossings-of op-calls-of)
+           (only-in "private/op-calls.rkt" crossings-of faulted-at? op-calls-of)
            (only-in "private/within.rkt" bounded-test))
 
   (define norms
@@ -26,20 +25,6 @@
 
   (define (cache bn)
     (counter-one (counter bn)))
-
-  (struct injected (k))
-
-  (define (faulted-at? k thunk)
-    (define here (current-thread))
-    (define n 0)
-    (with-handlers ([injected? (lambda (_) #t)])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! n (add1 n))
-                              (when (= n k)
-                                (raise (injected k)))))
-        (thunk))
-      #f))
 
   (define (repaired-after-every-fault make batch target)
     (let loop ([k 1])

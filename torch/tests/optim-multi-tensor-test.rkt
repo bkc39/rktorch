@@ -18,7 +18,7 @@
                     zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/resnet.rkt" ResNet)
-           (only-in "private/op-calls.rkt" crossings-of)
+           (only-in "private/op-calls.rkt" crossings-of op-calls-of)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
@@ -157,6 +157,11 @@
        (define one (steady c mode 1 crossings-of))
        (check-equal? (steady c mode 2 crossings-of) one)
        (check <= one bound))
+      (bounded-test
+       (format "~a, ~a: a steady step's op calls are its crossings less its gradients' one release"
+               name mode)
+       (check-equal? (steady c mode 2 op-calls-of)
+                     (sub1 (steady c mode 2 crossings-of))))
       (bounded-test (format "~a, ~a: a steady step frees every tensor it accounts"
                             name mode)
         (check-equal? (steady c mode 2 owned-balance) 0))

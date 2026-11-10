@@ -12,7 +12,7 @@
 
   (define (holding-the-reaper . body)
     `(begin
-       (require (only-in torch make-generator zeros)
+       (require (only-in torch finalizer-failures make-generator zeros)
                 (only-in torch/foreign/raw/cas cas-claim!)
                 (only-in torch/foreign/raw/fault with-crossing-hook)
                 (only-in torch/foreign/raw/pressure-settings native-collect-at-troughs)
@@ -21,7 +21,7 @@
                          reap-after-collection! reap-when-dead! reaped wake-reapers!)
                 (only-in (submod torch/runtime/reaper private)
                          reaper-statistics reaper-threads)
-                (only-in torch/tests/private/op-calls crossings-of op-calls-of)
+                (only-in torch/tests/private/op-calls crossings-of faulted-at? op-calls-of)
                 (only-in torch/tests/private/race-harness with-race-hook)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
        (define holding (box #f))
@@ -112,10 +112,42 @@
                 0
                 1))))
 
+  (define fault-sweep-program
+    (holding-the-reaper
+     '(define (op)
+        (zeros 1))
+     '(void (crossings-of op))
+     '(settle!)
+     '(define alone (crossings-of op))
+     `(define (sweep k)
+        (settle!)
+        (for ([_ (in-range ,dead-tensors)])
+          (zeros 1))
+        (collect-garbage)
+        (define before (released))
+        (define faulted? (faulted-at? k op))
+        (define reaped (- (released) before))
+        (if faulted? (cons reaped (sweep (add1 k))) (list reaped)))
+     '(define failures (finalizer-failures))
+     '(define reaped (sweep 1))
+     '(define failed (- (finalizer-failures) failures))
+     '(set-box! go #t)
+     '(eprintf "op alone ~a; a sweep reaped ~a inline, ~a finalizer failures\n"
+               alone reaped failed)
+     `(exit (if (and (= (length reaped) (add1 alone))
+                     (= (last reaped) ,dead-tensors)
+                     (zero? failed))
+                0
+                1))))
+
   (test-case "op-calls-of counts no release a reaper batch on its thread makes"
     (check-equal? (with-one-reaper (lambda () (exit-status-of dead-generator-program #:within 60)))
                   0))
 
   (test-case "crossings-of counts none of the dead tensors an op reaps inline after a collection"
     (check-equal? (with-one-reaper (lambda () (exit-status-of dead-tensors-program #:within 60)))
+                  0))
+
+  (test-case "a fault sweep over an op that reaps inline faults each of the op's crossings, no release"
+    (check-equal? (with-one-reaper (lambda () (exit-status-of fault-sweep-program #:within 60)))
                   0)))
