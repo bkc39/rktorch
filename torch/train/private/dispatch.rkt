@@ -5,7 +5,7 @@
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../foreign.rkt" cpu-device device shape tensor? to)
-         (only-in "../../foreign/raw/fault.rkt" native-fault? note-native-fault!)
+         (only-in "../../foreign/raw/fault.rkt" native-fault? note-native-fault! with-fault-handlers)
          (only-in "../../nn/layer.rkt" buffers layer? parameters)
          (only-in (submod "../../nn/mode.rkt" private) eval-layer-count)
          (only-in "../logging.rkt" logger-finalize! logger-log-metrics!)
@@ -166,10 +166,10 @@
     (eprintf "rktorch-train: ~a\n" message)))
 
 (define (logged-attempt what thunk)
-  (with-handlers ([exn:fail? (lambda (e)
-                               (when (native-fault? e)
-                                 (note-native-fault! (format "running ~a during failure recovery" what)))
-                               (log-rktorch-train-warning "~a raised: ~a" what (exn-message e)))])
+  (with-fault-handlers ([exn:fail? (lambda (e)
+                                     (when (native-fault? e)
+                                       (note-native-fault! (format "running ~a during failure recovery" what)))
+                                     (log-rktorch-train-warning "~a raised: ~a" what (exn-message e)))])
     (thunk)))
 
 (define (recover! r stage e absorb-break?)
