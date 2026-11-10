@@ -21,8 +21,6 @@
   (if (memq type '(float16 bfloat16)) 'float32 type))
 
 (define (check-source who x source)
-  (unless (generator? source)
-    (raise-argument-error who "(or/c generator? #f) as #:generator" source))
   (unless (generator-on? source (device x))
     (raise-arguments-error who "contract violation; the generator lives on the tensor's device"
                            "generator device" (generator-device source)
@@ -39,6 +37,9 @@
            (/ keep))))
 
 (define (drop who x p training? generator)
+  (unless (tensor? x) (raise-argument-error who "tensor?" x))
+  (unless (or (not generator) (generator? generator))
+    (raise-argument-error who "(or/c generator? #f) as #:generator" generator))
   (define rate (exact->inexact p))
   (define source
     (and training? (< 0.0 rate 1.0) (or generator (current-generator))))

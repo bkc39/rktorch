@@ -13,6 +13,7 @@
            (only-in "../nn.rkt" Dropout dropout eval!)
            (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/python-env.rkt" python-check python-torch-available?)
+           (only-in "private/sandbox.rkt" with-fresh-eval)
            (only-in "private/within.rkt" bounded-test))
 
   (define caller (blamed "dropout-generator-test.rkt"))
@@ -101,6 +102,14 @@
       (~> (dropout leaf #:p 1 #:generator source) sum backward!)
       (check-equal? (tensor->list (grad leaf)) '(0.0 0.0 0.0))))
 
+  (bounded-test "p = 1 leaves the global stream where it was"
+    (manual-seed! 12)
+    (define next (draw-seed))
+    (manual-seed! 12)
+    (void (dropout input #:p 1))
+    (void ((Dropout #:p 1) input))
+    (check-equal? (draw-seed) next))
+
   (bounded-test "an evaluating layer is the identity and draws nothing"
     (define generator (make-generator 6))
     (define evaluating (eval! (Dropout #:p 0.5)))
@@ -160,9 +169,40 @@
     (check-equal? (dtype (dropout ints #:training? #f)) 'int64)
     (check-equal? (tensor->list (dropout (zeros 2 #:dtype 'int64) #:p 1)) '(0 0)))
 
-  (bounded-test "the layer's application rejects a #:generator that is none"
-    (check-exn (raised-by 'Dropout #rx"generator")
-               (lambda () ((Dropout) input #:generator 'g))))
+  (bounded-test "the layer rejects a #:generator that is none, drawing or not"
+    (for ([apply-layer (list (lambda () ((Dropout) input #:generator 'g))
+                             (lambda () ((eval! (Dropout)) (ones 2) #:generator 'g))
+                             (lambda () ((Dropout #:p 0) input #:generator 'g))
+                             (lambda () ((Dropout #:p 1) input #:generator 'g)))]
+          [label '(training evaluating p=0 p=1)])
+      (check-exn (raised-by 'Dropout #rx"generator") apply-layer (format "~a" label))))
+
+  (bounded-test "the layer rejects an input that is no tensor, with or without a generator"
+    (check-exn (raised-by 'Dropout #rx"tensor")
+               (lambda ()
+                 (parameterize ([current-generator (make-generator 1)])
+                   ((Dropout) 5))))
+    (check-exn (raised-by 'Dropout #rx"tensor") (lambda () ((Dropout) 5))))
+
+  (bounded-test "the define-layer example in the manual draws the library's mask"
+    (define example
+      '(define-layer Dropout (p)
+         #:contract (->* [] [#:p (and/c real? (>=/c 0) (<=/c 1))] dropout?)
+         #:init (#:p [p 0.5])
+         #:forward (x #:generator [generator #f])
+         (with-mode (dropout x #:p p #:training? (training? mode) #:generator generator))))
+    (with-fresh-eval (ev #:time-limit 120)
+      (ev `(module example racket/base
+             (require racket/contract torch torch/nn)
+             ,example))
+      (ev '(require torch (only-in torch/nn eval!) 'example))
+      (check-equal? (ev '(~> (arange 1 257)
+                             (reshape 4 64)
+                             ((Dropout #:p 0.3) #:generator (make-generator 9))
+                             tensor->list))
+                    (layer (make-generator 9)))
+      (check-equal? (ev '(~> (arange 3) ((eval! (Dropout))) tensor->list))
+                    (tensor->list (arange 3)))))
 
   (if (python-torch-available?)
       (bounded-test "the global stream draws F.dropout's mask, a generator torch.rand's"
