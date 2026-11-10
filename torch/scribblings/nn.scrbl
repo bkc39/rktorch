@@ -693,23 +693,27 @@ rebuilt as @racket[layer-copy] copies them. It does not recurse by itself:
 
 @racket[layer-copy] passes a @racket[child] and a @racket[tensor] that
 remember what they have copied, so shared values stay shared. A call given
-@racket[layer-copy]'s @racket[child] joins that copy. A call made, on the
-same thread, while a @racket[layer-rebuild] on the same @racket[child] and
-@racket[tensor] procedures has not returned joins that one; contract
-wrappers do not count as different procedures. Any other call, a
-@racket[layer-copy] included, makes a copy of its own. Within one copy, a
-layer reached twice is rebuilt once, and a cycle back into a rebuild that
-has not returned raises @racket[exn:fail:contract], naming the layer. The
-rebuild may see part-built copies of containers and @racket[define-layer]
-layers on a cycle.
+@racket[layer-copy]'s @racket[child] joins that copy. A call made while a
+@racket[layer-rebuild] has not returned joins that one when its
+@racket[child] and @racket[tensor] are @racket[equal-always?] to that one's,
+so contract wrappers and impersonators count as the same procedures; when
+it runs on the same thread; and unless a @racket[layer-copy] has started
+since. Any other call, a @racket[layer-copy] included, makes a copy of its
+own. Within one copy, a layer reached twice is rebuilt once, and a cycle
+back into a rebuild that has not returned raises @racket[exn:fail:contract],
+naming the layer, unless the cycle runs through @racket[define/generic]
+calls. The rebuild may see part-built copies of containers and
+@racket[define-layer] layers on a cycle.
 
 A hand-written layer is rebuilt through the @racket[gen:layer] method
 @racket[layer-rebuild-method], which takes the same arguments. Its body
 passes each child to @racket[child] or to @racket[layer-rebuild], and
 returns a new layer. A @racket[define/generic] of
-@racket[layer-rebuild-method], or the method's own name inside the
-@racket[#:methods] block, calls a method body directly and skips the memo,
-as a direct @tt{__deepcopy__} call does in Python.
+@racket[layer-rebuild-method] applied to a hand-written layer runs its body
+directly and skips the memo, as a direct @tt{__deepcopy__} call does in
+Python; applied to a @racket[define-layer] layer it uses the memo. A cycle
+of such direct calls never returns: where Python raises
+@tt{RecursionError}, the rebuild recurses until memory runs out.
 
 A child callback may be used by one
 thread a rebuild starts while the rebuild waits; a second thread at once, a

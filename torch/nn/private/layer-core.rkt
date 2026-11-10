@@ -219,6 +219,18 @@
 
 (define direct-rebuilds (make-continuation-mark-key 'layer-rebuild))
 
+(define rebuild-prompt (make-continuation-prompt-tag 'layer-rebuild))
+
+(define (enclosing-rebuilds)
+  (if (continuation-prompt-available? rebuild-prompt)
+      (continuation-mark-set-first #f direct-rebuilds '() rebuild-prompt)
+      '()))
+
+(define (call-with-direct-rebuilds rs thunk)
+  (call-with-continuation-prompt
+   (lambda () (with-continuation-mark direct-rebuilds rs (thunk)))
+   rebuild-prompt))
+
 (define (callbacks-equal? r child tensor)
   (and (equal-always? child (direct-rebuild-child r))
        (equal-always? tensor (direct-rebuild-tensor r))))
@@ -229,19 +241,18 @@
     (direct-rebuild-memo r)))
 
 (define (layer-rebuild-in m child tensor)
-  (define enclosing (continuation-mark-set-first #f direct-rebuilds '()))
+  (define enclosing (enclosing-rebuilds))
   (define joined (and (not (remembering? child)) (joined-memo child tensor enclosing)))
   (cond
     [(remembering? child) (rebuilt m child tensor (remembering-seen child))]
     [joined (rebuilt m child tensor joined)]
     [else
      (with-memo (fresh 'layer-rebuild)
-       (with-continuation-mark direct-rebuilds (cons (direct-rebuild child tensor fresh) enclosing)
-         (rebuilt m child tensor fresh)))]))
+       (call-with-direct-rebuilds (cons (direct-rebuild child tensor fresh) enclosing)
+         (lambda () (rebuilt m child tensor fresh))))]))
 
 (define (layer-rebuild-alone m child tensor)
-  (with-continuation-mark direct-rebuilds '()
-    (layer-rebuild-in m child tensor)))
+  (call-with-direct-rebuilds '() (lambda () (layer-rebuild-in m child tensor))))
 
 (define (rebuilt m child tensor seen)
   (if (rebuilder? m)

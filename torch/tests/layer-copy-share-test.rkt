@@ -210,6 +210,30 @@
     (define r (layer-rebuild (apart l l) keep values))
     (check-false (eq? (apart-a r) (apart-b r))))
 
+  (define (in-thread thunk)
+    (define result (box #f))
+    (thread-wait (thread (lambda () (set-box! result (thunk)))))
+    (unbox result))
+
+  (struct fenced (a b run)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (list (fenced-a self) (fenced-b self)))
+     (define (layer-rebuild-method self child tensor)
+       (match-define (fenced a b run) self)
+       (fenced (layer-rebuild a child tensor) (run (lambda () (layer-rebuild b child tensor))) run))])
+
+  (bounded-test "a nested direct rebuild behind a prompt joins the one it is inside"
+    (define l (leaf 1))
+    (define r (layer-rebuild (fenced l l call-with-continuation-prompt) keep values))
+    (check-eq? (fenced-a r) (fenced-b r))
+    (check-false (eq? (fenced-a r) l)))
+
+  (bounded-test "a nested direct rebuild on a thread the rebuild starts keeps its own memo"
+    (define l (leaf 1))
+    (define r (layer-rebuild (fenced l l in-thread) keep values))
+    (check-true (leaf? (fenced-b r)))
+    (check-false (eq? (fenced-a r) (fenced-b r))))
+
   (struct outer (a d)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (outer-d self))

@@ -412,9 +412,14 @@ are walked). Invariants of the walk:
   is the dispatch behind `layer-copy`, `layer-rebuild` and the registry
   method. A direct `layer-rebuild` pushes its memo on a continuation mark,
   which a nested call on `equal-always?` callbacks joins (contracts re-wrap
-  them at each call); `layer-copy` clears the mark. A `define/generic` of
-  `layer-rebuild-method`, or the struct's own name for it, skips the memo, as
-  a direct `__deepcopy__` call does in Python (#466).
+  them at each call). The mark sits under a private prompt tag, so a default
+  prompt (`eval`, `call-with-continuation-prompt`) does not hide it; a new
+  thread starts without it, and `layer-copy` clears it. A `define/generic`
+  of `layer-rebuild-method` on a hand-written layer skips the memo, as a
+  direct `__deepcopy__` call does in Python; on a `define-layer` layer it
+  uses the memo. A cycle of such direct calls never terminates (Python
+  raises `RecursionError`; Racket CS grows the stack until memory runs out)
+  (#466).
 - Layers, mutable containers and mutable strings are recorded empty, then
   filled (`allocated`): a back edge gets the part-built copy, as in Python.
 - Immutable values, `Children` and `Parameters` included, copy their parts
