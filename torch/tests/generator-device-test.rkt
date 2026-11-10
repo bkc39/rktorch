@@ -5,6 +5,7 @@
            (only-in racket/contract/combinator exn:fail:contract:blame?)
            (only-in racket/match match-define)
            (only-in racket/sequence sequence->list)
+           (only-in racket/string string-contains?)
            (only-in threading ~>)
            "../data/loader.rkt"
            (only-in "../main.rkt"
@@ -190,11 +191,10 @@
   (bounded-test "check-generator-on! names the generator's device and the target's"
     (check-equal? (check-generator-on! 'w (make-generator 1) 'cpu) (void))
     (check-equal? (check-generator-on! 'w #f #f) (void))
-    (define (raised? rx)
-      (lambda (e)
-        (and (exn:fail:contract? e)
-             (not (exn:fail:contract:blame? e))
-             (regexp-match? rx (exn-message e)))))
+    (define ((raised? rx) e)
+      (and (exn:fail:contract? e)
+           (not (exn:fail:contract:blame? e))
+           (regexp-match? rx (exn-message e))))
     (define target
       (string-append "^w: contract violation;\n"
                      " the generator lives on the target device\n"
@@ -270,12 +270,10 @@
                 (not ((blames-caller? "init.rkt") e))
                 (regexp-match? #rx"the generator lives on the target device"
                                message)
-                (regexp-match? (regexp-quote
-                                (format "generator device: ~a" accelerator))
-                               message)
-                (regexp-match? (regexp-quote
-                                (format "target device: ~a" (cpu-device)))
-                               message)))
+                (string-contains? message
+                                  (format "generator device: ~a" accelerator))
+                (string-contains? message
+                                  (format "target device: ~a" (cpu-device)))))
          (check-exn mismatch?
                     (lambda ()
                       (parameterize ([current-generator
