@@ -301,6 +301,21 @@
                  (lambda ()
                    (set-rng-state! (u8 (make-bytes 36 0)) #:device 'mps)))))
 
+  (bounded-test "L11: a CUDA seed for a listed absent index passes the contract"
+    (check-exn absent?
+               (lambda ()
+                 (set-rng-state! (u8 (make-bytes 8 0))
+                                 #:device (list 'cuda (cuda-device-count))))))
+
+  (bounded-test "the CPU stream is the one read and set without a device"
+    (manual-seed! 9)
+    (check-equal? (tensor->bytes (rng-state))
+                  (tensor->bytes (rng-state #:device 'cpu)))
+    (define s (rng-state))
+    (define first-run (draws (cpu-device) #f))
+    (set-rng-state! s)
+    (check-equal? (draws (cpu-device) #f) first-run))
+
   (define (ledger-entries thunk)
     (define here (current-thread))
     (define added 0)
