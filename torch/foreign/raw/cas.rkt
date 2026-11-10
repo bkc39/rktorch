@@ -17,7 +17,7 @@
 
 (begin-for-syntax
   (define known-sites
-    '(update claim collector lifetime probe gate lock tensor-state))
+    '(update claim collector lifetime probe gate lock tensor-state reaper))
 
   (define-syntax-class site
     #:description "a CAS site named in raw/cas.rkt"
