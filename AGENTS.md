@@ -401,17 +401,48 @@ nn.TransformerEncoderLayer(...), n)`, seeded parity and stream position
 included), a layer (`n` copies of it, the layer itself left out, as
 PyTorch's deep copies), or a thunk (called `n` times, each layer drawing
 its own values); the stack contract rejects layer keywords or `#:norm #t`
-beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
-with no RNG draws: fresh tensors with the same values, device, dtype and
-requires-grad (no gradients), children copied recursively, modes kept,
-shared layers and tensors kept shared through a memo. It runs on the
-`gen:layer` method `layer-rebuild layer child tensor`, which
-`define-layer` derives (the generated `rebuild` remakes the struct with
-each registered child through `child` and every tensor in its fields,
-plain lists, vectors and boxes included, through `tensor`, then
-reclassifies; `LSTM`'s plain `entries` list is why plain fields are
-walked); a stateless `procedure->Layer` copies, one with state refuses,
-and a hand-written `gen:layer` without the method refuses, naming
+beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is Python's
+`copy.deepcopy` with no RNG draws: fresh tensors with the same values,
+device, dtype and requires-grad (no gradients), modes kept, sharing and
+cycles kept, over the `gen:layer` method `layer-rebuild layer child tensor`
+that `define-layer` derives (`LSTM`'s plain `entries` list is why plain
+fields are walked). Invariants of the walk:
+- One memo per call (`torch/nn/private/memo.rkt`), carried by `layer-copy`'s
+  `remembering` child. `layer-rebuild-in`
+  (`torch/nn/private/layer-core.rkt`) is the one dispatch, behind
+  `layer-copy`, `layer-rebuild` and the registry method. A
+  `define/generic` call into a hand-written layer bypasses it, so a cycle
+  through that layer does not terminate (#466).
+- Layers, mutable containers and mutable strings are recorded empty, then
+  filled (`allocated`): a back edge gets the part-built copy, as in Python.
+- Immutable values, `Children` and `Parameters` included, copy their parts
+  and re-check the memo (`rebuilt-immutable`, `_deepcopy_tuple`); a cycle
+  with nothing recorded since entry is immutable only and raises. The walk
+  has no unwind handler: it runs inside a fill, and a fill that does not
+  return fails the memo. Structures other than layers, prefab and
+  transparent ones included, are shared.
+- `torch/nn/private/claim.rkt` owns the tables: one thread walks at a time
+  (the caller, or one worker while it waits); a failed fill or a dead
+  claimant fails the memo; the memo closes on exit. A hit with no other
+  claimant skips the lock, reading the done table, then the claim count,
+  then the state. A thread killed inside the lock leaves it held
+  (#469).
+- After the walk, mutable `equal?` hashes are re-keyed, immutable ones
+  checked (`check-keys`), and `check-names` runs; collapsed keys raise for
+  every non-weak table kind, naming its comparison, and as part-built when
+  an immutable `equal?` hash's keys collapse while one is still being built.
+- `check-hashable` (`torch/nn/private/hash-keys.rkt`) runs before each
+  `equal?` insertion: one Tarjan pass over the edges `equal-hash-code`
+  follows (keys of mutable `equal?` hashes, all hash values, containers,
+  the fields of a struct hashed by its fields), memoising components with
+  no part-built node. A key reaching its table, or a mutable `equal?` hash
+  in a component with its own key, raises; value-only cycles hash.
+  `gen:equal+hash` keys, transparent ones included, and sets are opaque to
+  it.
+- Weak and ephemeron hash keys are shared, as `WeakKeyDictionary`.
+
+A stateless `procedure->Layer` copies, one with state refuses, and a
+hand-written `gen:layer` without the method refuses, naming
 `layer-copy`. The layer constructor contracts come from one
 `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
@@ -851,12 +882,17 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   values (structs and mpairs are not looked inside); `torch/nn/layer.rkt` holds the
   contracted public definitions and the macros over
   `torch/nn/private/layer-core.rkt` (`gen:layer`, the registry struct,
-  moves, `call-layer`), `torch/nn/private/layer-containers.rkt` (the `Fn`,
-  `Parameters` and `Children` structs, `classify`, `check-names`),
+  moves, `call-layer`, `layer-rebuild-in`, `layer-rebuild-joined`),
+  `torch/nn/private/layer-containers.rkt` (the `Fn`, `Parameters` and
+  `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`
-  (the expansion's runtime: `assemble`, the `set!` check, entry procedures)
-  and `torch/nn/private/field-walk.rkt` (`rebuilt-value`, the field walk
-  `layer-rebuild` uses); `torch/nn/mode.rkt` = `train!`, `eval!`,
+  (the expansion's runtime: `assemble`, the `set!` check, entry procedures),
+  `torch/nn/private/field-walk.rkt` (`rebuilt-layer`, the allocate-and-fill
+  field walk `layer-rebuild` uses), `torch/nn/private/hash-keys.rkt`
+  (`check-hashable`, `rekeyed!`), `torch/nn/private/memo.rkt` (the
+  per-call memo, `with-memo`, the immutable walk and `remembering`, the
+  callback that carries the memo) and `torch/nn/private/claim.rkt` (the
+  memo's tables, thread ownership, failure and closing); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
@@ -1092,8 +1128,22 @@ on the hot tensor surface are the expensive part of `torch/foreign.rkt`.
 
 **Cheap accessors are the other extreme.**  `tensor-shape` is a struct
 field read at ~7 ns, so a boundary contract on it is 19x and even a hand
-guard is 10x, because `tensor?` alone is ~60 ns.  There the question is
-whether to validate at all.
+guard costs a multiple of the read, because `tensor?` -- a struct test and
+a read of the handle's tag -- is itself dearer than the read.  There the
+question is whether to validate at all.
+
+**Build a contract once, never in a dependent clause.**  An `->i`
+dependent clause runs on every call, so a combinator built there
+(`or/c`, `and/c`, `listof`, a literal `->`) is paid on every op.  A
+dependent clause selects among contracts built at module level, or calls
+a helper that returns one `flat-named-contract` over a predicate.  A
+check that relates two arguments, each with a contract of its own, is a
+`#:pre/name`, which builds nothing.  `torch/tests/contract-cost-test.rkt`
+scans every dependent clause, and the module-level helpers it calls, for
+a combinator.  `->i` itself still costs more than a literal `->`, but
+`->` cannot state that `b` must be a tensor when `a` is a real, and
+`contract-out` takes its direct-call fast path only for a literal `->` or
+`->*`, never for a named contract.
 
 **`define/contract` charges the same inside a module as across it**,
 because it wraps the definition rather than the export.

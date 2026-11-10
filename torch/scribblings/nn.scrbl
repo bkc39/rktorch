@@ -638,13 +638,28 @@ stream.
 
 The copy shares nothing that training changes: an optimizer stepping one
 leaves the other where it was, and moving one with @racket[to] leaves the
-other on its device. Gradients are not copied, as PyTorch's deep copy of a
-parameter does not copy them either. Within one copy, sharing is kept: a
-layer or a tensor that appears twice in @racket[m], as tied weights do,
-appears twice in the copy as one layer or one tensor. Tensors a layer
-keeps outside its parameters and buffers, in a plain field or inside a
-list, vector or box there, are copied too; any other value a field holds,
-a number or a procedure, is shared.
+other on its device. Gradients are not copied. Plain fields are copied all
+the way down: pairs, vectors, boxes, mutable strings and byte strings, and
+hashes, a hash's keys included, each keeping its mutability and a hash its
+comparison and weakness. Anything else a field holds is shared: a number, a
+procedure, an immutable string, and a structure other than a layer, prefab
+and transparent ones included.
+
+Sharing and cycles follow Python's @tt{copy.deepcopy}: a value reached twice
+in @racket[m], as tied weights are, is one value in the copy, a cycle is
+copied to a cycle, an immutable value holding nothing to copy is shared, and
+a weak or ephemeron hash shares its keys.
+
+@racket[layer-copy] raises @racket[exn:fail:contract] on a cycle made only of
+immutable values, which Python cannot build, and on a cycle back into a
+hand-written layer whose @racket[layer-rebuild] has not returned. It also
+raises where an @racket[equal?]-based hash cannot be copied: a key that
+reaches its own table, a key that reaches a mutable @racket[equal?]-based
+hash whose own keys reach it (both can hang @racket[equal-hash-code]), and keys
+that copy to @racket[equal?] keys or were part-built when an immutable hash
+was copied. Only the values @racket[layer-copy] walks are checked; a key
+whose own @racket[equal?] or hash method, as a @racketmodname[racket/set] set
+has, reaches its table can hang the copy as it can hang the original.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -677,9 +692,24 @@ buffers and the tensors in its plain fields, is replaced by
 what each child becomes. @racket[layer-copy] passes a @racket[child] that
 copies each child the same way and a @racket[tensor] that copies each
 tensor, both remembering what they have done, so shared values stay
-shared. A @racket[child] that answers some children with other layers
-rebuilds the tree with those leaves replaced, the shape a wrapper over
-named layers takes.
+shared. Plain fields are rebuilt as @racket[layer-copy] copies them.
+
+A hand-written @racket[layer-rebuild] passes each child to its
+@racket[child], as @racket[(child name inner)], and returns a new layer. A
+call given @racket[layer-copy]'s @racket[child] joins that copy, so what it
+reaches is shared with the rest of it; a call given any other
+@racket[child] copies its own containers as @racket[layer-copy] does. One
+that calls a hand-written inner layer's method through a
+@racket[define/generic] instead copies that inner layer apart from the rest
+of the copy. The rebuild may see part-built copies of containers and
+@racket[define-layer] layers on a cycle. A child callback may be used by one
+thread a rebuild starts while the rebuild waits; a second thread at once, a
+use after @racket[layer-copy] returns, and any use after a rebuild raised or
+was killed raise @racket[exn:fail:contract], except a thread killed inside
+the copy's lock, which leaves the copy waiting. A @racket[child] that answers
+some children with other layers rebuilds the tree with those leaves replaced,
+and raises when two keys of one hash, of any comparison, are replaced by keys
+that comparison equates.
 
 @racket[define-layer] supplies the method. A hand-written layer that
 should be copyable defines it in its @racket[#:methods gen:layer] block,

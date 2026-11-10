@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            "../main.rkt"
            "../nn.rkt"
            (only-in (submod "../nn/recurrent.rkt" private)
@@ -163,7 +164,8 @@
     (define c (layer-copy l))
     (check-equal? (map requires-grad? (parameters c)) '(#f #t))
     (check-equal? (map dtype (parameters c)) '(float64 float64))
-    (check-false (has-grad? (cadr (parameters c))))
+    (match-define (list _ w) (parameters c))
+    (check-false (has-grad? w))
     (define net (Sequential (Linear 2 2) (Dropout)))
     (eval! (child-ref net "1"))
     (define copied (layer-copy net))
@@ -195,8 +197,8 @@
       (set! stash (box t))
       (set! fixed (ones 2))
       #:forward (x)
-      (+ x table (car pair) (vector-ref (cadr pair) 0)
-         (vector-ref (caddr pair) 0) (unbox stash) fixed))
+      (match-define (list plain (vector in-vector) (vector in-immutable)) pair)
+      (+ x table plain in-vector in-immutable (unbox stash) fixed))
     (define t (requires-grad! (ones 2)))
     (define h (holder t))
     (define c (layer-copy h))

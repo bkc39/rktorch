@@ -83,6 +83,23 @@
     (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)) t 0)))
     (check-exn exn:fail:contract? (lambda () (gather t 1 '(0 1)))))
 
+  (test-case "a non-tensor or float index names the whole index contract"
+    (define t (zeros 2 3))
+    (define ((expected name) e)
+      (regexp-match? (regexp (string-append "expected: " (regexp-quote name) "\n"))
+                     (exn-message e)))
+    (for ([bad (list '((0) (1)) (tensor '((0.0) (1.0))))])
+      (check-exn (expected "int64-index-within-input-shape") (lambda () (gather t 1 bad)))
+      (check-exn (expected "int64-tensor") (lambda () (take-along-dim t bad)))
+      (check-exn (expected "int64-tensor") (lambda () (take-along-dim t bad 1)))
+      (check-exn (expected "int64-index-of-matching-rank") (lambda () (scatter! t 1 bad 5))))
+    (for ([bad (list '(0) (tensor '(0.0)))])
+      (check-exn (expected "int64-index-vector") (lambda () (index-fill! t 0 bad 1)))
+      (check-exn (expected "int64-index-vector")
+                 (lambda () (index-copy! t 0 bad (zeros 1 3)))))
+    (check-exn #rx"indices of the input's rank when dim is given"
+               (lambda () (take-along-dim t (to-dtype (tensor '(0 1)) 'int64) 1))))
+
 
   (test-case "indexed writes: ref! sugar and the in-place family (#73)"
     (define (fresh) (tensor '((1.0 2.0 3.0) (4.0 5.0 6.0))))

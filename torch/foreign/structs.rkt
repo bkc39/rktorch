@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer)
+(require (only-in ffi/unsafe cpointer-has-tag? cpointer? prop:cpointer)
          (only-in ffi/vector
                   f32vector->list
                   f64vector->list
@@ -20,7 +20,6 @@
          (only-in "raw/fault.rkt" native-fault? note-native-fault! with-fault-handlers)
          (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
          (only-in "raw/race-points.rkt" race-point)
-         (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-data-f64/raw
@@ -208,7 +207,8 @@
 
 (define/checked-out (tensor? v) ;; noqa
   (-> any/c boolean?)
-  (and (tensor-impl? v) (Tensor? v)))
+  (define h (and (tensor-impl? v) (tensor-impl-handle v)))
+  (and h (cpointer? h) (cpointer-has-tag? h 'Tensor)))
 
 (define tensor-handle tensor-impl-handle)
 
