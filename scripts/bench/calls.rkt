@@ -58,7 +58,7 @@
                              [(ledger-entry-added) (when here? (count! tally-tensors))]
                              [(ledger-entry-added/batched)
                               (when here? (count! #:by -1 tally-tensors))]
-                             [(free-released finalizer-releasing) (frees! 1)]
+                             [(free-released finalizer-releasing generator-releasing) (frees! 1)]
                              [(frees-released/batched) (frees! (- 1 (length subject)))]
                              [else (void)]))
            (step-phases! p #:around (lambda (name thunk)

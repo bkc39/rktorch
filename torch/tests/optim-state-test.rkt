@@ -260,7 +260,7 @@
         (with-race-hook (lambda (name _subject)
                           (case (and (eq? (current-thread) here) name)
                             [(ledger-entry-added) (set! tensors (add1 tensors))]
-                            [(free-released finalizer-releasing)
+                            [(free-released finalizer-releasing generator-releasing)
                              (set! frees (add1 frees))]
                             [else (void)]))
           (thunk))))

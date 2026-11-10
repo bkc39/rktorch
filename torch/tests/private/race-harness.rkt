@@ -367,10 +367,18 @@
 (define (positive-entries totals)
   (filter (lambda (entry) (positive? (cdr entry))) totals))
 
-(define (counter-mismatches)
-  (define-values (counters fold)
+;; Reapers release on parallel threads, which atomic mode does not stop, so
+;; the counters must read the same on both sides of the fold.
+(define (counters-and-fold [tries 100])
+  (define-values (before fold after)
     (call-as-atomic
-     (lambda () (values (live-bytes-by-device) (native-memory-use/fold)))))
+     (lambda () (values (live-bytes-by-device) (native-memory-use/fold) (live-bytes-by-device)))))
+  (if (or (equal? before after) (= tries 1))
+      (values before fold)
+      (counters-and-fold (sub1 tries))))
+
+(define (counter-mismatches)
+  (define-values (counters fold) (counters-and-fold))
   (for/list ([dev (in-list (remove-duplicates (map car (append counters fold))))]
              #:unless (let ([live (dict-ref counters dev 0)])
                         (and (>= live 0) (= live (dict-ref fold dev 0)))))

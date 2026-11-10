@@ -113,9 +113,9 @@
       (match (locked c (lambda () (claim! c v)))
         [(cons 'done copy) copy]
         ['open
-         (raise-arguments-error (claims-who c)
-                                "a cycle re-enters a hand-written layer-rebuild before it returns"
-                                "layer" v)]
+         (raise-arguments-error
+          (claims-who c) "a cycle re-enters a hand-written layer-rebuild-method before it returns"
+          "layer" v)]
         ['claimed (with-claim c v (build))])))
 
 (define (copied c v default)

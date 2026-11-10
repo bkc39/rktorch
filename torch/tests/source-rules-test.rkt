@@ -6,11 +6,15 @@
            (only-in racket/match match)
            (only-in racket/path normalize-path)
            (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/string string-prefix?)
            rackunit)
 
   (define-runtime-path torch-dir "..")
   (define-runtime-path foreign-dir "../foreign")
+  (define-runtime-path runtime-dir "../runtime")
+  (define-runtime-path tests-dir ".")
   (define-runtime-path cas-module "../foreign/raw/cas.rkt")
+  (define-runtime-path reaper-module "../runtime/reaper.rkt")
 
   (define (modules-under dir)
     (find-files (lambda (p) (regexp-match? #rx"[.]rkt$" (path->string p))) dir))
@@ -39,16 +43,36 @@
     (equal? (normalize-path a) (normalize-path b)))
 
   (define foreign-modules (modules-under foreign-dir))
+  (define runtime-modules (modules-under runtime-dir))
+
+  (define (under? dir p)
+    (define prefix (path->string (path->directory-path (normalize-path dir))))
+    (string-prefix? (path->string (normalize-path p)) prefix))
+
+  (define library-modules
+    (filter (lambda (p) (not (under? tests-dir p))) (modules-under torch-dir)))
 
   (test-case "the scans read the checkout under test"
     (check-true (> (length foreign-modules) 20))
-    (check-true (for/or ([p (in-list foreign-modules)]) (same-file? p cas-module))))
+    (check-true (for/or ([p (in-list foreign-modules)]) (same-file? p cas-module)))
+    (check-true (for/or ([p (in-list runtime-modules)]) (same-file? p reaper-module)))
+    (check-true (> (length library-modules) (length foreign-modules))))
 
-  (test-case "no module under torch/foreign enters atomic mode"
+  (test-case "no module under torch/foreign or torch/runtime enters atomic mode"
     (check-no-symbols
      #px"(^|:)ffi/unsafe/alloc$|(call-as-atomic|start-atomic|end-atomic|start-breakable-atomic|end-breakable-atomic)$"
-     foreign-modules
+     (append foreign-modules runtime-modules)
      "enters atomic mode, or names a form that does"))
+
+  (test-case "L18: nothing under torch/foreign registers a finalizer"
+    (check-no-symbols #px"^register-finalizer$" foreign-modules
+                      "registers a finalizer instead of a reaper kind"))
+
+  (test-case "L18: only torch/runtime/reaper.rkt makes a guardian"
+    (check-no-symbols
+     #px"make-guardian"
+     (for/list ([p (in-list library-modules)] #:unless (same-file? p reaper-module)) p)
+     "makes a guardian outside the reapers"))
 
   (define cas-primitive #px"(box|box[*]|struct|struct[*]|vector|vector[*])-cas!$")
 
@@ -78,5 +102,5 @@
     (check-false (cites-an-issue? "(error 'f \"step; see #12\")"))
     (check-false (cites-an-issue? "(f \"a \\\"q\\\"; #3\")")))
 
-  (test-case "comments under torch/foreign cite no issue numbers"
-    (check-equal? (append-map issue-comments foreign-modules) '())))
+  (test-case "comments under torch/foreign and torch/runtime cite no issue numbers"
+    (check-equal? (append-map issue-comments (append foreign-modules runtime-modules)) '())))
