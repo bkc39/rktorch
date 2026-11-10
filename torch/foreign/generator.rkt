@@ -6,13 +6,15 @@
                   -> ->* ->i and/c flat-contract? flat-named-contract
                   integer-in or/c parameter/c)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "device-type.rkt" device-type device/c device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
                   default-device
                   device->type+index
                   tensor-device
+                  tensor-dtype
+                  tensor-shape
                   type+index->device)
          (only-in "raw/random.rkt"
                   current-generator/raw
@@ -20,6 +22,7 @@
                   tr-generator-new-on/raw
                   tr-tensor-normal!/raw
                   tr-tensor-uniform!/raw)
+         (only-in "raw/tensor.rkt" tr-tensor-copy-bytes/raw)
          (only-in "structs.rkt" tensor?))
 
 (provide generator?
@@ -63,6 +66,77 @@
        (device->type+index (or target (default-device))))
      (equal? (generator-device effective)
              (type+index->device type index))]))
+
+(define (host-bytes t n)
+  (define out (make-bytes n))
+  (define-values (rc _copied) (tr-tensor-copy-bytes/raw t n out))
+  (and (zero? rc) out))
+
+(define (byte-tensor-of? v n)
+  (and (tensor? v)
+       (= n (apply * (tensor-shape v)))
+       (eq? 'uint8 (tensor-dtype v))
+       (eq? 'cpu (device-type (tensor-device v)))))
+
+(define (state-bytes v n)
+  (and (byte-tensor-of? v n) (host-bytes v n)))
+
+(define (field bs start end signed?)
+  (integer-bytes->integer bs signed? #f start end))
+
+(define (cpu-rng-state? v)
+  (define bs (state-bytes v 5056))
+  (and bs
+       (<= 1 (field bs 8 12 #t) 624)
+       (not (zero? (field bs 12 16 #t)))
+       (<= (field bs 16 24 #f) 624)))
+
+(define (cuda-rng-state? v)
+  (define seed-only? (byte-tensor-of? v 8))
+  (define bs (and (not seed-only?) (state-bytes v 16)))
+  (cond
+    [seed-only? #t]
+    [bs (zero? (modulo (field bs 8 16 #f) 4))]
+    [else #f]))
+
+(define (mps-rng-state? v)
+  (byte-tensor-of? v 36))
+
+(define cpu-rng-state/c (flat-named-contract 'cpu-rng-state cpu-rng-state?))
+(define cuda-rng-state/c (flat-named-contract 'cuda-rng-state cuda-rng-state?))
+(define mps-rng-state/c (flat-named-contract 'mps-rng-state mps-rng-state?))
+
+(define (rng-state-of/c type)
+  (case type
+    [(cpu) cpu-rng-state/c]
+    [(cuda) cuda-rng-state/c]
+    [else mps-rng-state/c]))
+
+(define (designated-type device)
+  (define d (supplied-or device 'cpu))
+  (cond
+    [(device? d) (device-type d)]
+    [(pair? d) 'cuda]
+    [else d]))
+
+(define/contract-out (rng-state #:device [device 'cpu]) ;; noqa
+  (->* () (#:device device/c) tensor?)
+  (error 'unimplemented))
+
+(define/contract-out (set-rng-state! state #:device [device 'cpu]) ;; noqa
+  (->i ([state (device) (rng-state-of/c (designated-type device))])
+       (#:device [device device/c])
+       [result void?])
+  (error 'unimplemented))
+
+(define/contract-out (generator-state g) (-> generator? tensor?) ;; noqa
+  (error 'unimplemented))
+
+(define/contract-out (set-generator-state! g state) ;; noqa
+  (->i ([g generator?]
+        [state (g) (rng-state-of/c (device-type (generator-device g)))])
+       [result void?])
+  (error 'unimplemented))
 
 (define-syntax-parse-rule (define-fill! name:id raw:id first:id second:id
                                         second/c:expr)

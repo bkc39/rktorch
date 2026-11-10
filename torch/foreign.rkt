@@ -76,6 +76,10 @@
          randperm
          draw-seed
          current-generator
+         rng-state
+         set-rng-state!
+         generator-state
+         set-generator-state!
          seed/c
          size/c
          arange

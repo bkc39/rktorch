@@ -173,4 +173,26 @@ tr_tensor* tr_randperm(int64_t n, tr_generator* g) {
   });
 }
 
+tr_tensor* tr_generator_state(const tr_generator* /*g*/) {
+  torchrkt::set_error("tr_generator_state: unimplemented");
+  return nullptr;
+}
+
+int tr_generator_set_state(tr_generator* /*g*/, const tr_tensor* /*state*/) {
+  torchrkt::set_error("tr_generator_set_state: unimplemented");
+  return 1;
+}
+
+tr_tensor* tr_default_generator_state(tr_device_type /*type*/,
+                                      int64_t /*index*/) {
+  torchrkt::set_error("tr_default_generator_state: unimplemented");
+  return nullptr;
+}
+
+int tr_default_generator_set_state(tr_device_type /*type*/, int64_t /*index*/,
+                                   const tr_tensor* /*state*/) {
+  torchrkt::set_error("tr_default_generator_set_state: unimplemented");
+  return 1;
+}
+
 }  // extern "C"
