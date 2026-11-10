@@ -232,9 +232,9 @@ level deeper than before the call. A `#:pool 'own` thread left in that state
 never joins a collection, so every later collection waits on it forever; 9.3
 does not do this. Every catch that survives a fault therefore uses
 `with-fault-handlers`, which records the interrupt depth on entry and restores
-it before the handler runs: release counting and accounting in `memory.rkt`,
-the tensor printer, and the trainer's failure recovery in
-`train/private/dispatch.rkt`. On 9.3 the restore is a no-op.
+it before the handler runs: release counting and accounting in
+`torch/foreign/raw/memory.rkt`, the tensor printer, and the trainer's failure
+recovery in `torch/train/private/dispatch.rkt`. On 9.3 the restore is a no-op.
 
 ## Phantom-bytes accounting
 
