@@ -167,7 +167,10 @@
     (define samples (box 0))
     (define calls
       (parameterize ([allocator-reading (crossing (allocator-reading) samples)])
-        (op-calls kind run n on)))
+        (define once (run (input kind n on) (make-generator 1 #:device on)))
+        (once)
+        (set-box! samples 0)
+        (op-calls-of once)))
     (values calls (unbox samples)))
 
   (bounded-test "A1: the backstop's allocator samples are not the op's native calls"
@@ -176,6 +179,7 @@
       (for ([on (in-list devices)])
         (define-values (small small-samples) (sampled-op-calls kind run 2 on))
         (define-values (large large-samples) (sampled-op-calls kind run 8 on))
+        (check-true (> small-samples 0) (format "[~a]: no samples at 2" on))
         (check-true (> large-samples small-samples)
                     (format "[~a]: ~a samples at 2, ~a at 8"
                             on small-samples large-samples))
