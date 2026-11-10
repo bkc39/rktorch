@@ -142,7 +142,11 @@
     (check-true (andmap infinite?
                         (filled-with 'float32 (lambda (t) (normal! t 0 +inf.0)))))
     (check-true (andmap nan?
-                        (filled-with 'float32 (lambda (t) (normal! t +nan.0 1))))))
+                        (filled-with 'float32 (lambda (t) (normal! t +nan.0 1)))))
+    (check-true (for/and ([v (in-list (host (trunc-normal-init '(3) #:a 3.3e38
+                                                               #:b 3.4e38
+                                                               #:mean 0.0)))])
+                  (<= 3.29e38 v 3.41e38))))
 
   (bounded-test "G10: kaiming-uniform needs two dimensions and draws nothing for zero fan"
     (check-exn (blames-caller? caller) (lambda () (kaiming-uniform '(3))))

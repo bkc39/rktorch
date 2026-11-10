@@ -67,15 +67,24 @@
   (parameter/c (or/c generator? #f))
   current-generator/raw)
 
+(define (target-device target)
+  (define-values (type index) (device->type+index (or target (default-device))))
+  (type+index->device type index))
+
 (define (generator-on? generator target)
   (define effective (or generator (current-generator/raw)))
-  (cond
-    [(not effective) #t]
-    [else
-     (define-values (type index)
-       (device->type+index (or target (default-device))))
-     (equal? (generator-device effective)
-             (type+index->device type index))]))
+  (or (not effective)
+      (equal? (generator-device effective) (target-device target))))
+
+(define (check-generator-on! who generator target
+                             #:noun [noun "target"] #:label [label noun])
+  (unless (generator-on? generator target)
+    (raise-arguments-error
+     who
+     (string-append "contract violation;\n the generator lives on the " noun
+                    " device")
+     "generator device" (generator-device (or generator (current-generator/raw)))
+     (string-append label " device") (target-device target))))
 
 (define (host-bytes t n)
   (define out (make-bytes n))
@@ -170,11 +179,10 @@
      (and (tensor? t) (hash-has-key? float-dtype-max (tensor-dtype t))))))
 
 (define (uniform-range? dtype low high)
-  (error 'uniform-range? "not implemented"))
-
-(define (check-generator-on! who generator target
-                             #:noun [noun "target"] #:label [label noun])
-  (error 'check-generator-on! "not implemented"))
+  (define top (hash-ref float-dtype-max dtype #f))
+  (define lo (exact->inexact low))
+  (define hi (exact->inexact high))
+  (and top (<= (- top) lo hi top) (<= (- hi lo) top)))
 
 (define/contract-out (uniform! t [low 0.0] [high 1.0] ;; noqa
                                #:generator [generator #f])
@@ -188,7 +196,8 @@
        "low is at most high, both within the dtype's finite range and at most its largest value apart"
        (uniform-range? (tensor-dtype t) (supplied-or low 0.0) (supplied-or high 1.0))
        [result void?])
-  (check-ok (tr-tensor-uniform!/raw t (exact->inexact low) (exact->inexact high) #f)
+  (check-ok (tr-tensor-uniform!/raw t (exact->inexact low) (exact->inexact high)
+                                    generator)
             'uniform!)
   (void))
 
@@ -201,6 +210,7 @@
        #:pre/name (t generator) "the generator lives on the tensor's device"
        (generator-on? (supplied-or generator) (tensor-device t))
        [result void?])
-  (check-ok (tr-tensor-normal!/raw t (exact->inexact mean) (exact->inexact std) #f)
+  (check-ok (tr-tensor-normal!/raw t (exact->inexact mean) (exact->inexact std)
+                                   generator)
             'normal!)
   (void))

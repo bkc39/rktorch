@@ -79,8 +79,8 @@ with `backward!` outside the form as PyTorch recommends). From
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
-  `uniform!` and `normal!`, each with `#:generator`, #356); every constructor takes `#:device` / `#:dtype` chosen at
-  native construction (never construct-then-move), with one exception:
+  `uniform!` and `normal!`, each with `#:generator`, #356); every
+  constructor takes `#:device` / `#:dtype` chosen at native construction (never construct-then-move), with one exception:
   `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which
   no host vector type carries, is built and narrowed on the CPU and moved
   once, so an accelerator never holds the wide copy; `#:requires-grad?`

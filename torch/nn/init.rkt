@@ -68,8 +68,11 @@
        [result tensor?])
   (check-generator-on! 'kaiming-uniform generator #f)
   (define gain (sqrt (/ 2.0 (+ 1.0 (* a a)))))
-  (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
-  (uniform-draw dims (- bound) bound generator))
+  (cond
+    [(memv 0 dims) (apply zeros dims)]
+    [else
+     (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
+     (uniform-draw dims (- bound) bound generator)]))
 
 (define (uniform-bias n fan #:generator [generator #f])
   (check-generator-on! 'uniform-bias generator #f)
