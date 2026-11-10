@@ -51,9 +51,15 @@
 
 (define (within/switches-restored seconds thunk)
   (define saved (switch-values))
+  (define started (make-custodian))
   (dynamic-wind void
-                (lambda () (within seconds thunk))
-                (lambda () (set-switches! saved))))
+                (lambda ()
+                  (parameterize ([current-custodian started]
+                                 [current-subprocess-custodian-mode 'kill])
+                    (within seconds thunk)))
+                (lambda ()
+                  (custodian-shutdown-all started)
+                  (set-switches! saved))))
 
 (define-syntax-parse-rule (bounded-switches-test name:expr
                             (~optional (~seq #:seconds seconds:expr)

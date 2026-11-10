@@ -17,7 +17,8 @@
            (only-in "private/blame.rkt" arity-error-of? blames-caller?)
            (only-in "private/switches.rkt"
                     bounded-switches-test default-switches determinism-rows
-                    set-switches! switch-values within/switches-restored))
+                    set-switches! switch-values within/switches-restored)
+           (only-in "private/within.rkt" within))
 
   (check-equal? (switch-values) default-switches
                 "S0: libtorch's defaults, and no flag leaked from an earlier file")
@@ -203,4 +204,18 @@
                                                  (set-switches! all-on)
                                                  (sleep 5)))))
                   'no-result-in-time)
+    (check-equal? (switch-values) default-switches))
+
+  (bounded-switches-test "S8: nothing a timed-out body started writes a flag after the restore"
+    #:seconds 10
+    (check-equal? (refusal-of
+                   (lambda ()
+                     (within/switches-restored 0.5
+                                               (lambda ()
+                                                 (within 5
+                                                         (lambda ()
+                                                           (sleep 1)
+                                                           (set-switches! all-on)))))))
+                  'no-result-in-time)
+    (sleep 1.5)
     (check-equal? (switch-values) default-switches)))

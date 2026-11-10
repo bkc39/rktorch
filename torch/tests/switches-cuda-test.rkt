@@ -66,19 +66,50 @@
 
   (define-runtime-path main-module "../main.rkt")
 
-  (define warn-only-program
+  (define (warn-only-program on)
     `(begin
        (require (only-in (file ,(path->string main-module))
                          ~> adaptive-avg-pool2d backward! randn sum
                          use-deterministic-algorithms!))
        (define captured (open-output-string))
-       (use-deterministic-algorithms! #t #:warn-only? #t)
-       (parameterize ([current-error-port captured])
-         (~> (randn 1 2 5 5 #:device 'cuda #:requires-grad? #t)
-             (adaptive-avg-pool2d '(3 3))
-             sum
-             backward!))
-       (exit (if (string=? (get-output-string captured) "") 0 3))))
+       (define status
+         (with-handlers ([(lambda (_) #t)
+                          (lambda (e)
+                            (eprintf "~a\n" (if (exn? e) (exn-message e) e))
+                            4)])
+           (use-deterministic-algorithms! #t #:warn-only? #t)
+           (parameterize ([current-error-port captured])
+             (~> (randn 1 2 5 5 #:device ',on #:requires-grad? #t)
+                 (adaptive-avg-pool2d '(3 3))
+                 sum
+                 backward!))
+           (if (string=? (get-output-string captured) "") 0 3)))
+       (exit status)))
+
+  (define (warn-only-child on)
+    (define os-err (open-output-string))
+    (define status
+      (parameterize ([current-error-port os-err])
+        (system*/exit-code (find-exe) "-e" (format "~s" (warn-only-program on)))))
+    (values status (get-output-string os-err)))
+
+  (define (exit-meaning status)
+    (case status
+      [(0) "the backward ran and wrote nothing to current-error-port"]
+      [(3) "the warning reached current-error-port, not the process's standard error"]
+      [(4) "the program raised; its error is on stderr below"]
+      [else "racket failed outside the program's handler, e.g. in its require"]))
+
+  (define (child-report status err)
+    (format "exit ~a: ~a; stderr:\n~a" status (exit-meaning status) err))
+
+  (bounded-switches-test "C2: a child that raises reports its error to the parent"
+    #:seconds 120
+    (define-values (status err) (warn-only-child 'nowhere))
+    (define report (child-report status err))
+    (check-equal? status 4 report)
+    (check-regexp-match #rx"nowhere" report)
+    (check-regexp-match #rx"the program raised" report))
 
   (define warning
     #rx"adaptive_avg_pool2d_backward_cuda does not have a deterministic implementation")
@@ -115,15 +146,9 @@
 
     (bounded-switches-test "C2: warn-only's warning goes to the process's standard error"
       #:seconds 120
-      (define os-err (open-output-string))
-      (define status
-        (parameterize ([current-error-port os-err])
-          (system*/exit-code (find-exe) "-e" (format "~s" warn-only-program))))
-      (check-equal? status 0
-                    (format "~a; stderr:\n~a"
-                            "exit 3 means the warning reached current-error-port"
-                            (get-output-string os-err)))
-      (check-regexp-match warning (get-output-string os-err)))
+      (define-values (status err) (warn-only-child 'cuda))
+      (check-equal? status 0 (child-report status err))
+      (check-regexp-match warning err))
 
     (bounded-switches-test "C3: index-add! repeats bit for bit only under the switch"
       (check-true (< 1 (distinct-runs 20 (index-add-run)))

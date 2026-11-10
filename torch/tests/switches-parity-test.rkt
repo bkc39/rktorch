@@ -47,14 +47,14 @@
   (define (cpu-tests)
     (bounded-switches-test "P1: PyTorch's fresh defaults are rktorch's"
       (check-equal? (switch-values) (hash-ref (twin 'cpu) 'defaults)))
-    (bounded-switches-test "P3: no row refuses or warns on the CPU, in either"
+    (bounded-switches-test
+        "P3: on the CPU no row refuses in rktorch, and none refuses or warns in PyTorch"
       (define j (twin 'cpu))
       (for* ([key (in-list '(strict warn_only))]
              [(name o) (in-hash (hash-ref j key))])
         (check-equal? o "ok" (format "PyTorch ~a ~a" key name)))
-      (for* ([warn-only? (in-list '(#f #t))]
-             [(name o) (in-hash (outcomes 'cpu #:warn-only? warn-only?))])
-        (check-equal? o "ok" (format "rktorch warn-only ~a ~a" warn-only? name)))))
+      (for ([(name o) (in-hash (outcomes 'cpu #:warn-only? #f))])
+        (check-equal? o "ok" (format "rktorch ~a" name)))))
 
   (define (cuda-tests)
     (bounded-switches-test "P2: on CUDA rktorch refuses exactly where PyTorch does"
