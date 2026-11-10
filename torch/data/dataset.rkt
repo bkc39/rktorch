@@ -30,31 +30,33 @@
                               any)]
           [dataset-device (-> dataset? (or/c device? #f))]))
 
-(define index-tensor/c
-  (flat-named-contract
-   'non-empty-int64-vector
-   (lambda (v)
-     (and (tensor? v)
-          (eq? (dtype v) 'int64)
-          (= 1 (length (shape v)))
-          (positive? (car (shape v)))))))
+(define (index-tensor? v)
+  (and (tensor? v)
+       (eq? (dtype v) 'int64)
+       (= 1 (length (shape v)))
+       (positive? (car (shape v)))))
+
+(define index-tensor/c (flat-named-contract 'non-empty-int64-vector index-tensor?))
 (define/contract-out indices/c contract? ;; noqa
   (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
 (define/contract-out collate/c contract? ;; noqa
   (-> (non-empty-listof list?) any))
 
+(define (below? i n)
+  (and (exact-nonnegative-integer? i) (< i n)))
+
 (define (index-of/c ds)
   (define n (dataset-length ds))
-  (flat-named-contract 'index-below-length
-                       (lambda (i) (and (exact-nonnegative-integer? i) (< i n)))))
+  (flat-named-contract 'index-below-length (lambda (i) (below? i n))))
 
 ;; a list is checked against the length; a tensor's elements are not read
 (define (indices-of/c ds)
-  (define below? (index-of/c ds))
-  (or/c (flat-named-contract
-         'indices-below-length
-         (lambda (v) (and (list? v) (pair? v) (andmap below? v))))
-        index-tensor/c))
+  (define n (dataset-length ds))
+  (flat-named-contract
+   'indices-below-length-or-non-empty-int64-vector
+   (lambda (v)
+     (or (index-tensor? v)
+         (and (pair? v) (list? v) (for/and ([i (in-list v)]) (below? i n)))))))
 
 (define-generics dataset
   (dataset-length dataset)

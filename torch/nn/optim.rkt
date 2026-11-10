@@ -131,8 +131,11 @@
 (define (explicit? v)
   (and (not (unsupplied-arg? v)) v))
 
+(define floating-tensors/c (listof floating-tensor/c))
+(define tensors/c (listof tensor?))
+
 (define (fused-parameters/c fused?)
-  (if (explicit? fused?) (listof floating-tensor/c) (listof tensor?)))
+  (if (explicit? fused?) floating-tensors/c tensors/c))
 
 (begin-for-syntax
   (define-syntax-class hyperparameter

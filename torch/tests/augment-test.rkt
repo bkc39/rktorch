@@ -397,6 +397,11 @@
     (check-exn blames-this-test
                (lambda () (random-color-jitter x #:hue 0.6)))
     (check-exn blames-this-test (lambda () (adjust-hue x 0.7)))
+    (check-exn #rx"expected: per-sample-factor" (lambda () (adjust-hue x 0.7)))
+    (check-exn #rx"expected: per-sample-factor" (lambda () (adjust-brightness x -0.1)))
+    (check-exn #rx"expected: per-sample-mask-or-false"
+               (lambda () (resized-crop x (boxes-for x) 4 #:flip 'yes)))
+    (check-exn #rx"expected: rgb-float-image-batch" (lambda () (random-grayscale u8)))
     (check-exn blames-this-test
                (lambda () (multi-crop u8 (list (crop-view #:size 8)
                                                (crop-view #:size 6))
