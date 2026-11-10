@@ -34,7 +34,7 @@
   (define (index-add-run)
     (manual-seed! 0)
     (define src (randn (expt 2 20) #:device 'cuda))
-    (define idx (to-dtype (* (rand (expt 2 20) #:device 'cuda) 8) 'int64))
+    (define idx (~> (expt 2 20) (rand #:device 'cuda) (* 8) (to-dtype 'int64)))
     (lambda ()
       (define out (zeros 8 #:device 'cuda))
       (index-add! out 0 idx src)
@@ -44,9 +44,9 @@
     (manual-seed! 0)
     (define w (randn 8 16 #:device 'cuda #:requires-grad? #t))
     (define k (randn 4 1 3 3 #:device 'cuda #:requires-grad? #t))
-    (define idx (to-dtype (* (rand (expt 2 18) #:device 'cuda) 8) 'int64))
+    (define idx (~> (expt 2 18) (rand #:device 'cuda) (* 8) (to-dtype 'int64)))
     (define x (reshape (index-select w 0 idx) 1024 1 64 64))
-    (backward! (mean (conv2d x k)))
+    (~> (conv2d x k) mean backward!)
     (with-no-grad
       (sub! w (grad w) 0.1)
       (sub! k (grad k) 0.1))
@@ -56,7 +56,7 @@
     (manual-seed! 0)
     (define x (randn 1024 1 64 64 #:device 'cuda))
     (define k (randn 4 1 3 3 #:device 'cuda #:requires-grad? #t))
-    (backward! (mean (conv2d x k)))
+    (~> (conv2d x k) mean backward!)
     (bytes-of (grad k)))
 
   (define (matmul-run)
@@ -92,10 +92,11 @@
        (with-switches-restored
          (use-deterministic-algorithms! #t #:warn-only? #t)
          (define x-cpu (randn 1 2 5 5 #:requires-grad? #t))
-         (define x (~> x-cpu detach (to 'cuda) requires-grad!))
-         (pooled-backward! x)
+         (define x-cuda (~> x-cpu detach (to 'cuda) requires-grad!))
+         (pooled-backward! x-cuda)
          (pooled-backward! x-cpu)
-         (for ([g (in-list (host (grad x)))] [want (in-list (host (grad x-cpu)))])
+         (for ([g (in-list (host (grad x-cuda)))]
+               [want (in-list (host (grad x-cpu)))])
            (check-within g want 1e-6))))
 
      (bounded-test "C3: index-add! repeats bit for bit only under the switch"

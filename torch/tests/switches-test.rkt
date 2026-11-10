@@ -81,11 +81,10 @@
 
   (bounded-test "S4: a non-boolean blames the caller and writes nothing"
     (define blamed? (blames-caller? "switches-test.rkt"))
-    (define (arity-of? who)
-      (lambda (e)
-        (and (exn:fail:contract:arity? e)
-             (regexp-match? (regexp (string-append "^" (regexp-quote who) ": "))
-                            (exn-message e)))))
+    (define ((arity-of? who) e)
+      (and (exn:fail:contract:arity? e)
+           (regexp-match? (regexp (string-append "^" (regexp-quote who) ": "))
+                          (exn-message e))))
     (for ([(call refused?)
            (in-dict
             (list (cons (lambda () (use-deterministic-algorithms! 1)) blamed?)
@@ -117,12 +116,12 @@
               (with-switches-restored
                 (set-switches! all-on)
                 (define p (dynamic-place place-switches 'main))
-                (define seen (sync/timeout 100 p))
+                (define read-there (sync/timeout 100 p))
                 (place-channel-put p default-switches)
                 (define written (sync/timeout 100 p))
                 (define after (switch-values))
                 (place-kill p)
-                (check-equal? seen all-on "the place read main's write")
+                (check-equal? read-there all-on "the place read main's write")
                 (check-equal? written 'written)
                 (check-equal? after default-switches
                               "main read the place's write")))))

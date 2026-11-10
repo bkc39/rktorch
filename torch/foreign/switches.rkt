@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (for-syntax racket/base syntax/parse)
+(require (for-syntax racket/base syntax/parse/pre)
          (only-in racket/contract/base -> ->*)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -33,14 +33,14 @@
   (check-ok (tr-set-deterministic-algorithms/raw on? warn-only?)
             'use-deterministic-algorithms!))
 
-(define-flag deterministic-algorithms-enabled?
+(define-flag deterministic-algorithms-enabled? ;; noqa
   tr-get-deterministic-algorithms/raw)
 
-(define-flag deterministic-algorithms-warn-only?
+(define-flag deterministic-algorithms-warn-only? ;; noqa
   tr-get-deterministic-algorithms-warn-only/raw)
 
-(define-flag cudnn-deterministic? tr-get-cudnn-deterministic/raw
+(define-flag cudnn-deterministic? tr-get-cudnn-deterministic/raw ;; noqa
   set-cudnn-deterministic! tr-set-cudnn-deterministic/raw)
 
-(define-flag cudnn-benchmark? tr-get-cudnn-benchmark/raw
+(define-flag cudnn-benchmark? tr-get-cudnn-benchmark/raw ;; noqa
   set-cudnn-benchmark! tr-set-cudnn-benchmark/raw)

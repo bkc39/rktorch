@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (for-syntax racket/base syntax/parse)
+(require (for-syntax racket/base syntax/parse/pre)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../main.rkt"
                   * - ~> adaptive-avg-pool2d backward! conv2d embedding

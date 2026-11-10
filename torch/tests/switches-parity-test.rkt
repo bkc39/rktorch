@@ -54,12 +54,12 @@
        (check-equal? ours-at-start (as-hash (hash-ref (twin 'cpu) 'defaults))))
      (bounded-test "P3: no row refuses or warns on the CPU, in either"
        (define j (twin 'cpu))
-       (for ([key (in-list '(strict warn_only))])
-         (for ([(name o) (in-hash (hash-ref j key))])
-           (check-equal? o "ok" (format "PyTorch ~a ~a" key name))))
-       (for ([warn-only? (in-list '(#f #t))])
-         (for ([(name o) (in-hash (outcomes 'cpu #:warn-only? warn-only?))])
-           (check-equal? o "ok" (format "rktorch warn-only ~a ~a" warn-only? name)))))]
+       (for* ([key (in-list '(strict warn_only))]
+              [(name o) (in-hash (hash-ref j key))])
+         (check-equal? o "ok" (format "PyTorch ~a ~a" key name)))
+       (for* ([warn-only? (in-list '(#f #t))]
+              [(name o) (in-hash (outcomes 'cpu #:warn-only? warn-only?))])
+         (check-equal? o "ok" (format "rktorch warn-only ~a ~a" warn-only? name))))]
     [else
      (displayln "[switches-parity-test] skipped the CPU rows: needs python3 `torch`")])
 

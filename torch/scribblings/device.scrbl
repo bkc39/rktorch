@@ -189,7 +189,7 @@ Equivalent to @racket[(to t dtype)].
 @section[#:tag "determinism"]{Determinism}
 
 A seeded run replays bit for bit only if every kernel it runs is
-deterministic. On CUDA some are not: @racket[index-add!] and the backward of
+deterministic. On CUDA some are not: @racketidfont{index-add!} and the backward of
 @racket[index-select] add atomically in whatever order threads arrive, and
 cuDNN may pick convolution algorithms that do the same. These switches are
 PyTorch's. Each is a flag of libtorch's process-wide context, seen by every
@@ -214,7 +214,7 @@ matmul repeats bit for bit.
 @tt{torch.use_deterministic_algorithms}. While @racket[on?] holds, an op
 with a deterministic implementation uses it, and an op without one raises
 @racket[exn:fail] naming the kernel: on CUDA, the backwards of
-@racket[adaptive-avg-pool2d], @racket[ctc-loss], @racket[grid-sample] and
+@racketidfont{adaptive-avg-pool2d}, @racket[ctc-loss], @racket[grid-sample] and
 @racket[upsample-bicubic2d]. No op refuses on the CPU. With
 @racket[warn-only?] such an op runs anyway, and libtorch prints a warning to
 the process's standard error, not to @racket[current-error-port].
@@ -233,7 +233,7 @@ The two values @racket[use-deterministic-algorithms!] last stored:
 @deftogether[(@defproc[(cudnn-deterministic?) boolean?]
               @defproc[(set-cudnn-deterministic! [on? boolean?]) void?])]{
 @tt{torch.backends.cudnn.deterministic}: cuDNN picks only deterministic
-convolution algorithms. Every other op, @racket[index-add!] among them, is
+convolution algorithms. Every other op, @racketidfont{index-add!} among them, is
 left as it was. Without CUDA the flag is stored and changes nothing.}
 
 @deftogether[(@defproc[(cudnn-benchmark?) boolean?]
