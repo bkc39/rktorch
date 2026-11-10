@@ -3,7 +3,10 @@
 (module+ test
   (require (for-syntax racket/base (only-in syntax/parse/pre expr id))
            rackunit
+           (only-in racket/match match)
            (only-in racket/math infinite? nan?)
+           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/string string-prefix?)
            (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in "../main.rkt"
                     cpu-device cuda-available? cuda-device current-generator
@@ -49,7 +52,9 @@
           (init-row on "normal-init" (normal-init '(3 4)))
           (init-row on "trunc-normal-init" (trunc-normal-init '(64 32) #:std 0.02))
           (init-row on "trunc-normal-init's uniform branch"
-                    (trunc-normal-init '(64 32) #:std 0.02 #:a 0.03 #:b 0.05))))
+                    (trunc-normal-init '(64 32) #:std 0.02 #:a 0.03 #:b 0.05))
+          (init-row on "trunc-normal-init's redraws"
+                    (trunc-normal-init '(64 32) #:a -0.5 #:b 0.5))))
 
   (define (built on make-layer)
     (with-default-device on
@@ -125,6 +130,8 @@
             (lambda () (uniform-init '(3) -inf.0 0))
             (lambda () (uniform-init '(3) -2e38 2e38))
             (lambda () (kaiming-uniform '(2 2) #:a +nan.0))
+            (lambda () (kaiming-uniform '(2 2) #:a 1e200))
+            (lambda () (kaiming-uniform '(2 2) #:a -1e200))
             (lambda ()
               (trunc-normal-init '(3) #:a 3.3e38 #:b 3.5e38 #:mean 0.0))
             (lambda () (trunc-normal-init '(3) #:a +nan.0))
@@ -181,10 +188,45 @@
                                                                #:b 3.4e38
                                                                #:mean 0.0)))])
                   (<= 3.29e38 v 3.41e38)))
-    (for ([a (in-list (list +inf.0 -inf.0))])
+    (check-true (for/and ([v (in-list (host (kaiming-uniform '(2 2) #:a 1e150)))])
+                  (< (abs v) 1e-150)))
+    (check-equal? (host (trunc-normal-init '(4) #:a -1e300 #:b 1e300
+                                           #:generator (make-generator 3)))
+                  (host (normal-init '(4) #:generator (make-generator 3))))
+    (for ([a (in-list (list +inf.0 -inf.0 (expt 10 200)))])
       (check-equal? (host (kaiming-uniform '(2 2) #:a a #:generator (make-generator 1)))
                     '(-0.0 -0.0 -0.0 -0.0)
                     (format "kaiming-uniform #:a ~a" a))))
+
+  (define-runtime-path init-source "../nn/init.rkt")
+
+  (define (defined-on name)
+    (define header (format "(define-init (~a" name))
+    (with-input-from-file init-source
+      (lambda ()
+        (for/first ([line (in-lines)]
+                    [n (in-naturals 1)]
+                    #:when (string-prefix? line header))
+          n))))
+
+  (define (reported-on thunk)
+    (with-handlers ([exn:fail:contract?
+                     (lambda (e)
+                       (match (regexp-match #rx"at: [^\n]*init[.]rkt:([0-9]+):"
+                                            (exn-message e))
+                         [(list _ line) (string->number line)]
+                         [_ #f]))])
+      (thunk)
+      #f))
+
+  (bounded-test "G6e: a violation is located at its initializer's definition"
+    (define rows
+      (list (cons 'uniform-init (lambda () (uniform-init '(3) 1 0)))
+            (cons 'normal-init (lambda () (normal-init '(-1))))
+            (cons 'kaiming-uniform (lambda () (kaiming-uniform '(3))))
+            (cons 'trunc-normal-init (lambda () (trunc-normal-init '(3) #:a 1 #:b 0)))))
+    (for ([row (in-list rows)])
+      (check-equal? (reported-on (cdr row)) (defined-on (car row)) (format "~a" (car row)))))
 
   (bounded-test "uniform-bias draws as uniform-init does on its bound"
     (check-equal? (host (uniform-bias 4 9 #:generator (make-generator 7)))

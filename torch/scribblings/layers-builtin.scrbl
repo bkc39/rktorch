@@ -281,7 +281,10 @@ largest value apart.}
 
 @defproc[(kaiming-uniform [dims (and/c (listof exact-nonnegative-integer?)
                                        (λ (dims) (>= (length dims) 2)))]
-                          [#:a a (and/c real? (not/c nan?)) (sqrt 5.0)]
+                          [#:a a (and/c real? (not/c nan?)
+                                         (λ (a) (or (infinite? a)
+                                                    (not (infinite? (sqr a))))))
+                              (sqrt 5.0)]
                           [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 @tt{nn.init.kaiming_uniform_} with the bound PyTorch's @tt{nn.Linear} and

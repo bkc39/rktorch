@@ -60,7 +60,17 @@
      (list 'linear 14
            (init (lambda (g)
                    (parameterize ([current-generator g])
-                     (parameters (Linear 4 3))))))))
+                     (parameters (Linear 4 3))))))
+     (list 'trunc-redraw 15
+           (init (lambda (g)
+                   (list (trunc-normal-init '(64 32) #:a -0.5 #:b 0.5 #:generator g)))))
+     (list 'trunc-wide 16
+           (init (lambda (g)
+                   (list (trunc-normal-init '(4) #:a -1e300 #:b 1e300 #:generator g)))))
+     (list 'trunc-one-sided 17
+           (init (lambda (g)
+                   (list (trunc-normal-init '(64 32) #:a -1e300 #:b 0.5
+                                            #:generator g)))))))
 
   (define (ours on seed draw)
     (define g (make-generator seed #:device on))

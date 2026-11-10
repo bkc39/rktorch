@@ -46,4 +46,7 @@ print(json.dumps({
     "trunc-tail": case(13, lambda g: [init.trunc_normal_(empty(64, 32), std=0.02, a=0.03, b=0.05, generator=g)]),
     "linear": case(14, lambda g: [init.kaiming_uniform_(empty(3, 4), a=math.sqrt(5), generator=g),
                                    init.uniform_(empty(3), -bound, bound, generator=g)]),
+    "trunc-redraw": case(15, lambda g: [init.trunc_normal_(empty(64, 32), a=-0.5, b=0.5, generator=g)]),
+    "trunc-wide": case(16, lambda g: [init.trunc_normal_(empty(4), a=-1e300, b=1e300, generator=g)]),
+    "trunc-one-sided": case(17, lambda g: [init.trunc_normal_(empty(64, 32), a=-1e300, b=0.5, generator=g)]),
 }))

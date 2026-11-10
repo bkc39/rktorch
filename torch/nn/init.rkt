@@ -9,7 +9,7 @@
                   -> ->i and/c contract-out flat-contract-predicate
                   flat-named-contract listof)
          (only-in racket/match match-define)
-         (only-in racket/math nan? sqr)
+         (only-in racket/math infinite? nan? sqr)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
@@ -32,8 +32,11 @@
                        (lambda (d) (and (dims? d) (>= (length d) 2)))))
 
 (define slope/c
-  (flat-named-contract 'non-nan-real
-                       (lambda (a) (and (real? a) (not (nan? a))))))
+  (flat-named-contract 'slope
+                       (lambda (a)
+                         (and (real? a)
+                              (not (nan? a))
+                              (or (infinite? a) (~> a sqr infinite? not))))))
 
 (define (init-range? low high)
   (uniform-range? 'float32 low high))
@@ -71,6 +74,7 @@
                                             result)
                             body:expr ...+)
   #:with generator (format-id #'name "generator")
+  #:with contracted (syntax/loc #'name contracted)
   (begin
     (define contracted
       (let ()
@@ -135,9 +139,14 @@
 (define (any? mask)
   (~> mask sum item positive?))
 
+(define (float32 v)
+  (floating-point-bytes->real (real->floating-point-bytes v 4)))
+
 (define (redrawn-normal dims mean std a b generator)
+  (define lo (float32 a))
+  (define hi (float32 b))
   (let loop ([result (normal-draw dims mean std generator)])
-    (define outside (ne result (clamp result #:min a #:max b)))
+    (define outside (ne result (clamp result #:min lo #:max hi)))
     (cond
       [(any? outside)
        (loop (where outside (normal-draw dims mean std generator) result))]
