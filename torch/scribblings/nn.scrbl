@@ -697,12 +697,13 @@ remember what they have copied, so shared values stay shared. A call given
 @racket[layer-rebuild] has not returned joins that one when its
 @racket[child] and @racket[tensor] are @racket[equal-always?] to that one's,
 so contract wrappers and impersonators count as the same procedures; when
-it runs on the same thread; and unless a @racket[layer-copy] has started
-since. Any other call, a @racket[layer-copy] included, makes a copy of its
-own. Within one copy, a layer reached twice is rebuilt once, and a cycle
-back into a rebuild that has not returned raises @racket[exn:fail:contract],
-naming the layer, unless the cycle runs through @racket[define/generic]
-calls. The rebuild may see part-built copies of containers and
+it runs on the same thread; and unless it is made inside a
+@racket[layer-copy] that has not returned. Any other call, a
+@racket[layer-copy] included, makes a copy of its own. Within one copy, a
+layer reached twice is rebuilt once, and a cycle back into a rebuild that
+has not returned raises @racket[exn:fail:contract], naming the layer. A
+cycle made only of @racket[define/generic] calls on hand-written layers is
+never checked (see below). The rebuild may see part-built copies of containers and
 @racket[define-layer] layers on a cycle.
 
 A hand-written layer is rebuilt through the @racket[gen:layer] method

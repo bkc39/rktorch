@@ -220,7 +220,9 @@
     [(define (layer-forward self . _inputs) (list (fenced-a self) (fenced-b self)))
      (define (layer-rebuild-method self child tensor)
        (match-define (fenced a b run) self)
-       (fenced (layer-rebuild a child tensor) (run (lambda () (layer-rebuild b child tensor))) run))])
+       (fenced (layer-rebuild a child tensor)
+               (run (lambda () (layer-rebuild b child tensor)))
+               run))])
 
   (bounded-test "a nested direct rebuild behind a prompt joins the one it is inside"
     (define l (leaf 1))
@@ -245,6 +247,21 @@
     (match-define (outer a2 d2) (layer-rebuild (outer l (deleg l 'fixed)) keep values))
     (check-false (eq? (deleg-inner d2) a2))
     (check-false (eq? (deleg-inner d2) l)))
+
+  (struct after-copy (a y b)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (after-copy-a self))
+     (define (layer-rebuild-method self child tensor)
+       (match-define (after-copy a y b) self)
+       (define a2 (layer-rebuild a child tensor))
+       (define y2 (layer-copy y))
+       (after-copy a2 y2 (layer-rebuild b child tensor)))])
+
+  (bounded-test "a direct rebuild after a nested layer-copy returns joins again"
+    (define l (leaf 1))
+    (match-define (after-copy a2 _ b2) (layer-rebuild (after-copy l (leaf 2) l) keep values))
+    (check-eq? a2 b2)
+    (check-false (eq? a2 l)))
 
   (struct fallback (f)
     #:methods gen:layer

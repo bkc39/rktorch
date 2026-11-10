@@ -293,6 +293,12 @@
     (check-exn #rx"^layer-rebuild: a cycle re-enters [^\n]*\n  layer: #<procedure:deleg>"
                (lambda () (layer-rebuild d keep values))))
 
+  (memory-bounded-test "a cycle with one define/generic step still raises, naming the layer"
+    (define d (deleg #f 'plain))
+    (set-deleg-inner! d (deleg d 'generic))
+    (check-exn #rx"^layer-rebuild: a cycle re-enters [^\n]*\n  layer: #<procedure:deleg>"
+               (lambda () (layer-rebuild d keep values))))
+
   (memory-bounded-test "layers delegating with callbacks of their own raise, naming the layer"
     (define d (deleg #f 'fixed))
     (set-deleg-inner! d (deleg d 'fixed))
