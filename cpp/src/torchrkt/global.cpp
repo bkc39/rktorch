@@ -103,4 +103,34 @@ int tr_get_cudnn_benchmark(int* out) {
                    [](const at::Context& c) { return c.benchmarkCuDNN(); });
 }
 
+int tr_set_float32_matmul_precision(int precision) {
+  (void)precision;
+  return torchrkt::null_arg_status("tr_set_float32_matmul_precision");
+}
+
+int tr_get_float32_matmul_precision(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_float32_matmul_precision");
+}
+
+int tr_set_cuda_matmul_allow_tf32(int enabled) {
+  (void)enabled;
+  return torchrkt::null_arg_status("tr_set_cuda_matmul_allow_tf32");
+}
+
+int tr_get_cuda_matmul_allow_tf32(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_cuda_matmul_allow_tf32");
+}
+
+int tr_set_cudnn_allow_tf32(int enabled) {
+  (void)enabled;
+  return torchrkt::null_arg_status("tr_set_cudnn_allow_tf32");
+}
+
+int tr_get_cudnn_allow_tf32(int* out) {
+  (void)out;
+  return torchrkt::null_arg_status("tr_get_cudnn_allow_tf32");
+}
+
 }  // extern "C"

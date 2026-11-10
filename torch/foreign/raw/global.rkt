@@ -14,7 +14,13 @@
          tr-set-cudnn-deterministic/raw
          tr-get-cudnn-deterministic/raw
          tr-set-cudnn-benchmark/raw
-         tr-get-cudnn-benchmark/raw)
+         tr-get-cudnn-benchmark/raw
+         tr-set-float32-matmul-precision/raw
+         tr-get-float32-matmul-precision/raw
+         tr-set-cuda-matmul-allow-tf32/raw
+         tr-get-cuda-matmul-allow-tf32/raw
+         tr-set-cudnn-allow-tf32/raw
+         tr-get-cudnn-allow-tf32/raw)
 
 (define-torch tr-version/raw
   (_fun -> _string/utf-8)
@@ -63,3 +69,27 @@
 (define-torch tr-get-cudnn-benchmark/raw
   _flag-getter
   #:c-id tr_get_cudnn_benchmark)
+
+(define-torch tr-set-float32-matmul-precision/raw
+  (_fun (code : _int) -> _int)
+  #:c-id tr_set_float32_matmul_precision)
+
+(define-torch tr-get-float32-matmul-precision/raw
+  (_fun (out : (_ptr o _int)) -> (rc : _int) -> (values rc out))
+  #:c-id tr_get_float32_matmul_precision)
+
+(define-torch tr-set-cuda-matmul-allow-tf32/raw
+  _flag-setter
+  #:c-id tr_set_cuda_matmul_allow_tf32)
+
+(define-torch tr-get-cuda-matmul-allow-tf32/raw
+  _flag-getter
+  #:c-id tr_get_cuda_matmul_allow_tf32)
+
+(define-torch tr-set-cudnn-allow-tf32/raw
+  _flag-setter
+  #:c-id tr_set_cudnn_allow_tf32)
+
+(define-torch tr-get-cudnn-allow-tf32/raw
+  _flag-getter
+  #:c-id tr_get_cudnn_allow_tf32)

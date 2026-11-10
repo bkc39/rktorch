@@ -31,6 +31,12 @@ void torchrkt_c_api_compile_check(void) {
   int (*get_cudnn_deterministic)(int*) = tr_get_cudnn_deterministic;
   int (*set_cudnn_benchmark)(int) = tr_set_cudnn_benchmark;
   int (*get_cudnn_benchmark)(int*) = tr_get_cudnn_benchmark;
+  int (*set_float32_matmul_precision)(int) = tr_set_float32_matmul_precision;
+  int (*get_float32_matmul_precision)(int*) = tr_get_float32_matmul_precision;
+  int (*set_cuda_matmul_allow_tf32)(int) = tr_set_cuda_matmul_allow_tf32;
+  int (*get_cuda_matmul_allow_tf32)(int*) = tr_get_cuda_matmul_allow_tf32;
+  int (*set_cudnn_allow_tf32)(int) = tr_set_cudnn_allow_tf32;
+  int (*get_cudnn_allow_tf32)(int*) = tr_get_cudnn_allow_tf32;
   tr_tensor* (*randn)(const int64_t*, int64_t) = tr_randn;
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
   int (*numel)(const tr_tensor*, int64_t*) = tr_tensor_numel;
@@ -334,6 +340,12 @@ void torchrkt_c_api_compile_check(void) {
   (void)get_cudnn_deterministic;
   (void)set_cudnn_benchmark;
   (void)get_cudnn_benchmark;
+  (void)set_float32_matmul_precision;
+  (void)get_float32_matmul_precision;
+  (void)set_cuda_matmul_allow_tf32;
+  (void)get_cuda_matmul_allow_tf32;
+  (void)set_cudnn_allow_tf32;
+  (void)get_cudnn_allow_tf32;
   (void)randn;
   (void)tensor_free;
   (void)numel;

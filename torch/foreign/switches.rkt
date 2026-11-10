@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base syntax/parse/pre)
-         (only-in racket/contract/base -> ->*)
+         (only-in racket/contract/base -> ->* or/c)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "error.rkt" check-ok)
@@ -44,3 +44,27 @@
 
 (define-flag cudnn-benchmark? tr-get-cudnn-benchmark/raw ;; noqa
   set-cudnn-benchmark! tr-set-cudnn-benchmark/raw)
+
+(define/contract-out (set-float32-matmul-precision! precision) ;; noqa
+  (-> (or/c 'highest 'high 'medium) void?)
+  (error 'unimplemented))
+
+(define/contract-out (float32-matmul-precision) ;; noqa
+  (-> (or/c 'highest 'high 'medium))
+  (error 'unimplemented))
+
+(define/contract-out (cuda-matmul-allow-tf32?) ;; noqa
+  (-> boolean?)
+  (error 'unimplemented))
+
+(define/contract-out (set-cuda-matmul-allow-tf32! on?) ;; noqa
+  (-> boolean? void?)
+  (error 'unimplemented))
+
+(define/contract-out (cudnn-allow-tf32?) ;; noqa
+  (-> boolean?)
+  (error 'unimplemented))
+
+(define/contract-out (set-cudnn-allow-tf32! on?) ;; noqa
+  (-> boolean? void?)
+  (error 'unimplemented))

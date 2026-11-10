@@ -292,7 +292,7 @@ with `backward!` outside the form as PyTorch recommends). From
   autocast-dtype` (`torch/foreign/autocast.rkt` over
   `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
   grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
-- determinism switches, process-wide: `torch/foreign/switches.rkt` (#482)
+- determinism and precision switches, process-wide: `torch/foreign/switches.rkt` (#482, #483)
 
 **Name shadowing convention:** the 22 ops named like a `racket` export
 (`+ - * / < <= > >= abs argmax cos exp flatten length log max min sin sort

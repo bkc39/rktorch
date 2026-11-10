@@ -32,6 +32,19 @@ int tr_get_cudnn_deterministic(int* out);
 int tr_set_cudnn_benchmark(int enabled);
 int tr_get_cudnn_benchmark(int* out);
 
+/* TF32 and float32 matmul precision, flags of the same context. A precision
+ * code is 0 highest, 1 high, 2 medium, as at::Float32MatmulPrecision; the
+ * setter returns 1 on any other code and writes nothing. The precision getter
+ * returns 1 and leaves *out unwritten where libtorch refuses to answer:
+ * after tr_set_cuda_matmul_allow_tf32 has contradicted a high or medium
+ * precision. */
+int tr_set_float32_matmul_precision(int precision);
+int tr_get_float32_matmul_precision(int* out);
+int tr_set_cuda_matmul_allow_tf32(int enabled);
+int tr_get_cuda_matmul_allow_tf32(int* out);
+int tr_set_cudnn_allow_tf32(int enabled);
+int tr_get_cudnn_allow_tf32(int* out);
+
 #ifdef __cplusplus
 }
 #endif

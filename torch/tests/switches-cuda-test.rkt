@@ -3,17 +3,22 @@
 (module+ test
   (require rackunit
            (only-in compiler/find-exe find-exe)
+           (only-in racket/dict in-dict)
+           (only-in racket/list remove-duplicates)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/system system*/exit-code)
            (only-in "../main.rkt"
-                    * @ ~> adaptive-avg-pool2d backward! conv2d cuda-available?
+                    * - / @ ~> abs adaptive-avg-pool2d backward! conv2d cuda-available?
                     deterministic-algorithms-enabled? detach exn:fail:rktorch:oom?
-                    grad index-add! index-select manual-seed! mean rand randn
-                    requires-grad! reshape set-cudnn-benchmark! set-cudnn-deterministic! sub!
-                    sum to to-dtype use-deterministic-algorithms! with-no-grad zeros)
+                    grad index-add! index-select item manual-seed! max mean rand randn
+                    requires-grad! reshape set-cuda-matmul-allow-tf32!
+                    set-cudnn-allow-tf32! set-cudnn-benchmark! set-cudnn-deterministic!
+                    set-float32-matmul-precision! sub! sum to to-dtype
+                    use-deterministic-algorithms! with-no-grad zeros)
            (only-in "private/host.rkt" bytes-of distinct-runs host)
            (only-in "private/switches.rkt"
-                    bounded-switches-test default-switches switch-values))
+                    bounded-switches-test conv-witness default-switches distinct-values
+                    matmul-witness set-switches! switch-values tf32-hardware?))
 
   (check-equal? (switch-values) default-switches
                 "no flag leaked from an earlier file")
@@ -184,6 +189,100 @@
       (use-deterministic-algorithms! #t)
       (check-equal? (distinct-runs 10 matmul-run) 1)))
 
+  (define (matmul-tf32-settings)
+    (list (cons "'high" (lambda () (set-float32-matmul-precision! 'high)))
+          (cons "'medium" (lambda () (set-float32-matmul-precision! 'medium)))
+          (cons "(set-cuda-matmul-allow-tf32! #t)"
+                (lambda () (set-cuda-matmul-allow-tf32! #t)))))
+
+  (define (from-defaults setting! witness)
+    (set-switches! default-switches)
+    (setting!)
+    (distinct-values (witness 'cuda)))
+
+  (define (seeded-pair m k n)
+    (manual-seed! 0)
+    (values (randn m k #:device 'cuda) (randn k n #:device 'cuda)))
+
+  (define (worst-ratio a b)
+    (define a64 (to-dtype a 'float64))
+    (define b64 (to-dtype b 'float64))
+    (define e (abs (- (to-dtype (@ a b) 'float64) (@ a64 b64))))
+    (~> (/ e (@ (abs a64) (abs b64))) max item))
+
+  (define (under precision thunk)
+    (set-float32-matmul-precision! precision)
+    (thunk))
+
+  (define (precision-tests hardware)
+    (define tf32-on (if hardware '(1024.0) '(1024.25)))
+    (define conv-on (if hardware '(576.0) '(576.140625)))
+    (define tf32-half? (not (eq? hardware 'unknown)))
+
+    (bounded-switches-test "C7: a float32 matmul rounds to TF32 only when allowed"
+      #:seconds 120
+      (for ([cudnn-tf32? (in-list '(#t #f))])
+        (check-equal? (from-defaults (lambda () (set-cudnn-allow-tf32! cudnn-tf32?))
+                                     matmul-witness)
+                      '(1024.25)
+                      (format "'highest, cuDNN TF32 ~a" cudnn-tf32?)))
+      (when tf32-half?
+        (for ([(label setting!) (in-dict (matmul-tf32-settings))])
+          (check-equal? (from-defaults setting! matmul-witness) tf32-on
+                        (format "~a, tf32-hardware? ~a" label hardware)))))
+
+    (bounded-switches-test "C8: a cuDNN convolution follows cuDNN's flag, not the precision"
+      #:seconds 120
+      (check-equal? (from-defaults (lambda () (set-cudnn-allow-tf32! #f)) conv-witness)
+                    '(576.140625)
+                    "cuDNN TF32 off")
+      (check-equal? (from-defaults (lambda ()
+                                     (set-cudnn-allow-tf32! #f)
+                                     (set-float32-matmul-precision! 'high))
+                                   conv-witness)
+                    '(576.140625)
+                    "'high, cuDNN TF32 off")
+      (when tf32-half?
+        (check-equal? (from-defaults void conv-witness) conv-on
+                      (format "the defaults, tf32-hardware? ~a" hardware))
+        (check-equal? (from-defaults (lambda () (set-float32-matmul-precision! 'highest))
+                                     conv-witness)
+                      conv-on
+                      (format "'highest, cuDNN TF32 on, tf32-hardware? ~a" hardware))))
+
+    (bounded-switches-test "C9: the matmul's error stays within the precision's bound"
+      #:seconds 120
+      (define-values (a b) (seeded-pair 4096 2048 1024))
+      (define k 2048)
+      (define highest-ratio (under 'highest (lambda () (worst-ratio a b))))
+      (define high-ratio (under 'high (lambda () (worst-ratio a b))))
+      (check-true (<= highest-ratio (* k (expt 2.0 -23)))
+                  (format "'highest: max E/S is ~a" highest-ratio))
+      (check-true (<= high-ratio (+ (expt 2.0 -9) (* k (expt 2.0 -23))))
+                  (format "'high: max E/S is ~a" high-ratio))
+      (when (eq? hardware #t)
+        (check-not-equal? (under 'high (lambda () (bytes-of (@ a b))))
+                          (under 'highest (lambda () (bytes-of (@ a b))))
+                          "TF32 hardware: 'high changes the bytes")))
+
+    (bounded-switches-test "C10: on CUDA 'medium, 'high and the matmul flag are one setting"
+      #:seconds 120
+      (define-values (a b) (seeded-pair 4096 4096 4096))
+      (define (product setting!)
+        (set-switches! default-switches)
+        (setting!)
+        (bytes-of (@ a b)))
+      (define reads (map product (map cdr (matmul-tf32-settings))))
+      (check-equal? (remove-duplicates reads) (list (car reads))))
+
+    (bounded-switches-test "C11: under 'high a seeded matmul and its backward repeat"
+      #:seconds 120
+      (set-float32-matmul-precision! 'high)
+      (for ([on? (in-list '(#f #t))])
+        (use-deterministic-algorithms! on?)
+        (check-equal? (distinct-runs 10 matmul-run) 1
+                      (format "use-deterministic-algorithms! ~a" on?)))))
+
   (define cuda? (cuda-available?))
   (define cublas-config (getenv "CUBLAS_WORKSPACE_CONFIG"))
 
@@ -192,7 +291,9 @@
      (displayln "[switches-cuda-test] skipped: needs CUDA (run inside `nix develop .#cuda`)")]
     [cublas-config
      (cuda-tests)
+     (precision-tests (tf32-hardware?))
      (displayln "[switches-cuda-test] skipped C6: CUBLAS_WORKSPACE_CONFIG is set")]
     [else
      (cuda-tests)
+     (precision-tests (tf32-hardware?))
      (matmul-test)]))
