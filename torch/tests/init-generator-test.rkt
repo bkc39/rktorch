@@ -4,27 +4,24 @@
   (require (for-syntax racket/base (only-in syntax/parse/pre expr id))
            rackunit
            (only-in racket/math infinite? nan?)
-           (only-in racket/sequence sequence->list)
            (only-in syntax/parse/define define-syntax-parse-rule)
-           (only-in threading ~>)
            (only-in "../main.rkt"
                     cpu-device cuda-available? cuda-device current-generator
-                    generator-state in-flattened-tensor make-generator
-                    manual-seed! mps-available? mps-device normal! rng-state
-                    shape tensor->bytes to uniform! with-default-device zeros)
+                    generator-state make-generator manual-seed! mps-available?
+                    mps-device normal! rng-state shape tensor->bytes uniform!
+                    with-default-device zeros)
            (only-in "../nn.rkt"
                     Conv2d Linear kaiming-uniform normal-init parameters
                     trunc-normal-init uniform-init)
-           (only-in "private/blame.rkt" blames-caller?)
+           (only-in "../nn/init.rkt" uniform-bias)
+           (only-in "private/blame.rkt" blames-caller? contract-violation?)
+           (only-in "private/host.rkt" host)
            (only-in "private/within.rkt" bounded-test))
 
   (define devices
     (append (list (cpu-device))
             (if (cuda-available?) (list (cuda-device)) '())
             (if (mps-available?) (list (mps-device)) '())))
-
-  (define (host t)
-    (~> t (to 'cpu) in-flattened-tensor sequence->list))
 
   (define (filled on fill!)
     (define t (zeros 3 4 #:device on))
@@ -109,7 +106,7 @@
     (fill! t)
     (host t))
 
-  (bounded-test "G6: arguments libtorch refuses blame the caller"
+  (bounded-test "G6a: arguments PyTorch refuses blame the caller"
     (define refused
       (list (lambda () (uniform! (zeros 3 #:dtype 'int64)))
             (lambda () (uniform! (zeros 3 #:dtype 'uint8)))
@@ -123,12 +120,49 @@
             (lambda () (normal! (zeros 3) 0 -1))
             (lambda () (normal! (zeros 3) 0 +nan.0))
             (lambda () (uniform-init '(3) 1 0))
+            (lambda () (uniform-init '(3) +nan.0 0))
+            (lambda () (uniform-init '(3) 0 +nan.0))
+            (lambda () (uniform-init '(3) -inf.0 0))
+            (lambda () (uniform-init '(3) -2e38 2e38))
+            (lambda () (kaiming-uniform '(2 2) #:a +nan.0))
             (lambda ()
-              (trunc-normal-init '(3) #:a 3.3e38 #:b 3.5e38 #:mean 0.0))))
+              (trunc-normal-init '(3) #:a 3.3e38 #:b 3.5e38 #:mean 0.0))
+            (lambda () (trunc-normal-init '(3) #:a +nan.0))
+            (lambda () (trunc-normal-init '(3) #:b +nan.0))
+            (lambda () (trunc-normal-init '(3) #:a -inf.0 #:b -1e30))
+            (lambda () (trunc-normal-init '(3) #:a 1e30 #:b +inf.0))))
     (for ([thunk (in-list refused)] [k (in-naturals)])
       (check-exn (blames-caller? caller) thunk (format "refused row ~a" k))))
 
-  (bounded-test "G6: arguments libtorch accepts are accepted"
+  (bounded-test "G6c: bounds too far apart are named as such"
+    (define apart?
+      (contract-violation? (regexp caller)
+                           #rx"at most its largest value apart"))
+    (check-exn apart? (lambda () (uniform! (zeros 3) -2e38 2e38)))
+    (check-exn apart? (lambda () (uniform-init '(2) -2e38 2e38)))
+    (check-exn apart?
+               (lambda () (trunc-normal-init '(3) #:a -2e38 #:b 2e38 #:mean 1e39))))
+
+  (bounded-test "G6d: a violation names the operation"
+    (for ([row (in-list
+                (list (cons "uniform!" (lambda () (uniform! (zeros 3) 1 0)))
+                      (cons "normal!" (lambda () (normal! (zeros 3) 0 -1)))
+                      (cons "uniform-init" (lambda () (uniform-init '(3) 1 0)))
+                      (cons "normal-init" (lambda () (normal-init '(-1))))
+                      (cons "kaiming-uniform" (lambda () (kaiming-uniform '(3))))
+                      (cons "trunc-normal-init"
+                            (lambda () (trunc-normal-init '(3) #:a 1 #:b 0)))))])
+      (check-exn (regexp (string-append "^" (regexp-quote (car row))
+                                        ": contract violation"))
+                 (cdr row)
+                 (car row)))
+    (check-equal? (map object-name
+                       (list uniform! normal! uniform-init normal-init
+                             kaiming-uniform trunc-normal-init))
+                  '(uniform! normal! uniform-init normal-init kaiming-uniform
+                    trunc-normal-init)))
+
+  (bounded-test "G6b: arguments PyTorch accepts are accepted"
     (check-true (for/and ([v (in-list (filled-with 'float16
                                                    (lambda (t) (uniform! t 0 65504))))])
                   (<= 0 v 65504)))
@@ -146,7 +180,16 @@
     (check-true (for/and ([v (in-list (host (trunc-normal-init '(3) #:a 3.3e38
                                                                #:b 3.4e38
                                                                #:mean 0.0)))])
-                  (<= 3.29e38 v 3.41e38))))
+                  (<= 3.29e38 v 3.41e38)))
+    (for ([a (in-list (list +inf.0 -inf.0))])
+      (check-equal? (host (kaiming-uniform '(2 2) #:a a #:generator (make-generator 1)))
+                    '(-0.0 -0.0 -0.0 -0.0)
+                    (format "kaiming-uniform #:a ~a" a))))
+
+  (bounded-test "uniform-bias draws as uniform-init does on its bound"
+    (check-equal? (host (uniform-bias 4 9 #:generator (make-generator 7)))
+                  (host (uniform-init '(4) (/ -1.0 3.0) (/ 1.0 3.0)
+                                      #:generator (make-generator 7)))))
 
   (bounded-test "G10: kaiming-uniform needs two dimensions and draws nothing for zero fan"
     (check-exn (blames-caller? caller) (lambda () (kaiming-uniform '(3))))

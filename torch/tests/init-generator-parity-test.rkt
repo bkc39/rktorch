@@ -3,22 +3,17 @@
 (module+ test
   (require rackunit
            (only-in racket/match match-define)
-           (only-in racket/sequence sequence->list)
-           (only-in threading ~>)
            (only-in "../main.rkt"
-                    cuda-available? current-generator in-flattened-tensor
-                    make-generator normal! rand to uniform! with-default-device
-                    zeros)
+                    cuda-available? current-generator make-generator normal!
+                    rand uniform! with-default-device zeros)
            (only-in "../nn.rkt"
                     Linear kaiming-uniform normal-init parameters
                     trunc-normal-init uniform-init)
+           (only-in "private/host.rkt" host)
            (only-in "private/python-env.rkt"
                     call-with-python-env python-check python-cuda-available?
                     python-torch-available?)
            (only-in "private/within.rkt" bounded-test))
-
-  (define (host t)
-    (~> t (to 'cpu) in-flattened-tensor sequence->list))
 
   (define ((fill dims dtype fill!) on g)
     (define t (apply zeros dims #:device on #:dtype dtype))
