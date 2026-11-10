@@ -15,9 +15,10 @@
                   blend brightened column contrast-mean hue-turned luma
                   solarized)
          (only-in "private/contracts.rkt"
-                  batch-for/c crop-boxes/c default-ratio default-scale
-                  float-batch/c generator/c image-size/c jitter-strengths/c
-                  nonnegative/c per-sample-mask/c per-sample/c ratio/c
+                  batch-on-generator-device? crop-boxes/c default-ratio
+                  default-scale flip-mask/c float-batch/c generator/c
+                  image-size/c jitter-strengths/c nonnegative-real?
+                  nonnegative/c per-sample/c ratio/c
                   rgb-float-batch/c rgb-image-batch-u8-or-float/c rgb-triple/c
                   scale/c))
 
@@ -63,7 +64,7 @@
                                    #:flip [flip #f]
                                    #:padding-mode [padding-mode 'reflection])
   (->i ([x float-batch/c] [boxes (x) (crop-boxes/c x)] [size image-size/c])
-       (#:flip [flip (x) (or/c #f (per-sample-mask/c x))]
+       (#:flip [flip (x) (flip-mask/c x)]
         #:padding-mode [padding-mode padding-mode/c])
        [result tensor?])
   (match-define (list _ _ h w) (shape x))
@@ -77,22 +78,25 @@
            padding-mode))
 
 (define/contract-out (adjust-brightness x factor) ;; noqa
-  (->i ([x float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+  (->i ([x float-batch/c] [factor (x) (per-sample/c x nonnegative-real?)])
        [result tensor?])
   (brightened x (column x factor)))
 
 (define/contract-out (adjust-contrast x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative-real?)])
        [result tensor?])
   (blend x (contrast-mean x) (column x factor)))
 
 (define/contract-out (adjust-saturation x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative-real?)])
        [result tensor?])
   (blend x (luma x) (column x factor)))
 
+(define (hue-factor? v)
+  (and (real? v) (<= -0.5 v 0.5)))
+
 (define/contract-out (adjust-hue x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x (real-in -0.5 0.5))])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x hue-factor?)])
        [result tensor?])
   (hue-turned x (column x factor)))
 
@@ -111,13 +115,14 @@
                                          #:flip-p [flip-p 0.0]
                                          #:padding-mode [padding-mode 'reflection]
                                          #:generator [generator #f])
-  (->i ([x (generator) (batch-for/c float-batch/c generator)]
-        [size image-size/c])
+  (->i ([x float-batch/c] [size image-size/c])
        (#:scale [scale scale/c]
         #:ratio [ratio ratio/c]
         #:flip-p [flip-p (real-in 0 1)]
         #:padding-mode [padding-mode padding-mode/c]
         #:generator [generator generator/c])
+       #:pre/name (x generator) "a batch on the generator's device"
+       (batch-on-generator-device? x generator)
        [result tensor?])
   (match-define (list _ _ h w) (shape x))
   (match-define (list min-area max-area) scale)
@@ -140,13 +145,15 @@
                                           #:hue [h 0]
                                           #:p [p 1.0]
                                           #:generator [generator #f])
-  (->i ([x (generator) (batch-for/c rgb-float-batch/c generator)])
+  (->i ([x rgb-float-batch/c])
        (#:brightness [b nonnegative/c]
         #:contrast [c nonnegative/c]
         #:saturation [s nonnegative/c]
         #:hue [h (real-in 0 0.5)]
         #:p [p (real-in 0 1)]
         #:generator [generator generator/c])
+       #:pre/name (x generator) "a batch on the generator's device"
+       (batch-on-generator-device? x generator)
        [result tensor?])
   (cond
     [(zero? p) x]
@@ -166,8 +173,10 @@
          (hue-turned (column x fh)))]))
 
 (define/contract-out (random-grayscale x #:p [p 0.1] #:generator [generator #f]) ;; noqa
-  (->i ([x (generator) (batch-for/c rgb-float-batch/c generator)])
+  (->i ([x rgb-float-batch/c])
        (#:p [p (real-in 0 1)] #:generator [generator generator/c])
+       #:pre/name (x generator) "a batch on the generator's device"
+       (batch-on-generator-device? x generator)
        [result tensor?])
   (cond
     [(zero? p) x]
@@ -176,9 +185,10 @@
 (define/contract-out (random-solarize x threshold ;; noqa
                                       #:p [p 0.5]
                                       #:generator [generator #f])
-  (->i ([x (generator) (batch-for/c float-batch/c generator)]
-        [threshold real?])
+  (->i ([x float-batch/c] [threshold real?])
        (#:p [p (real-in 0 1)] #:generator [generator generator/c])
+       #:pre/name (x generator) "a batch on the generator's device"
+       (batch-on-generator-device? x generator)
        [result tensor?])
   (cond
     [(zero? p) x]
@@ -187,9 +197,10 @@
 
 (define view-call/c
   (->i ([view any/c]
-        [images (generator)
-                (batch-for/c rgb-image-batch-u8-or-float/c generator)])
+        [images rgb-image-batch-u8-or-float/c])
        (#:generator [generator generator/c])
+       #:pre/name (images generator) "a batch on the generator's device"
+       (batch-on-generator-device? images generator)
        [result tensor?]))
 
 (struct crop-spec (size run)
@@ -254,14 +265,15 @@
     (equal? size first)))
 
 (define/contract-out (multi-crop images globals locals #:generator [generator #f]) ;; noqa
-  (->i ([images (generator)
-                (batch-for/c rgb-image-batch-u8-or-float/c generator)]
+  (->i ([images rgb-image-batch-u8-or-float/c]
         [globals (non-empty-listof crop-view?)]
         [locals (listof crop-view?)])
        (#:generator [generator generator/c])
        #:pre/name (globals) "global views share one #:size" (one-size? globals)
        #:pre/name (locals) "local views share one #:size"
        (or (null? locals) (one-size? locals))
+       #:pre/name (images generator) "a batch on the generator's device"
+       (batch-on-generator-device? images generator)
        (values [global-views tensor?] [local-views (or/c #f tensor?)]))
   (define (group views)
     (for/list ([v (in-list views)])

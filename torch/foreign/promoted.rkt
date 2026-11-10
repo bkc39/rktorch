@@ -2,7 +2,7 @@
 
 (require (only-in racket/base [abs base:abs] [cos base:cos] [sin base:sin])
          (only-in racket/contract/base
-                  -> ->* ->i and/c listof none/c or/c unsupplied-arg? vectorof)
+                  -> ->* ->i none/c or/c unsupplied-arg?)
          (only-in racket/list
                   append* drop [flatten list-flatten] make-list
                   [take list-take])
@@ -42,8 +42,10 @@
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "contracts.rkt"
-                  bool-tensor/c compare/c flatten/c index-spec/c index-vector/c
-                  index/c int64-tensor/c unary-numeric/c unary-real/c)
+                  bool-tensor/c compare/c flatten/c gather-index/c index-spec/c
+                  index-vector/c index/c int64-tensor/c same-rank-index/c
+                  same-rank? take-index/c tensor-or-real/c tensors/c
+                  unary-numeric/c unary-real/c)
          (only-in "creation-ops.rkt" tensor)
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
@@ -169,11 +171,7 @@
 
 (define/contract-out (take v n)
   (->i ([v (or/c tensor? list?)]
-        [n (v) (if (tensor? v)
-                   (or/c int64-tensor/c
-                         (listof exact-integer?)
-                         (vectorof exact-integer?))
-                   exact-nonnegative-integer?)])
+        [n (v) (if (tensor? v) take-index/c exact-nonnegative-integer?)])
        [result (v) (if (tensor? v) tensor? list?)])
   (cond
     [(not (tensor? v)) (list-take v n)]
@@ -198,44 +196,25 @@
 (define/contract-out (gather t dim index) ;; noqa
   (->i ([t tensor?]
         [dim index/c]
-        [index (t dim)
-               (and/c int64-tensor/c
-                      (lambda (x)
-                        (define td (tensor-shape t))
-                        (define xd (tensor-shape x))
-                        (define rank (length td))
-                        (define g (if (negative? dim) (+ dim rank) dim))
-                        (and (= (length xd) rank)
-                             ;; ATen skips extent checks for empty
-                             ;; indices (verified)
-                             (or (zero? (apply * xd))
-                                 (for/and ([xi (in-list xd)]
-                                           [ti (in-list td)]
-                                           [i (in-naturals)])
-                                   (or (= i g) (<= xi ti)))))))])
+        [index (t dim) (gather-index/c t dim)])
        [result tensor?])
   (g:gather t dim index #f))
 
 (define/contract-out (take-along-dim t indices [dim #f]) ;; noqa
-  (->i ([t tensor?]
-        [indices (t dim)
-                 (and/c int64-tensor/c
-                        (lambda (x)
-                          (or (unsupplied-arg? dim)
-                              (not dim)
-                              (= (length (tensor-shape x))
-                                 (length (tensor-shape t))))))])
+  (->i ([t tensor?] [indices int64-tensor/c])
        ([dim (or/c #f index/c)])
+       #:pre/name (t indices dim) "indices of the input's rank when dim is given"
+       (or (unsupplied-arg? dim) (not dim) (same-rank? t indices))
        [result tensor?])
   (g:take-along-dim t indices dim))
 
 (define/contract-out where
   (->i ([c bool-tensor/c])
-       ([a (or/c tensor? real?)]
-        [b (a) (if (unsupplied-arg? a) none/c (or/c tensor? real?))])
+       ([a tensor-or-real/c]
+        [b (a) (if (unsupplied-arg? a) none/c tensor-or-real/c)])
        #:pre/name (a b) "a condition alone, or condition + both arms"
        (eq? (unsupplied-arg? a) (unsupplied-arg? b))
-       [result (a) (if (unsupplied-arg? a) (listof tensor?) tensor?)])
+       [result (a) (if (unsupplied-arg? a) tensors/c tensor?)])
   (case-lambda
     [(mask)
      (cond
@@ -297,11 +276,6 @@
             (not (double-roundtrips? v)))
        (g:index-fill-int-tensor! t dim index (scalar->value-tensor v t))
        (g:index-fill-int-scalar! t dim index (exact->inexact v)))))
-
-(define (same-rank-index/c t)
-  (and/c int64-tensor/c
-         (lambda (x)
-           (= (length (tensor-shape x)) (length (tensor-shape t))))))
 
 (define/contract-out (scatter! t dim index v) ;; noqa
   (->i ([t tensor?]
