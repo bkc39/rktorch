@@ -4,6 +4,7 @@
 #include <torch/torch.h>
 
 #include <exception>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -173,26 +174,58 @@ tr_tensor* tr_randperm(int64_t n, tr_generator* g) {
   });
 }
 
-tr_tensor* tr_generator_state(const tr_generator* /*g*/) {
-  torchrkt::set_error("tr_generator_state: unimplemented");
-  return nullptr;
+namespace {
+
+torch::Tensor state_of(at::Generator gen) {
+  const std::lock_guard<std::mutex> lock(gen.mutex());
+  return gen.get_state();
 }
 
-int tr_generator_set_state(tr_generator* /*g*/, const tr_tensor* /*state*/) {
-  torchrkt::set_error("tr_generator_set_state: unimplemented");
-  return 1;
+// libtorch 2.14's CPU set_state reads from the start of the storage, so a
+// valid state seen through a view at an offset is rejected: hand it a copy.
+void set_state_of(at::Generator gen, const torch::Tensor& state) {
+  const torch::Tensor copy = state.contiguous().clone();
+  const std::lock_guard<std::mutex> lock(gen.mutex());
+  gen.set_state(copy);
 }
 
-tr_tensor* tr_default_generator_state(tr_device_type /*type*/,
-                                      int64_t /*index*/) {
-  torchrkt::set_error("tr_default_generator_state: unimplemented");
-  return nullptr;
+at::Generator default_generator(tr_device_type type, int64_t index) {
+  return at::globalContext().defaultGenerator(
+      torchrkt::to_torch_device(type, index));
 }
 
-int tr_default_generator_set_state(tr_device_type /*type*/, int64_t /*index*/,
-                                   const tr_tensor* /*state*/) {
-  torchrkt::set_error("tr_default_generator_set_state: unimplemented");
-  return 1;
+}  // namespace
+
+tr_tensor* tr_generator_state(const tr_generator* g) {
+  if (!g) {
+    return torchrkt::null_arg("tr_generator_state");
+  }
+  return torchrkt::alloc_result("tr_generator_state",
+                                [&] { return state_of(g->value); });
+}
+
+int tr_generator_set_state(tr_generator* g, const tr_tensor* state) {
+  if (!g || !state) {
+    return torchrkt::null_arg_status("tr_generator_set_state");
+  }
+  return torchrkt::status_call("tr_generator_set_state",
+                               [&] { set_state_of(g->value, state->value); });
+}
+
+tr_tensor* tr_default_generator_state(tr_device_type type, int64_t index) {
+  return torchrkt::alloc_result("tr_default_generator_state", [&] {
+    return state_of(default_generator(type, index));
+  });
+}
+
+int tr_default_generator_set_state(tr_device_type type, int64_t index,
+                                   const tr_tensor* state) {
+  if (!state) {
+    return torchrkt::null_arg_status("tr_default_generator_set_state");
+  }
+  return torchrkt::status_call("tr_default_generator_set_state", [&] {
+    set_state_of(default_generator(type, index), state->value);
+  });
 }
 
 }  // extern "C"

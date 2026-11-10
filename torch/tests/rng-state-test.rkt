@@ -10,9 +10,10 @@
                     cuda-device-count current-generator device device-type
                     draw-seed dtype generator-state in-flattened-tensor
                     make-generator manual-seed! mps-available? mps-device
-                    narrow normal! rand randn randperm reshape rng-state
+                    narrow rand randn randperm reshape rng-state
                     set-generator-state! set-rng-state! shape tensor
                     tensor->bytes to uniform! zero! zeros)
+           (only-in "../foreign/generator.rkt" normal!)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/within.rkt" bounded-test))

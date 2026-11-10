@@ -18,12 +18,16 @@
                   type+index->device)
          (only-in "raw/random.rkt"
                   current-generator/raw
+                  tr-default-generator-set-state!/raw
+                  tr-default-generator-state/raw
                   tr-generator-device/raw
                   tr-generator-new-on/raw
+                  tr-generator-set-state!/raw
+                  tr-generator-state/raw
                   tr-tensor-normal!/raw
                   tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt" tr-tensor-copy-bytes/raw)
-         (only-in "structs.rkt" tensor?))
+         (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide generator?
          generator-on?)
@@ -119,24 +123,32 @@
     [(pair? d) 'cuda]
     [else d]))
 
+(define (state-tensor who handle)
+  (wrap-tensor (check-handle who handle)))
+
 (define/contract-out (rng-state #:device [device 'cpu]) ;; noqa
   (->* () (#:device device/c) tensor?)
-  (error 'unimplemented))
+  (define-values (type index) (device->type+index device))
+  (state-tensor 'rng-state (tr-default-generator-state/raw type index)))
 
 (define/contract-out (set-rng-state! state #:device [device 'cpu]) ;; noqa
   (->i ([state (device) (rng-state-of/c (designated-type device))])
        (#:device [device device/c])
        [result void?])
-  (error 'unimplemented))
+  (define-values (type index) (device->type+index device))
+  (check-ok (tr-default-generator-set-state!/raw type index state)
+            'set-rng-state!)
+  (void))
 
 (define/contract-out (generator-state g) (-> generator? tensor?) ;; noqa
-  (error 'unimplemented))
+  (state-tensor 'generator-state (tr-generator-state/raw g)))
 
 (define/contract-out (set-generator-state! g state) ;; noqa
   (->i ([g generator?]
         [state (g) (rng-state-of/c (device-type (generator-device g)))])
        [result void?])
-  (error 'unimplemented))
+  (check-ok (tr-generator-set-state!/raw g state) 'set-generator-state!)
+  (void))
 
 (define-syntax-parse-rule (define-fill! name:id raw:id first:id second:id
                                         second/c:expr)
