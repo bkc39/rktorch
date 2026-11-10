@@ -1,18 +1,21 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->* <=/c >=/c and/c or/c)
+(require (only-in racket/contract/base ->* <=/c >=/c and/c flat-contract-predicate or/c)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   * / < current-generator device dtype generator? generator-device
                   rand-like tensor? to-dtype)
          (only-in "../foreign/generator.rkt" generator-on?)
+         (only-in "../foreign/ops.rkt" any-float-dtype/c)
          (prefix-in g: (only-in "../generated.rkt" dropout))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" define-layer training? with-mode))
 
 (define default-p 0.5)
 
-(define float-dtypes '(float16 bfloat16 float32 float64))
+(define probability/c (and/c real? (>=/c 0) (<=/c 1)))
+
+(define float-dtype? (flat-contract-predicate any-float-dtype/c))
 
 (define (draw-dtype type)
   (if (memq type '(float16 bfloat16)) 'float32 type))
@@ -25,7 +28,7 @@
      (raise-arguments-error who "contract violation; the generator lives on the tensor's device"
                             "generator device" (generator-device source)
                             "tensor device" (device x))]
-    [(not (memq (dtype x) float-dtypes))
+    [(not (float-dtype? (dtype x)))
      (raise-argument-error who "a floating-point tensor when drawing from a generator" x)]
     [else (void)]))
 
@@ -47,7 +50,7 @@
 
 (define/contract-out dropout ;; noqa
   (->* [tensor?]
-       [#:p (and/c real? (>=/c 0) (<=/c 1))
+       [#:p probability/c
         #:training? boolean?
         #:generator (or/c generator? #f)]
        tensor?)
@@ -55,7 +58,7 @@
     (drop 'dropout x p training? generator)))
 
 (define-layer Dropout (p) ;; noqa
-  #:contract (->* [] [#:p (and/c real? (>=/c 0) (<=/c 1))] dropout?)
+  #:contract (->* [] [#:p probability/c] dropout?)
   #:init (#:p [p default-p])
   #:forward (x #:generator [generator #f])
   (with-mode (drop 'Dropout x p (training? mode) generator)))

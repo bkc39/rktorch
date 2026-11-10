@@ -94,7 +94,7 @@ updated in place.
 
 @racketblock[
 (define-layer Dropout (p)
-  #:contract (->* [] [#:p (and/c real? (>=/c 0) (<=/c 1))] dropout?)
+  #:contract (->* [] [#:p probability/c] dropout?)
   #:init (#:p [p default-p])
   #:forward (x #:generator [generator #f])
   (with-mode (drop 'Dropout x p (training? mode) generator)))
