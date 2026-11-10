@@ -21,7 +21,7 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
-         layer-rebuild ;; noqa
+         layer-rebuild-alone
          layer-rebuild-in
          prop:on-move
          prop:rebuilder
@@ -38,7 +38,7 @@
   (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
-  (layer-rebuild layer child tensor)
+  (layer-rebuild-method layer child tensor)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
   #:derive-property prop:procedure
   (make-keyword-procedure
@@ -53,10 +53,10 @@
    (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
    (define (layer-set-mode! self mode) (void)) ;; noqa
-   (define (layer-rebuild self child tensor) ;; noqa
+   (define (layer-rebuild-method self child tensor) ;; noqa
      (raise-arguments-error
       'layer-copy
-      "a hand-written gen:layer has no layer-rebuild method to copy it with"
+      "a hand-written gen:layer has no layer-rebuild-method to copy it with"
       "layer" self))])
 
 ;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes",
@@ -209,20 +209,55 @@
        (child-set-mode! c mode)))
    (define (layer-mode self)
      (registry-mode self))
-   (define (layer-rebuild self child tensor)
+   (define (layer-rebuild-method self child tensor)
      (layer-rebuild-in self child tensor))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
 
-(define (layer-rebuild-in m child tensor
-                          #:memo [seen (and (remembering? child) (remembering-seen child))])
+(struct direct-rebuild (child tensor memo))
+
+(define direct-rebuilds (make-continuation-mark-key 'layer-rebuild))
+
+(define rebuild-prompt (make-continuation-prompt-tag 'layer-rebuild))
+
+(define (enclosing-rebuilds)
+  (if (continuation-prompt-available? rebuild-prompt)
+      (continuation-mark-set-first #f direct-rebuilds '() rebuild-prompt)
+      '()))
+
+(define (call-with-direct-rebuilds rs thunk)
+  (call-with-continuation-prompt
+   (lambda () (with-continuation-mark direct-rebuilds rs (thunk)))
+   rebuild-prompt))
+
+(define (callbacks-equal? r child tensor)
+  (and (equal-always? child (direct-rebuild-child r))
+       (equal-always? tensor (direct-rebuild-tensor r))))
+
+(define (joined-memo child tensor enclosing)
+  (for/first ([r (in-list enclosing)]
+              #:when (callbacks-equal? r child tensor))
+    (direct-rebuild-memo r)))
+
+(define (layer-rebuild-in m child tensor)
+  (define enclosing (enclosing-rebuilds))
+  (define joined (and (not (remembering? child)) (joined-memo child tensor enclosing)))
   (cond
-    [(not seen)
+    [(remembering? child) (rebuilt m child tensor (remembering-seen child))]
+    [joined (rebuilt m child tensor joined)]
+    [else
      (with-memo (fresh 'layer-rebuild)
-       (layer-rebuild-in m child tensor #:memo fresh))]
-    [(rebuilder? m) ((rebuilder-of m) m child tensor seen)]
-    [else (remembered seen m (lambda () (layer-rebuild m child tensor)))]))
+       (call-with-direct-rebuilds (cons (direct-rebuild child tensor fresh) enclosing)
+         (lambda () (rebuilt m child tensor fresh))))]))
+
+(define (layer-rebuild-alone m child tensor)
+  (call-with-direct-rebuilds '() (lambda () (layer-rebuild-in m child tensor))))
+
+(define (rebuilt m child tensor seen)
+  (if (rebuilder? m)
+      ((rebuilder-of m) m child tensor seen)
+      (remembered seen m (lambda () (layer-rebuild-method m child tensor)))))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

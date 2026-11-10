@@ -469,7 +469,9 @@
             (collect-garbage (if (positive? minors) 'minor 'major))
             (sleep 0.01)
             (collect (sub1 minors))))
-        (join holder))
+        ;; A reaper releases on its own thread, so the return can trail the join.
+        (begin0 (join holder)
+                (spin-until returned 10000)))
       (define saw-finalizer?
         (with-race-hook stage
           (call-with-process-deadline deadline gradient-finalized-against-holder)))
