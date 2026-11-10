@@ -4,6 +4,9 @@
   (require rackunit
            (only-in racket/contract/base contract-name value-contract)
            (only-in racket/list make-list)
+           (only-in racket/match match)
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in scribble/reader read-inside)
            (only-in threading ~>)
            (prefix-in g: (only-in "../generated.rkt" dropout))
            (only-in "../main.rkt"
@@ -184,13 +187,19 @@
                    ((Dropout) 5))))
     (check-exn (raised-by 'Dropout #rx"tensor") (lambda () ((Dropout) 5))))
 
+  (define-runtime-path nn-scrbl "../scribblings/nn.scrbl")
+
+  (define (dropout-example form)
+    (match form
+      [(list 'racketblock (and example (list 'define-layer 'Dropout _ ...))) example]
+      [(cons head tail) (or (dropout-example head) (dropout-example tail))]
+      [_ #f]))
+
   (bounded-test "the define-layer example in the manual draws the library's mask"
     (define example
-      '(define-layer Dropout (p)
-         #:contract (->* [] [#:p (and/c real? (>=/c 0) (<=/c 1))] dropout?)
-         #:init (#:p [p 0.5])
-         #:forward (x #:generator [generator #f])
-         (with-mode (dropout x #:p p #:training? (training? mode) #:generator generator))))
+      (dropout-example
+       (call-with-input-file nn-scrbl (lambda (in) (read-line in 'any) (read-inside in)))))
+    (check-not-false example "nn.scrbl has the define-layer Dropout example")
     (with-fresh-eval (ev #:time-limit 120)
       (ev `(module example racket/base
              (require racket/contract torch torch/nn)
