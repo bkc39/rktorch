@@ -43,8 +43,8 @@
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "contracts.rkt"
-                  bool-tensor/c compare/c flatten/c gather-index/c index-spec/c
-                  index-vector/c index/c int64-tensor/c same-rank-index/c
+                  bool-tensor/c compare/c extremum/c flatten/c gather-index/c
+                  index-spec/c index-vector/c index/c int64-tensor/c same-rank-index/c
                   same-rank? take-index/c tensor-or-real/c tensors/c
                   unary-numeric/c unary-real/c)
          (only-in "creation-ops.rkt" tensor)
@@ -68,7 +68,6 @@
   g:masked-select)
 (define/contract-out nonzero (-> tensor? tensor?) g:nonzero) ;; noqa
 
-(define extremum/c (-> tensor? tensor? tensor?))
 (define/contract-out maximum extremum/c g:maximum) ;; noqa
 (define/contract-out minimum extremum/c g:minimum) ;; noqa
 

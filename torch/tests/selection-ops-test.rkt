@@ -3,7 +3,8 @@
 (module+ test
   (require rackunit
            (only-in "../generated.rkt" index-tensor)
-           "../main.rkt")
+           "../main.rkt"
+           (only-in "private/blame.rkt" blames-caller?))
 
   (test-case "selection family: take/gather/take-along-dim/where (#73)"
     (define t (reshape (arange 6) 2 3))
@@ -100,6 +101,13 @@
     (check-exn #rx"indices of the input's rank when dim is given"
                (lambda () (take-along-dim t (to-dtype (tensor '(0 1)) 'int64) 1))))
 
+  (test-case "maximum and minimum blame a caller who passes a real"
+    (for* ([extremum (in-list (list maximum minimum))]
+           [operands (in-list (list (list (tensor '(1.0 2.0)) 1.5)
+                                    (list 1.5 (tensor '(1.0 2.0)))))])
+      (check-exn (blames-caller? "selection-ops-test")
+                 (lambda () (apply extremum operands))
+                 (format "~a ~s" (object-name extremum) operands))))
 
   (test-case "indexed writes: ref! sugar and the in-place family (#73)"
     (define (fresh) (tensor '((1.0 2.0 3.0) (4.0 5.0 6.0))))

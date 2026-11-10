@@ -96,6 +96,19 @@ TEST(GeneratedTranche10, ExtremaPropagateANanFromEitherOperand) {
   expect_floats(data_of(smaller.t), {kNan, kNan, kNan, 3.0F});
 }
 
+TEST(GeneratedTranche10, ExtremaPropagateANanInBfloat16) {
+  const Handle a32 = make({kNan, 1.0F, -2.0F, kNan}, {4});
+  const Handle b32 = make({0.5F, kNan, -3.0F, kNan}, {4});
+  const Handle a(tr_tensor_to_dtype(a32.t, TR_DTYPE_BFLOAT16));
+  const Handle b(tr_tensor_to_dtype(b32.t, TR_DTYPE_BFLOAT16));
+  const Handle larger(tr_gen_maximum(a.t, b.t));
+  EXPECT_EQ(dtype_of(larger.t), TR_DTYPE_BFLOAT16);
+  expect_floats(data_of(larger.t), {kNan, kNan, -2.0F, kNan});
+  const Handle smaller(tr_gen_minimum(a.t, b.t));
+  EXPECT_EQ(dtype_of(smaller.t), TR_DTYPE_BFLOAT16);
+  expect_floats(data_of(smaller.t), {kNan, kNan, -3.0F, kNan});
+}
+
 TEST(GeneratedTranche10, ExtremaKeepIntegersAndPromoteAMixedPair) {
   const Handle a = make_i64({5, -2, 7}, {3});
   const Handle b = make_i64({3, 4, 7}, {3});

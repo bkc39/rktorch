@@ -3,7 +3,8 @@
 (module+ test
   (require rackunit
            (only-in racket/dict dict-ref in-dict)
-           (only-in racket/list make-list)
+           (only-in racket/list flatten make-list)
+           (only-in racket/math nan?)
            (only-in racket/match match-define)
            (only-in threading ~>)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
@@ -39,12 +40,9 @@
 
   (define (close? a b tolerance)
     (and (equal? (shape a) (shape b))
-         (for/and ([u (in-list (flat (values-of a)))]
-                   [v (in-list (flat (values-of b)))])
+         (for/and ([u (in-list (flatten (values-of a)))]
+                   [v (in-list (flatten (values-of b)))])
            (~> (- u v) abs (<= tolerance)))))
-
-  (define (flat v)
-    (if (list? v) (apply append (map flat v)) (list v)))
 
   (define (images n on #:side [side 12])
     (to (rand n 3 side side) on))
@@ -312,8 +310,8 @@
     (for ([on (in-list devices)])
       (define out (random-color-jitter (to (pixel-pairs 256) on) #:contrast 1.5 #:p 1
                                        #:generator (make-generator 6 #:device on)))
-      (check-true (for/and ([dark (in-list (flat (values-of (narrow out 3 0 1))))]
-                            [light (in-list (flat (values-of (narrow out 3 1 1))))])
+      (check-true (for/and ([dark (in-list (flatten (values-of (narrow out 3 0 1))))]
+                            [light (in-list (flatten (values-of (narrow out 3 1 1))))])
                     (<= dark light))
                   (format "~a" on))))
 
@@ -324,6 +322,17 @@
                           (adjust-hue x -0.2)
                           1e-5)
                   (format "~a" on))))
+
+  (bounded-test "A6: hue turns a NaN pixel NaN in every channel and leaves its neighbour alone"
+    (for ([on (in-list devices)])
+      (define x (~> '(+nan.0 0.2 0.3 0.5 0.4 +nan.0 0.6 0.25 0.7 0.8 +nan.0 0.75)
+                    tensor (reshape 1 3 1 4) (to on)))
+      (define clean (narrow x 3 3 1))
+      (for ([h (in-list '(0.0 0.1))])
+        (define out (adjust-hue x h))
+        (check-true (andmap nan? (flatten (values-of (narrow out 3 0 3)))) (format "~a [~a]" h on))
+        (check-true (close? (narrow out 3 3 1) (adjust-hue clean h) 1e-6) (format "~a [~a]" h on)))
+      (check-true (close? (narrow (adjust-hue x 0.0) 3 3 1) clean 1e-6) (format "~a" on))))
 
   (define (index-image rows cols)
     (define (grid value)
@@ -341,7 +350,7 @@
         (narrow axis 2 3)
         (narrow across 2 4)
         values-of
-        flat))
+        flatten))
 
   (bounded-test "A4: random-affine-crop of a non-square image keeps the drawn area and ratio"
     (for ([on (in-list devices)])

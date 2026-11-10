@@ -330,8 +330,9 @@ on the hand-written shim) and the sampling grids (`affine-grid grid-sample
 #:mode #:padding-mode #:align-corners? upsample-bicubic2d`, tranche 9, #389:
 `F.affine_grid`, `F.grid_sample` on a float `[N C H W]` batch with the grid
 on its N, dtype and device, bicubic `F.interpolate(size=)`; `floor-tensor`
-and `fmod-scalar` stay on `torch/generated`) live on
-`torch` beside the other functional ops;
+and `fmod-scalar` stay on `torch/generated`) and the elementwise extrema
+(`maximum minimum`, tranche 10, #451) live on `torch` beside the other
+functional ops;
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'

@@ -1,12 +1,4 @@
-"""torch.maximum and torch.minimum over broadcast, mixed-dtype, NaN and
-integer operands.
-
-Each operand is torch.tensor(values).to(dtype).reshape(shape), which the
-Racket side mirrors as (reshape (to-dtype (tensor values) dtype) shape ...).
-Values travel as Racket-readable strings, because JSON carries neither NaN
-nor the infinities through read-json; integers stay exact, past 2**53, and
-a bool reads back as rktorch's tensor->list does, 0.0 or 1.0.
-"""
+"""Values travel as Racket-readable strings: JSON has no NaN or infinities."""
 import json
 import math
 
@@ -39,6 +31,14 @@ CASES = [
      ([2, -1, 0], [3], "int64")),
     ("bfloat16-float16", ([1.5, -4.0], [2], "bfloat16"),
      ([2.0, -8.0], [2], "float16")),
+    ("nan-bfloat16", ([NAN, 1.0, -2.0, NAN], [4], "bfloat16"),
+     ([0.5, NAN, -3.0, NAN], [4], "bfloat16")),
+    ("bfloat16-int64", ([1.5, -4.0, NAN], [3], "bfloat16"),
+     ([2, -5, 0], [3], "int64")),
+    ("zero-dim-float64-int64", ([5, -2, 3], [3], "int64"),
+     ([2.5], [], "float64")),
+    ("zero-dim-nan-float64-float32", ([1.0, 2.0], [2], "float32"),
+     ([NAN], [], "float64")),
     ("uint8-int64", ([3, 200, 0], [3], "uint8"), ([-5, 255, 1], [3], "int64")),
     ("bool-float32", ([1, 0, 1], [3], "bool"), ([0.5, -1.0, 2.0], [3], "float32")),
     ("bool-int64", ([1, 0], [2], "bool"), ([-3, 4], [2], "int64")),
