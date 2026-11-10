@@ -26,22 +26,28 @@
   (check-ok rc who)
   on?)
 
-(define (decode choices raw)
-  (if choices (list-ref choices raw) raw))
-
-(define (encode choices value)
-  (if choices (index-of choices value) value))
+(begin-for-syntax
+  (define-splicing-syntax-class codec
+    #:attributes (contract decode encode)
+    (pattern (~seq #:among (choice:id ...+))
+             #:with contract #'(or/c 'choice ...)
+             #:with decode #'(lambda (code) (list-ref '(choice ...) code))
+             #:with encode #'(lambda (value) (index-of '(choice ...) value)))
+    (pattern (~seq)
+             #:with contract #'boolean?
+             #:with decode #'values
+             #:with encode #'values)))
 
 (define-syntax-parse-rule (define-flag getter:id raw-get:id
                             (~optional (~seq setter:id raw-set:id))
-                            (~optional (~seq #:among (choice:id ...+))))
+                            flag:codec)
   (begin
     (define/contract-out (getter)
-      (-> (~? (or/c 'choice ...) boolean?))
-      (decode (~? '(choice ...) #f) (read-flag raw-get 'getter)))
+      (-> flag.contract)
+      (flag.decode (read-flag raw-get 'getter)))
     (~? (define/contract-out (setter value)
-          (-> (~? (or/c 'choice ...) boolean?) void?)
-          (check-ok (raw-set (encode (~? '(choice ...) #f) value)) 'setter)))))
+          (-> flag.contract void?)
+          (check-ok (raw-set (flag.encode value)) 'setter)))))
 
 (define/contract-out (use-deterministic-algorithms! on? ;; noqa
                                                     #:warn-only? [warn-only? #f])
@@ -61,7 +67,6 @@
 (define-flag cudnn-benchmark? tr-get-cudnn-benchmark/raw ;; noqa
   set-cudnn-benchmark! tr-set-cudnn-benchmark/raw)
 
-;; codes 0 1 2, the order of at::Float32MatmulPrecision
 (define-flag float32-matmul-precision tr-get-float32-matmul-precision/raw ;; noqa
   set-float32-matmul-precision! tr-set-float32-matmul-precision/raw
   #:among (highest high medium))

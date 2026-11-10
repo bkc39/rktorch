@@ -4,9 +4,6 @@
          (only-in racket/dict in-dict)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
-         (only-in racket/port open-output-nowhere)
-         (only-in racket/string string-split)
-         (only-in racket/system system*)
          (only-in rackunit test-case)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../main.rkt"
@@ -26,20 +23,23 @@
          (only-in "within.rkt" within))
 
 (provide bounded-switches-test
-         default-switches
          conv-witness
+         default-switches
          determinism-rows
-         distinct-values
+         from-defaults
          matmul-witness
          other-switches
          precision-refusal?
          precision-sequences
+         precisions
          sequence-outcome
          set-switches!
          switch-values
-         tf32-hardware?
+         tf32-settings
          witness-values
          within/switches-restored)
+
+(define precisions '(highest high medium))
 
 (struct switch (key read write! default))
 
@@ -102,8 +102,8 @@
 (define refusal-rx
   (pregexp
    (string-append
-    "^float32-matmul-precision: FFI call failed \\(rc=1\\): "
-    "tr_get_float32_matmul_precision: PyTorch is checking the matmul precision")))
+    "^float32-matmul-precision: .*tr_get_float32_matmul_precision: "
+    "PyTorch is checking the matmul precision")))
 
 (define (precision-refusal? e)
   (and (exn:fail? e)
@@ -126,24 +126,6 @@
   (for-each apply-step! steps)
   (map outcome-of
        (list float32-matmul-precision cuda-matmul-allow-tf32? cudnn-allow-tf32?)))
-
-(define (compute-capabilities smi)
-  (define out (open-output-string))
-  (define ok?
-    (parameterize ([current-output-port out]
-                   [current-error-port (open-output-nowhere)])
-      (system* smi "--query-gpu=compute_cap" "--format=csv,noheader")))
-  (define caps (map string->number (string-split (get-output-string out))))
-  (and ok? (pair? caps) (andmap real? caps) caps))
-
-(define (tf32-hardware?)
-  (define smi (find-executable-path "nvidia-smi"))
-  (define caps (and smi (compute-capabilities smi)))
-  (cond
-    [(not caps) 'unknown]
-    [(andmap (lambda (c) (>= c 8)) caps) #t]
-    [(andmap (lambda (c) (< c 8)) caps) #f]
-    [else 'unknown]))
 
 (define (within/switches-restored seconds thunk)
   (define saved (switch-values))
@@ -236,21 +218,29 @@
     [(= lo (item (max t))) (list lo)]
     [else (~> t host remove-duplicates (sort <))]))
 
-(define matmul-settings
-  (list (cons 'highest (lambda () (set-float32-matmul-precision! 'highest)))
-        (cons 'high (lambda () (set-float32-matmul-precision! 'high)))
-        (cons 'medium (lambda () (set-float32-matmul-precision! 'medium)))
+(define (precision-setting p)
+  (lambda () (set-float32-matmul-precision! p)))
+
+(define tf32-settings
+  (list (cons 'high (precision-setting 'high))
+        (cons 'medium (precision-setting 'medium))
         (cons 'matmul-tf32 (lambda () (set-cuda-matmul-allow-tf32! #t)))))
+
+(define matmul-settings
+  (cons (cons 'highest (precision-setting 'highest)) tf32-settings))
 
 (define conv-settings
   (list (cons 'cudnn-on (lambda () (set-cudnn-allow-tf32! #t)))
         (cons 'cudnn-off (lambda () (set-cudnn-allow-tf32! #f)))))
 
+(define (from-defaults setting! witness)
+  (set-switches! default-switches)
+  (setting!)
+  (distinct-values (witness 'cuda)))
+
 (define (witness-under settings witness)
   (for/hasheq ([(name setting!) (in-dict settings)])
-    (set-switches! default-switches)
-    (setting!)
-    (values name (distinct-values (witness 'cuda)))))
+    (values name (from-defaults setting! witness))))
 
 (define (witness-values)
   (hasheq 'matmul (witness-under matmul-settings matmul-witness)

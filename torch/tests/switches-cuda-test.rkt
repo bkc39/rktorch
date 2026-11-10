@@ -5,8 +5,8 @@
            (only-in compiler/find-exe find-exe)
            (only-in racket/dict in-dict)
            (only-in racket/list remove-duplicates)
+           (only-in racket/port with-output-to-string)
            (only-in racket/runtime-path #%datum define-runtime-path)
-           (only-in racket/system system*/exit-code)
            (only-in "../main.rkt"
                     * - / @ ~> abs adaptive-avg-pool2d backward! conv2d cuda-available?
                     deterministic-algorithms-enabled? detach exn:fail:rktorch:oom?
@@ -15,10 +15,12 @@
                     set-cudnn-allow-tf32! set-cudnn-benchmark! set-cudnn-deterministic!
                     set-float32-matmul-precision! sub! sum to to-dtype
                     use-deterministic-algorithms! with-no-grad zeros)
+           (only-in "private/child.rkt" run-child)
+           (only-in "private/hardware.rkt" tf32-hardware?)
            (only-in "private/host.rkt" bytes-of distinct-runs host)
            (only-in "private/switches.rkt"
-                    bounded-switches-test conv-witness default-switches distinct-values
-                    matmul-witness set-switches! switch-values tf32-hardware?))
+                    bounded-switches-test conv-witness default-switches from-defaults
+                    matmul-witness set-switches! switch-values tf32-settings))
 
   (check-equal? (switch-values) default-switches
                 "no flag leaked from an earlier file")
@@ -92,11 +94,8 @@
        (exit status)))
 
   (define (warn-only-child on)
-    (define os-err (open-output-string))
-    (define status
-      (parameterize ([current-error-port os-err])
-        (system*/exit-code (find-exe) "-e" (format "~s" (warn-only-program on)))))
-    (values status (get-output-string os-err)))
+    (define-values (status output err) (run-child (warn-only-program on)))
+    (values status err))
 
   (define (exit-meaning status)
     (case status
@@ -189,17 +188,6 @@
       (use-deterministic-algorithms! #t)
       (check-equal? (distinct-runs 10 matmul-run) 1)))
 
-  (define (matmul-tf32-settings)
-    (list (cons "'high" (lambda () (set-float32-matmul-precision! 'high)))
-          (cons "'medium" (lambda () (set-float32-matmul-precision! 'medium)))
-          (cons "(set-cuda-matmul-allow-tf32! #t)"
-                (lambda () (set-cuda-matmul-allow-tf32! #t)))))
-
-  (define (from-defaults setting! witness)
-    (set-switches! default-switches)
-    (setting!)
-    (distinct-values (witness 'cuda)))
-
   (define (seeded-pair m k n)
     (manual-seed! 0)
     (values (randn m k #:device 'cuda) (randn k n #:device 'cuda)))
@@ -207,17 +195,71 @@
   (define (worst-ratio a b)
     (define a64 (to-dtype a 'float64))
     (define b64 (to-dtype b 'float64))
-    (define e (abs (- (to-dtype (@ a b) 'float64) (@ a64 b64))))
-    (~> (/ e (@ (abs a64) (abs b64))) max item))
+    (~> (@ a b)
+        (to-dtype 'float64)
+        (- (@ a64 b64))
+        abs
+        (/ (@ (abs a64) (abs b64)))
+        max
+        item))
 
   (define (under precision thunk)
     (set-float32-matmul-precision! precision)
     (thunk))
 
+  (define (tf32-skips hardware)
+    (cond
+      [(eq? hardware 'unknown) "C7, C8 and C9"]
+      [(not hardware) "C9"]
+      [else #f]))
+
+  (define (announce-tf32-skips hardware)
+    (define skipped (tf32-skips hardware))
+    (when skipped
+      (printf "[switches-cuda-test] skipped the TF32 halves of ~a: tf32-hardware? is ~a\n"
+              skipped hardware)))
+
+  (test-case "C7, C8, C9: a TF32 half that cannot run prints a skip line"
+    (for ([(hardware want)
+           (in-dict
+            (list (cons 'unknown
+                        (string-append "[switches-cuda-test] skipped the TF32 halves of "
+                                       "C7, C8 and C9: tf32-hardware? is unknown\n"))
+                  (cons #f
+                        (string-append "[switches-cuda-test] skipped the TF32 halves of "
+                                       "C9: tf32-hardware? is #f\n"))
+                  (cons #t "")))])
+      (check-equal? (with-output-to-string (lambda () (announce-tf32-skips hardware)))
+                    want
+                    (format "tf32-hardware? ~a" hardware))))
+
+  (define (probe-reading program)
+    (tf32-hardware? #:command (list (find-exe) "-e" (format "~s" program))))
+
+  (bounded-switches-test "tf32-hardware?: TF32 hardware is 8.0 and later on every GPU"
+    #:seconds 120
+    (for ([(program want)
+           (in-dict '(((display "8.6\n") . #t)
+                      ((display "8.0\n8.9\n") . #t)
+                      ((display "7.5\n") . #f)
+                      ((display "8.6\n7.5\n") . unknown)
+                      ((display "") . unknown)
+                      ((display "[N/A]\n") . unknown)
+                      ((begin (display "8.6\n") (exit 1)) . unknown)))])
+      (check-equal? (probe-reading program) want (format "~s" program))))
+
+  (bounded-switches-test "tf32-hardware?: a probe that hangs answers 'unknown at its bound"
+    #:seconds 30
+    (define started (current-inexact-milliseconds))
+    (check-equal? (tf32-hardware? #:command (list (find-exe) "-e" "(sleep 600)") #:seconds 2)
+                  'unknown)
+    (check-true (< (- (current-inexact-milliseconds) started) 20000)))
+
   (define (precision-tests hardware)
     (define tf32-on (if hardware '(1024.0) '(1024.25)))
     (define conv-on (if hardware '(576.0) '(576.140625)))
     (define tf32-half? (not (eq? hardware 'unknown)))
+    (announce-tf32-skips hardware)
 
     (bounded-switches-test "C7: a float32 matmul rounds to TF32 only when allowed"
       #:seconds 120
@@ -227,7 +269,7 @@
                       '(1024.25)
                       (format "'highest, cuDNN TF32 ~a" cudnn-tf32?)))
       (when tf32-half?
-        (for ([(label setting!) (in-dict (matmul-tf32-settings))])
+        (for ([(label setting!) (in-dict tf32-settings)])
           (check-equal? (from-defaults setting! matmul-witness) tf32-on
                         (format "~a, tf32-hardware? ~a" label hardware)))))
 
@@ -261,6 +303,9 @@
       (check-true (<= high-ratio (+ (expt 2.0 -9) (* k (expt 2.0 -23))))
                   (format "'high: max E/S is ~a" high-ratio))
       (when (eq? hardware #t)
+        (check-true (< highest-ratio (/ high-ratio 10))
+                    (format "TF32 hardware: 'highest's max E/S ~a is well below 'high's ~a"
+                            highest-ratio high-ratio))
         (check-not-equal? (under 'high (lambda () (bytes-of (@ a b))))
                           (under 'highest (lambda () (bytes-of (@ a b))))
                           "TF32 hardware: 'high changes the bytes")))
@@ -272,7 +317,7 @@
         (set-switches! default-switches)
         (setting!)
         (bytes-of (@ a b)))
-      (define reads (map product (map cdr (matmul-tf32-settings))))
+      (define reads (map product (map cdr tf32-settings)))
       (check-equal? (remove-duplicates reads) (list (car reads))))
 
     (bounded-switches-test "C11: under 'high a seeded matmul and its backward repeat"

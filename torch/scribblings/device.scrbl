@@ -231,17 +231,11 @@ is stored and changes nothing.}
 
 @section[#:tag "float32-precision"]{Float32 precision}
 
-PyTorch's TF32 switches. TF32 keeps float32's range and 10 of its 23
-mantissa bits. On CUDA GPUs of compute capability 8.0 and later, float32
-matmuls and cuDNN may round their inputs to it. Like the determinism
-switches, these are flags of libtorch's process-wide context
-(@secref["determinism"]). The defaults are libtorch's: matmuls in float32,
-cuDNN in TF32. @tt{TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1}, set before the
-process starts, makes @racket['high] the starting precision.
-
-@racketblock[
-(set-float32-matmul-precision! 'high)
-]
+PyTorch's TF32 switches, process-wide flags like the determinism switches
+(@secref["determinism"]). TF32 keeps 10 of float32's 23 mantissa bits, on CUDA GPUs of compute
+capability 8.0 and later. By default matmuls run in float32 and cuDNN in
+TF32. @tt{TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1} at process start makes
+@racket['high] the starting precision.
 
 @defproc[(set-float32-matmul-precision!
           [precision (or/c 'highest 'high 'medium)])
@@ -265,8 +259,10 @@ precision again clears that state.
               @defproc[(set-cuda-matmul-allow-tf32! [on? boolean?]) void?])]{
 @tt{torch.backends.cuda.matmul.allow_tf32}: whether cuBLAS may use TF32
 for float32 matmuls. It holds exactly when the precision is not
-@racket['highest]. Setting it sets the precision to @racket['high] or
-@racket['highest].}
+@racket['highest]. From @racket['highest], setting it sets the precision to
+@racket['high] or @racket['highest]. Turning it off after @racket['high], or
+setting it after @racket['medium], leaves @racket[float32-matmul-precision]
+raising until the precision is set again.}
 
 @deftogether[(@defproc[(cudnn-allow-tf32?) boolean?]
               @defproc[(set-cudnn-allow-tf32! [on? boolean?]) void?])]{

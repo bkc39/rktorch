@@ -2,7 +2,6 @@
 
 (module+ test
   (require rackunit
-           (only-in compiler/find-exe find-exe)
            (only-in ffi/unsafe _fun _int _ptr get-ffi-obj)
            (only-in racket/dict in-dict)
            (only-in racket/file file->string)
@@ -11,7 +10,6 @@
                     place-kill)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-contains?)
-           (only-in racket/system system*/exit-code)
            (only-in "../foreign/raw/native-library.rkt" native-library)
            (only-in "../main.rkt"
                     conv2d cuda-available? cuda-matmul-allow-tf32? cudnn-allow-tf32?
@@ -23,10 +21,11 @@
                     set-float32-matmul-precision! tensor->bytes
                     use-deterministic-algorithms!)
            (only-in "private/blame.rkt" arity-error-of? blames-caller?)
+           (only-in "private/child.rkt" run-child)
            (only-in "private/switches.rkt"
                     bounded-switches-test default-switches determinism-rows
                     matmul-witness other-switches precision-refusal? precision-sequences
-                    sequence-outcome set-switches! switch-values
+                    precisions sequence-outcome set-switches! switch-values
                     within/switches-restored)
            (only-in "private/within.rkt" within))
 
@@ -36,8 +35,6 @@
                 (format (string-append "S0: libtorch's defaults with ~a unset (it is ~s), "
                                        "and no flag leaked from an earlier file")
                         override-variable (getenv override-variable)))
-
-  (define precisions '(highest high medium))
 
   (define (c-getter name decode)
     (get-ffi-obj name native-library
@@ -102,28 +99,30 @@
 
   (struct row (label write! changes))
 
+  (define (fixed-row label write! changes)
+    (row label write! (lambda (_) changes)))
+
   (define writes
     (append
      (for*/list ([on? (in-list '(#t #f))] [w (in-list '(#t #f))])
-       (row (format "(use-deterministic-algorithms! ~a #:warn-only? ~a)" on? w)
-            (lambda () (use-deterministic-algorithms! on? #:warn-only? w))
-            (lambda (_) (list 'deterministic-algorithms on? 'warn-only w))))
-     (list (row "(use-deterministic-algorithms! #t)"
-                (lambda () (use-deterministic-algorithms! #t))
-                (lambda (_) '(deterministic-algorithms #t warn-only #f))))
+       (fixed-row (format "(use-deterministic-algorithms! ~a #:warn-only? ~a)" on? w)
+                  (lambda () (use-deterministic-algorithms! on? #:warn-only? w))
+                  (list 'deterministic-algorithms on? 'warn-only w)))
+     (list (fixed-row "(use-deterministic-algorithms! #t)"
+                      (lambda () (use-deterministic-algorithms! #t))
+                      '(deterministic-algorithms #t warn-only #f)))
      (for*/list ([(key setter)
                   (in-dict (list (cons 'cudnn-deterministic set-cudnn-deterministic!)
                                  (cons 'cudnn-benchmark set-cudnn-benchmark!)))]
                  [on? (in-list '(#t #f))])
-       (row (format "~a ~a" key on?)
-            (lambda () (setter on?))
-            (lambda (_) (list key on?))))
+       (fixed-row (format "~a ~a" key on?)
+                  (lambda () (setter on?))
+                  (list key on?)))
      (for/list ([p (in-list precisions)])
-       (row (format "(set-float32-matmul-precision! '~a)" p)
-            (lambda () (set-float32-matmul-precision! p))
-            (lambda (_)
-              (list 'float32-matmul-precision p
-                    'cuda-matmul-allow-tf32 (not (eq? p 'highest))))))
+       (fixed-row (format "(set-float32-matmul-precision! '~a)" p)
+                  (lambda () (set-float32-matmul-precision! p))
+                  (list 'float32-matmul-precision p
+                        'cuda-matmul-allow-tf32 (not (eq? p 'highest)))))
      (for/list ([on? (in-list '(#t #f))])
        (row (format "(set-cuda-matmul-allow-tf32! ~a)" on?)
             (lambda () (set-cuda-matmul-allow-tf32! on?))
@@ -131,9 +130,9 @@
               (list 'cuda-matmul-allow-tf32 on?
                     'float32-matmul-precision (precision-after-matmul start on?)))))
      (for/list ([on? (in-list '(#t #f))])
-       (row (format "(set-cudnn-allow-tf32! ~a)" on?)
-            (lambda () (set-cudnn-allow-tf32! on?))
-            (lambda (_) (list 'cudnn-allow-tf32 on?))))))
+       (fixed-row (format "(set-cudnn-allow-tf32! ~a)" on?)
+                  (lambda () (set-cudnn-allow-tf32! on?))
+                  (list 'cudnn-allow-tf32 on?)))))
 
   (bounded-switches-test "S1, S2: each setter writes its own flag in libtorch, and nothing else"
     (for* ([start (in-list (list default-switches other-switches))]
@@ -326,25 +325,13 @@
                     (cuda-matmul-allow-tf32?)
                     (cudnn-allow-tf32?)))))
 
-  (define (defaults-in-child override)
-    (define env (environment-variables-copy (current-environment-variables)))
-    (environment-variables-set! env (string->bytes/utf-8 override-variable) override)
-    (define out (open-output-string))
-    (define err (open-output-string))
-    (define status
-      (parameterize ([current-environment-variables env]
-                     [current-output-port out]
-                     [current-error-port err])
-        (system*/exit-code (find-exe) "-e" (format "~s" precision-defaults-program))))
-    (values status
-            (read (open-input-string (get-output-string out)))
-            (get-output-string err)))
-
   (bounded-switches-test "S10: TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1 makes 'high the starting precision"
     #:seconds 240
     (for ([(override want) (in-dict (list (cons #"1" '(high #t #t))
                                           (cons #f '(highest #f #t))))])
-      (define-values (status read-there err) (defaults-in-child override))
+      (define-values (status read-there err)
+        (run-child precision-defaults-program
+                   #:environment (list (cons override-variable override))))
       (define where (format "~a=~a; stderr:\n~a" override-variable override err))
       (check-equal? status 0 where)
       (check-equal? read-there want where)))
