@@ -98,6 +98,14 @@
   (check-= (ref one 'libtorch) 0.8 1e-12)
   (check-= (ref one 'value) 14.2 1e-12))
 
+(test-case "K1 reports the facade's process CPU per op beside its wall time"
+  (check-false (ref (k1-overhead records) 'cpu))
+  (define with-cpu
+    (cons (hasheq 'kind "op" 'impl "rktorch" 'op "scalar-add" 'layer "facade" 'threads 0
+                  'rep 0 'us_per_op 15.0 'cpu_us_per_op 21.0)
+          records))
+  (check-near (ref (k1-overhead with-cpu) 'cpu) 21.0))
+
 (test-case "K2 divides rktorch's one-thread facade by PyTorch's"
   (check-near (map (lambda (k) (ref k 'value)) (k2-pytorch-ratio records)) '(5 3)))
 

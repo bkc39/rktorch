@@ -9,6 +9,7 @@
            (only-in "../nn.rkt"
                     Linear kaiming-uniform normal-init parameters
                     trunc-normal-init uniform-init)
+           (only-in "../nn/init.rkt" uniform-bias)
            (only-in "private/host.rkt" host)
            (only-in "private/python-env.rkt"
                     call-with-python-env python-check python-cuda-available?
@@ -70,7 +71,9 @@
      (list 'trunc-one-sided 17
            (init (lambda (g)
                    (list (trunc-normal-init '(64 32) #:a -1e300 #:b 0.5
-                                            #:generator g)))))))
+                                            #:generator g)))))
+     (list 'bias-zero-fan 18
+           (init (lambda (g) (list (uniform-bias 3 0 #:generator g)))))))
 
   (define (ours on seed draw)
     (define g (make-generator seed #:device on))

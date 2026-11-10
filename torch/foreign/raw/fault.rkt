@@ -2,6 +2,7 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in ffi/unsafe _bytes _fun _int _intptr _void get-ffi-obj)
+         (only-in ffi/unsafe/vm vm-eval)
          (only-in syntax/parse/define define-syntax-parse-rule))
 
 (provide crossing-hook
@@ -11,7 +12,8 @@
          native-faulted
          note-native-fault!
          reset-native-fault-latch!
-         with-crossing-hook)
+         with-crossing-hook
+         with-fault-handlers)
 
 (define (native-fault? v)
   (and (exn:fail? v)
@@ -59,6 +61,25 @@
      " restart it.\n  Set RKTORCH_ON_NATIVE_FAULT=exit to stop the process"
      " at the first fault instead.")
     (current-continuation-marks))))
+
+(define interrupt-depth
+  (vm-eval '(lambda () (let ([n (disable-interrupts)]) (enable-interrupts) n))))
+
+(define restore-interrupt-depth!
+  (vm-eval '(lambda (n)
+              (let loop ()
+                (when (> (let ([m (disable-interrupts)]) (enable-interrupts) m) n)
+                  (enable-interrupts)
+                  (loop))))))
+
+(define ((restoring depth handler) e)
+  (restore-interrupt-depth! depth)
+  (handler e))
+
+(define-syntax-parse-rule (with-fault-handlers ([pred:expr handler:expr] ...) body:expr ...+)
+  (let ([depth (interrupt-depth)])
+    (with-handlers ([pred (restoring depth handler)] ...)
+      body ...)))
 
 (define crossing-hook (box #f))
 

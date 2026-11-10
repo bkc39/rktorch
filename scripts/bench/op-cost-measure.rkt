@@ -74,7 +74,8 @@
   (hasheq 'gc (current-gc-milliseconds)
           'heap (current-memory-use 'cumulative)
           'finalizers (finalizer-runs)
-          'main-cpu (main-cpu-ms)))
+          'main-cpu (main-cpu-ms)
+          'process-cpu (current-process-milliseconds)))
 
 (define (window n make seconds)
   (cond
@@ -113,6 +114,7 @@
           'us_per_op (~> (or main-ms 0) (+ thread-ms) (* 1000.0) per-op)
           'thread_us_per_op (per-op (* 1000.0 thread-ms))
           'main_cpu_ms main-ms
+          'cpu_us_per_op (per-op (* 1000.0 (moved 'process-cpu)))
           'ops_per_s (and (positive? elapsed-ms) (/ (* 1000.0 ops) elapsed-ms))
           'heap_bytes_per_op (per-op (moved 'heap))
           'finalizer_runs (moved 'finalizers)
@@ -136,11 +138,11 @@
   (match-lambda
     [(cons id _) (and (memq id names) #t)]))
 
-;; the drain the pressure check's yield runs is finalization's, not the check's
+;; the wake the pressure check sends is finalization's, not the check's
 (define sampler-pieces
   (hasheq 'accounting (named 'account! 'record-allocation!)
           'pressure (named 'collect-under-pressure!)
-          'finalizer (named 'register-tensor! 'yield-to-finalizers!)
+          'finalizer (named 'register-tensor! 'wake-after-collection!)
           'shape (named 'handle-shape 'wrap-tensor)
           'contract contract-frame?))
 
@@ -294,7 +296,7 @@
       (check-true (< (- t1 t0) 100) (format "asleep ~a ms" (- t1 t0)))
       (check-true (> (- t2 t1) 150) (format "spinning ~a ms" (- t2 t1)))))
 
-  ;; Without the yield, registered and retry drain 45% and 55% in window;
+  ;; Without the wake, registered and retry drain 45% and 55% in window;
   ;; with it, 90% and 97%.
   (test-case "every layer that registers drains its finalizers inside its own window"
     (call-with-process-deadline
@@ -344,14 +346,14 @@
 
   (test-case "a piece's disjoint functions both count toward its share"
     (check-equal? (finalizer-share '(register-tensor! op) '(register-tensor! op)
-                                   '(register-tensor! op) '(yield-to-finalizers! op)
-                                   '(yield-to-finalizers! op) '(op) '(op) '(op) '(op) '(op))
+                                   '(register-tensor! op) '(wake-after-collection! op)
+                                   '(wake-after-collection! op) '(op) '(op) '(op) '(op) '(op))
                   0.5))
 
   (test-case "a sample with nested functions of one piece counts once"
-    (check-equal? (finalizer-share '(yield-to-finalizers! register-tensor! op)
-                                   '(yield-to-finalizers! register-tensor! op)
-                                   '(yield-to-finalizers! register-tensor! op)
+    (check-equal? (finalizer-share '(wake-after-collection! register-tensor! op)
+                                   '(wake-after-collection! register-tensor! op)
+                                   '(wake-after-collection! register-tensor! op)
                                    '(op) '(op) '(op) '(op) '(op) '(op) '(op))
                   0.3))
 

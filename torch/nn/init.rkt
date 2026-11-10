@@ -133,7 +133,9 @@
 
 (define (uniform-bias n fan #:generator [generator #f])
   (check-generator-on! 'uniform-bias generator #f)
-  (define bound (/ 1.0 (sqrt fan)))
+  ;; reset_parameters' bound 0 at fan 0: a zero-width draw that still
+  ;; advances the stream, one value per element
+  (define bound (if (zero? fan) 0 (/ 1.0 (sqrt fan))))
   (uniform-draw (list n) (- bound) bound generator))
 
 (define (any? mask)
