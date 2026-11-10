@@ -4,6 +4,8 @@
 #include <torch/torch.h>
 #include <torch/version.h>
 
+#include <array>
+#include <cstddef>
 #include <exception>
 #include <string>
 
@@ -18,7 +20,7 @@ int read_flag(const char* who, int* out, Read read) {
     return torchrkt::null_arg_status(who);
   }
   return torchrkt::status_call(
-      who, [&] { *out = read(at::globalContext()) ? 1 : 0; });
+      who, [&] { *out = static_cast<int>(read(at::globalContext())); });
 }
 
 }  // namespace
@@ -104,33 +106,41 @@ int tr_get_cudnn_benchmark(int* out) {
 }
 
 int tr_set_float32_matmul_precision(int precision) {
-  (void)precision;
-  return torchrkt::null_arg_status("tr_set_float32_matmul_precision");
+  return torchrkt::status_call("tr_set_float32_matmul_precision", [=] {
+    constexpr std::array<const char*, 3> names = {"highest", "high", "medium"};
+    TORCH_CHECK(precision >= 0 && precision < static_cast<int>(names.size()),
+                "no float32 matmul precision has code ", precision);
+    at::globalContext().setFloat32MatmulPrecision(
+        names.at(static_cast<std::size_t>(precision)));
+  });
 }
 
 int tr_get_float32_matmul_precision(int* out) {
-  (void)out;
-  return torchrkt::null_arg_status("tr_get_float32_matmul_precision");
+  return read_flag(
+      "tr_get_float32_matmul_precision", out,
+      [](const at::Context& c) { return c.float32MatmulPrecision(); });
 }
 
 int tr_set_cuda_matmul_allow_tf32(int enabled) {
-  (void)enabled;
-  return torchrkt::null_arg_status("tr_set_cuda_matmul_allow_tf32");
+  return torchrkt::status_call("tr_set_cuda_matmul_allow_tf32", [=] {
+    at::globalContext().setAllowTF32CuBLAS(enabled != 0);
+  });
 }
 
 int tr_get_cuda_matmul_allow_tf32(int* out) {
-  (void)out;
-  return torchrkt::null_arg_status("tr_get_cuda_matmul_allow_tf32");
+  return read_flag("tr_get_cuda_matmul_allow_tf32", out,
+                   [](const at::Context& c) { return c.allowTF32CuBLAS(); });
 }
 
 int tr_set_cudnn_allow_tf32(int enabled) {
-  (void)enabled;
-  return torchrkt::null_arg_status("tr_set_cudnn_allow_tf32");
+  return torchrkt::status_call("tr_set_cudnn_allow_tf32", [=] {
+    at::globalContext().setAllowTF32CuDNN(enabled != 0);
+  });
 }
 
 int tr_get_cudnn_allow_tf32(int* out) {
-  (void)out;
-  return torchrkt::null_arg_status("tr_get_cudnn_allow_tf32");
+  return read_flag("tr_get_cudnn_allow_tf32", out,
+                   [](const at::Context& c) { return c.allowTF32CuDNN(); });
 }
 
 }  // extern "C"
