@@ -2,7 +2,7 @@
 
 (require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr id))
          (only-in racket/contract/base
-                  -> ->i and/c any/c contract-out flat-named-contract listof
+                  -> ->i any/c contract-out flat-named-contract listof
                   or/c unsupplied-arg?)
          (only-in racket/list first)
          (only-in racket/match == match)
@@ -36,20 +36,23 @@
   (flat-named-contract 'batched-tensor
                        (lambda (v) (and (tensor? v) (pair? (shape v))))))
 
-(define (same-leading-dimension/c t)
-  (flat-named-contract
-   'same-leading-dimension
-   (lambda (u) (and (batched/c u) (= (car (shape u)) (car (shape t)))))))
+(define batched-tensors/c (listof batched/c))
 
-(define (same-device/c t)
-  (flat-named-contract
-   'same-device
-   (lambda (u) (and (tensor? u) (equal? (device u) (device t))))))
+(define (same-leading-dimension? t more)
+  (for/and ([u (in-list more)])
+    (= (car (shape u)) (car (shape t)))))
+
+(define (same-device? t more)
+  (for/and ([u (in-list more)])
+    (equal? (device u) (device t))))
 
 (define-dataset tensor-dataset (tensors) ;; noqa
   #:contract (->i ([t batched/c])
-                  #:rest [more (t) (listof (and/c (same-leading-dimension/c t)
-                                                  (same-device/c t)))]
+                  #:rest [more batched-tensors/c]
+                  #:pre/name (t more) "tensors of the same leading dimension"
+                  (same-leading-dimension? t more)
+                  #:pre/name (t more) "tensors on the same device"
+                  (same-device? t more)
                   [result tensor-dataset?])
   #:init (t . more)
   (set! tensors (cons t more))
