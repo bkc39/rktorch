@@ -14,8 +14,6 @@
     #:forward ()
     slot)
 
-  (define rebuild-directly layer-rebuild)
-
   (define part-built
     #rx"^layer-copy: a rebuild raised, escaped or was killed while a copy was part-built")
   (define two-threads #rx"^layer-copy: a child callback used from two threads at once")
@@ -31,7 +29,7 @@
   (struct gate (in go)
     #:methods gen:layer
     [(define (layer-forward _self . _inputs) 0)
-     (define (layer-rebuild self _child _tensor)
+     (define (layer-rebuild-method self _child _tensor)
        (semaphore-post (gate-in self))
        (semaphore-wait (gate-go self))
        (gate (make-semaphore 0) (make-semaphore 1)))])
@@ -42,10 +40,10 @@
   (struct forked (inner g copies)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (forked-copies self))
-     (define (layer-rebuild self child tensor)
+     (define (layer-rebuild-method self child tensor)
        (match-define (forked inner g _) self)
        (define (rebuilt)
-         (rebuild-directly inner child tensor))
+         (layer-rebuild inner child tensor))
        (define-values (first first-result) (running rebuilt))
        (if g (semaphore-wait (gate-in g)) (thread-wait first))
        (define-values (second second-result) (running rebuilt))
@@ -74,7 +72,7 @@
   (struct stalled (armed ready)
     #:methods gen:layer
     [(define (layer-forward _self . _inputs) 0)
-     (define (layer-rebuild self _child _tensor)
+     (define (layer-rebuild-method self _child _tensor)
        (match-define (stalled armed ready) self)
        (cond
          [(unbox armed)
@@ -86,7 +84,7 @@
   (struct abandoned (first second stall)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (abandoned-first self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (match-define (abandoned first second stall) self)
        (define t (thread (lambda () (child "first" first))))
        (semaphore-wait (stalled-ready stall))
@@ -120,7 +118,7 @@
   (struct both (a b g)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (both-b self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (match-define (both a b g) self)
        (define-values (ta ra) (copying child "a" a))
        (semaphore-wait (gate-in g))
@@ -144,7 +142,7 @@
   (struct leaver (inner g)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (leaver-inner self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (match-define (leaver inner g) self)
        (copying child "inner" inner)
        (semaphore-wait (gate-in g))
