@@ -13,7 +13,7 @@
                     mps-available? mps-device multinomial rand rand-like randn
                     randn-like randperm reshape tensor to uniform! zeros)
            (only-in "../nn.rkt"
-                    dropout kaiming-uniform trunc-normal-init uniform-init)
+                    Dropout dropout kaiming-uniform trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blames-caller?)
@@ -105,12 +105,6 @@
                 (lambda ()
                   (parameterize ([current-generator elsewhere])
                     (uniform! (zeros 3) 0.0 1.0))))
-          (cons "dropout on cpu, accelerator generator"
-                (lambda () (dropout (zeros 3) #:generator elsewhere)))
-          (cons "dropout through current-generator"
-                (lambda ()
-                  (parameterize ([current-generator elsewhere])
-                    (dropout (zeros 3)))))
           (cons "uniform-init through current-generator"
                 (lambda ()
                   (parameterize ([current-generator elsewhere])
@@ -152,6 +146,27 @@
                   (multinomial probabilities 2
                                #:generator (make-generator 1))))))
 
+  (define ((raised-by who) e)
+    (and (exn:fail:contract? e)
+         (regexp-match? (regexp (format "^~a: contract violation" who)) (exn-message e))
+         (regexp-match? #rx"the generator lives on the tensor's device" (exn-message e))))
+
+  (define (raised-on accelerator)
+    (define elsewhere (make-generator 1 #:device accelerator))
+    (define (on-accelerator) (to (zeros 3) accelerator))
+    (list (list 'dropout "dropout on cpu, accelerator generator"
+                (lambda () (dropout (zeros 3) #:generator elsewhere)))
+          (list 'dropout "dropout through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (dropout (zeros 3)))))
+          (list 'dropout "dropout on the accelerator, cpu generator"
+                (lambda () (dropout (on-accelerator) #:generator (make-generator 1))))
+          (list 'Dropout "Dropout on the accelerator through a cpu current-generator"
+                (lambda ()
+                  (parameterize ([current-generator (make-generator 1)])
+                    ((Dropout) (on-accelerator)))))))
+
   (bounded-test "R4: a CPU generator drawing for CUDA blames the caller, CUDA or not"
     (for ([thunk (in-list
                   (list (lambda ()
@@ -169,6 +184,11 @@
          (match-define (cons label thunk) row)
          (check-exn (blames-caller? "generator-device-test") thunk
                     (format "~a: ~a" accelerator label))))
+     (bounded-test "R4: dropout drawing with a generator on another device is the caller's error"
+       (for* ([accelerator (in-list accelerators)]
+              [row (in-list (raised-on accelerator))])
+         (match-define (list who label thunk) row)
+         (check-exn (raised-by who) thunk (format "~a: ~a" accelerator label))))
      (bounded-test "R4: rand-like moved to the CPU takes a CPU generator"
        (for ([accelerator (in-list accelerators)])
          (check-equal? (~> (zeros 3)
