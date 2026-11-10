@@ -233,6 +233,14 @@
                   (host (uniform-init '(4) (/ -1.0 3.0) (/ 1.0 3.0)
                                       #:generator (make-generator 7)))))
 
+  (bounded-test "uniform-bias at fan 0 draws zero-width, advancing the stream per element"
+    (define g (make-generator 5))
+    (check-equal? (host (uniform-bias 3 0 #:generator g)) '(0.0 0.0 0.0))
+    (define twin (make-generator 5))
+    (uniform! (zeros 3) 0.0 0.0 #:generator twin)
+    (check-equal? (tensor->bytes (generator-state g))
+                  (tensor->bytes (generator-state twin))))
+
   (bounded-test "G10: kaiming-uniform needs two dimensions and draws nothing for zero fan"
     (check-exn (blames-caller? caller) (lambda () (kaiming-uniform '(3))))
     (define g (make-generator 4))

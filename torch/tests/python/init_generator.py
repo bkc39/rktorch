@@ -30,6 +30,8 @@ def case(seed, draw):
 
 
 bound = 1 / math.sqrt(4)
+# nn.Linear / _ConvNd.reset_parameters at fan_in == 0
+zero_fan_bound = 0
 print(json.dumps({
     "uniform": case(1, lambda g: [empty(4, 3).uniform_(-0.5, 0.5, generator=g)]),
     "uniform-defaults": case(2, lambda g: [empty(5).uniform_(generator=g)]),
@@ -49,4 +51,5 @@ print(json.dumps({
     "trunc-redraw": case(15, lambda g: [init.trunc_normal_(empty(64, 32), a=-0.5, b=0.5, generator=g)]),
     "trunc-wide": case(16, lambda g: [init.trunc_normal_(empty(4), a=-1e300, b=1e300, generator=g)]),
     "trunc-one-sided": case(17, lambda g: [init.trunc_normal_(empty(64, 32), a=-1e300, b=0.5, generator=g)]),
+    "bias-zero-fan": case(18, lambda g: [init.uniform_(empty(3), -zero_fan_bound, zero_fan_bound, generator=g)]),
 }))
