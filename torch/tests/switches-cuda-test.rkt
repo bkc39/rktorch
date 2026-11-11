@@ -3,6 +3,8 @@
 (module+ test
   (require rackunit
            (only-in compiler/find-exe find-exe)
+           (only-in racket/dict in-dict)
+           (only-in racket/port with-output-to-string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/system system*/exit-code)
            (only-in "../main.rkt"
@@ -114,6 +116,24 @@
   (define warning
     #rx"adaptive_avg_pool2d_backward_cuda does not have a deterministic implementation")
 
+  (define (announce-cudnn-witness runs)
+    (when (= runs 1)
+      (displayln (string-append "[switches-cuda-test] C5: no nondeterminism witness with the "
+                                "cuDNN flag off on this GPU; the flag's effect is not shown"))))
+
+  (test-case "C5: a GPU whose runs all match with the flag off prints a skip line"
+    (for ([(runs want)
+           (in-dict
+            (list (cons 1
+                        (string-append "[switches-cuda-test] C5: no nondeterminism witness "
+                                       "with the cuDNN flag off on this GPU; the flag's "
+                                       "effect is not shown\n"))
+                  (cons 2 "")
+                  (cons 10 "")))])
+      (check-equal? (with-output-to-string (lambda () (announce-cudnn-witness runs)))
+                    want
+                    (format "~a distinct runs" runs))))
+
   (define (cuda-tests)
     (bounded-switches-test "C1: the switch refuses a CUDA backward with no deterministic kernel"
       (define x (randn 1 2 5 5 #:device 'cuda #:requires-grad? #t))
@@ -167,12 +187,7 @@
       (check-equal? (distinct-runs 10 seeded-step) 1))
 
     (bounded-switches-test "C5: cuDNN's flag makes a convolution's weight gradient repeat"
-      (check-true (< 1 (distinct-runs 10 conv-weight-grad))
-                  (string-append
-                   "the witness: runs differ with the flag off, so long as cuDNN's "
-                   "heuristic picks a nondeterministic weight-gradient algorithm here; "
-                   "another GPU or cuDNN may pick a deterministic one, and a larger "
-                   "input would not change that"))
+      (announce-cudnn-witness (distinct-runs 10 conv-weight-grad))
       (set-cudnn-deterministic! #t)
       (check-equal? (distinct-runs 10 conv-weight-grad) 1)
       (set-cudnn-benchmark! #t)
