@@ -47,6 +47,7 @@
   (hasheq 'samples n
           'samples_per_s (/ n elapsed-s)
           'elapsed_s elapsed-s
+          'warmup warmup
           'gc_ms (- (current-gc-milliseconds) gc0)
           'finalizer_runs (- (finalizer-runs) runs0)
           'peak_rss_mb (let ([kb (peak-rss-kb)]) (and kb (quotient kb 1024)))))

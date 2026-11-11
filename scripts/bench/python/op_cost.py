@@ -110,11 +110,14 @@ def load():
 def sample(op, threads, step, seconds, gc_clock):
     gc0 = gc_clock.ms()
     run_load = load()
+    cpu0 = time.process_time()
     ops, elapsed = (main_loop(step, seconds) if threads == 0
                     else thread_loop(threads, OPS[op], seconds))
+    cpu = time.process_time() - cpu0
     return {"kind": "op", "impl": "pytorch", "op": op, "layer": "facade", "threads": threads,
             "ops": ops, "elapsed_ms": 1000.0 * elapsed,
             "us_per_op": 1e6 * elapsed * max(1, threads) / ops if ops else None,
+            "cpu_us_per_op": 1e6 * cpu / ops if ops else None,
             "ops_per_s": ops / elapsed, "heap_bytes_per_op": None,
             "gc_ms": gc_clock.ms() - gc0, "load": run_load}
 

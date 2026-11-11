@@ -144,7 +144,7 @@ def cell(name, workers, warmup, epochs, samples):
     elapsed = time.perf_counter() - t0
     rss = peak_rss_mb(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, sys.platform)
     return {"samples": n, "samples_per_s": n / elapsed, "elapsed_s": elapsed,
-            "gc_ms": None, "peak_rss_mb": rss}
+            "warmup": warmup, "gc_ms": None, "peak_rss_mb": rss}
 
 
 def peak_rss_mb(maxrss, platform):

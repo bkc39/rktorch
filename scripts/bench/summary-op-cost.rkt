@@ -19,7 +19,7 @@
          k3-thread-scaling
          k4-heap
          k5-pipelines
-         k6-gc-share
+         k6-gc-per-sample
          gap-tolerance
          op-cost-markdown)
 
@@ -147,13 +147,18 @@
   (define crossing (crossing-us records))
   (define own (and raw crossing (- raw (* 2 crossing))))
   (define cpu (layer-median records "scalar-add" "facade" #:key 'cpu_us_per_op))
-  (hasheq 'facade facade 'libtorch own 'cpu cpu 'value (and facade own (- facade own))))
+  (hasheq 'facade facade 'libtorch own 'cpu cpu
+          'above-wall (and cpu facade (- cpu facade))
+          'value (and facade own (- facade own))))
 
 (define (k2-pytorch-ratio records)
   (for/list ([op (in-list (map symbol->string pure-overhead-ops))])
     (define r (layer-median records op "facade"))
     (define p (layer-median records op "facade" #:impl "pytorch"))
-    (hasheq 'op op 'rktorch r 'pytorch p 'value (and r p (positive? p) (/ r p)))))
+    (define (cpu impl) (layer-median records op "facade" #:impl impl #:key 'cpu_us_per_op))
+    (hasheq 'op op 'rktorch r 'pytorch p
+            'rktorch-cpu (cpu "rktorch") 'pytorch-cpu (cpu "pytorch")
+            'value (and r p (positive? p) (/ r p)))))
 
 (define (impl-rows records impl)
   (filter (lambda (r) (equal? (ref r 'impl) impl)) (kind records "op")))
@@ -205,27 +210,45 @@
                                       (not (ref r 'error))))
                  (ref r key))))
 
+(define (worker-counts rows)
+  (~> (map (lambda (r) (ref r 'workers)) rows) remove-duplicates (sort <)))
+
+;; PyTorch's persistent workers start inside the first epoch, so a cell with
+;; workers and no warm-up epoch times their start-up.
+(define (cold-start? records pipeline workers)
+  (and (positive? workers)
+       (for/or ([r (in-list (kind records "pipeline"))])
+         (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)
+              (eqv? (ref r 'warmup) 0)))))
+
 (define (k5-pipelines records)
   (define pipes (kind records "pipeline"))
   (for*/list ([p (in-list (remove-duplicates (map (lambda (r) (ref r 'pipeline)) pipes)))]
-              [w (in-list (~> (map (lambda (r) (ref r 'workers)) pipes) remove-duplicates (sort <)))])
+              [w (in-list (worker-counts pipes))])
     (define r (pipeline-median records "rktorch" p w 'samples_per_s))
     (define py (pipeline-median records "pytorch" p w 'samples_per_s))
-    (hasheq 'pipeline p 'workers w 'rktorch r 'pytorch py
-            'value (and r py (positive? py) (/ r py)))))
+    (define cold (cold-start? records p w))
+    (hasheq 'pipeline p 'workers w 'rktorch r 'pytorch py 'cold cold
+            'value (and r py (positive? py) (not cold) (/ r py)))))
 
-(define (k6-gc-share records #:pipeline [pipeline "cifar"])
+;; current-gc-milliseconds sums GC CPU over OS threads, so it can exceed wall
+;; time and is no share of it.
+(define (k6-gc-per-sample records #:pipeline [pipeline "cifar"])
   (define pipes (filter (lambda (r) (and (equal? (ref r 'impl) "rktorch")
                                          (equal? (ref r 'pipeline) pipeline)
                                          (not (ref r 'error))))
                         (kind records "pipeline")))
-  (define top (and (pair? pipes) (apply max (map (lambda (r) (ref r 'workers)) pipes))))
-  (define shares
-    (for/list ([r (in-list pipes)] #:when (equal? (ref r 'workers) top))
-      (/ (ref r 'gc_ms) (* 1000.0 (ref r 'elapsed_s)))))
-  (hasheq 'pipeline pipeline 'workers top 'value (list-median shares)))
+  (for/list ([w (in-list (worker-counts pipes))])
+    (define per-sample
+      (for/list ([r (in-list pipes)]
+                 #:when (and (equal? (ref r 'workers) w) (real? (ref r 'gc_ms))
+                             (real? (ref r 'samples)) (positive? (ref r 'samples))))
+        (/ (* 1000.0 (ref r 'gc_ms)) (ref r 'samples))))
+    (hasheq 'pipeline pipeline 'workers w 'value (list-median per-sample))))
 
 (define (pct x) (if (real? x) (format "~a%" (num (* 100 x) 1)) "-"))
+
+(define (num-or-na x) (if (real? x) (num x 2) "n/a"))
 
 (define (range-text xs)
   (if (pair? xs) (format "~a–~a" (num (apply min xs)) (num (apply max xs))) "-"))
@@ -255,16 +278,20 @@
             (num (and r (ref r 'value)) 2) (pct (and t (ref t 'finalized)))))
   (define heaps (k4-heap records))
   (define pipelines (k5-pipelines records))
-  (define gc (k6-gc-share records))
+  (define gc (k6-gc-per-sample records))
   (table '("#" "metric" "value")
          (list (list "K1" "µs/op, scalar add, 1 thread, minus libtorch's own time"
-                     (format "~a (facade ~a, libtorch ~a; process CPU ~a µs/op)"
+                     (format "~a wall (facade ~a, libtorch ~a); process CPU ~a µs/op, ~a above wall"
                              (num (ref overhead 'value) 2) (num (ref overhead 'facade) 2)
-                             (num (ref overhead 'libtorch) 2) (num (ref overhead 'cpu) 2)))
+                             (num (ref overhead 'libtorch) 2) (num-or-na (ref overhead 'cpu))
+                             (num-or-na (ref overhead 'above-wall))))
                (list "K2" "rktorch ÷ PyTorch µs/op, 1 thread"
                      (string-join (for/list ([t (in-list ratios)])
-                                    (format "~a: ~a× (~a / ~a µs)" (ref t 'op) (num (ref t 'value) 2)
-                                            (num (ref t 'rktorch) 2) (num (ref t 'pytorch) 2)))
+                                    (format "~a: ~a× (~a / ~a µs; process CPU ~a / ~a µs)"
+                                            (ref t 'op) (num (ref t 'value) 2)
+                                            (num (ref t 'rktorch) 2) (num (ref t 'pytorch) 2)
+                                            (num-or-na (ref t 'rktorch-cpu))
+                                            (num-or-na (ref t 'pytorch-cpu))))
                                   "; "))
                (list "K3" "per-op cost at 8 threads ÷ 1 thread, with main's in-window finalization"
                      (string-join (map scaling-text (map symbol->string pure-overhead-ops)) "; "))
@@ -283,11 +310,18 @@
                          (format "~a (~a)"
                                  (string-join (for/list ([f (in-list pipelines)])
                                                 (format "~a w=~a: ~a" (ref f 'pipeline)
-                                                        (ref f 'workers) (num (ref f 'value) 2)))
+                                                        (ref f 'workers)
+                                                        (if (ref f 'cold)
+                                                            "n/a (no warm-up epoch)"
+                                                            (num (ref f 'value) 2))))
                                               "; ")
                                  jpeg-order-note)))
-               (list "K6" "GC share of wall time, cifar, most workers"
-                     (format "~a at ~a workers" (pct (ref gc 'value)) (or (ref gc 'workers) "-"))))))
+               (list "K6" "GC CPU µs per sample, cifar (summed over OS threads)"
+                     (if (null? gc)
+                         "-"
+                         (string-join (for/list ([g (in-list gc)])
+                                        (format "w=~a: ~a" (ref g 'workers) (whole (ref g 'value))))
+                                      "; "))))))
 
 (define (attribution-section records op)
   (define a (attribution records op))

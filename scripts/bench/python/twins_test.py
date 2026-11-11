@@ -1,7 +1,8 @@
 import time
 import unittest
 
-from op_cost import stack_inputs, thread_loop
+from common import GcClock
+from op_cost import sample, stack_inputs, thread_loop
 from pipelines import peak_rss_mb
 
 
@@ -37,6 +38,13 @@ class ThreadLoop(unittest.TestCase):
         thread_loop(3, make_step, 0.1)
         self.assertEqual(len(cases), 3)
         self.assertTrue(all(cases), [len(c) for c in cases])
+
+
+class Sample(unittest.TestCase):
+    def test_records_process_cpu_per_op_beside_wall_time(self):
+        record = sample("scalar-add", 0, lambda: sum(range(10000)), 0.05, GcClock())
+        self.assertGreater(record["cpu_us_per_op"], 0)
+        self.assertGreater(record["us_per_op"], 0)
 
 
 class StackInputs(unittest.TestCase):

@@ -462,7 +462,11 @@ It writes `op-cost-<stamp>.jsonl` and `op-cost-<stamp>.md` to `--out-dir`
 directory inside the repository, a records file that already exists (one
 file is one run; a reused `BASELINE_DATE` needs a new value), and more than
 one ATen intra-op thread. `taskset` is optional; the meta row records the affinity. Pin
-n+1 CPUs for n threads: main runs the finalizers beside the workers.
+n+1 CPUs for n threads or workers: main and the reapers run beside them. The
+driver warns on stderr when the affinity mask (`Cpus_allowed_list`, else
+`nproc`) has n or fewer. `--smoke` takes the smallest settings (one rep, one
+64-sample epoch) and keeps the pipelines' warm-up epoch; flags after it
+override it.
 
 - **Ops:** scalar add (`(+ (zeros 1) 1.0)`), 8×8 add, `zeros 8 8`,
   `narrow`, `stack` of 32 random 3×32×32 tensors, and one cifar sample
@@ -499,6 +503,12 @@ n+1 CPUs for n threads: main runs the finalizers beside the workers.
   `scripts/bench/python/pipelines.py` at `--pipeline-workers` (default 0
   and 8), one child process per cell. The jpeg twin crops uint8 before
   converting; rktorch converts first (#458).
-  `--samples`, `--warmup` and `--epochs` shorten them.
+  `--samples`, `--warmup` and `--epochs` shorten them. PyTorch's persistent
+  workers start inside the first epoch, so K5 at w > 0 reads n/a for a cell
+  timed without a warm-up epoch. K6 is GC CPU µs per sample at each worker
+  count: `current-gc-milliseconds` sums GC CPU over OS threads, so it is no
+  share of wall time.
 
-The summary's K1–K6 table follows the #255 metrics comment.
+The summary's K1–K6 table follows the #255 metrics comment. K1 and K2 set
+process CPU per op (every OS thread, the reapers included) beside wall time,
+n/a for records written before it was recorded.

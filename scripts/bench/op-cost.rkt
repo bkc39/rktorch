@@ -3,11 +3,13 @@
 (require (for-syntax racket/base)
          (only-in racket/date current-date date->string date-display-format)
          (only-in racket/file make-directory*)
+         (only-in racket/match match)
          (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in racket/string string-prefix? string-split)
+         (only-in racket/string string-prefix? string-split string-trim)
          (only-in threading ~>)
          (only-in torch torch-version)
-         (only-in "harness.rkt" busy-cores comma-list host-meta load-average rotate write-record)
+         (only-in "harness.rkt"
+                  busy-cores comma-list host-meta load-average proc-field rotate write-record)
          (only-in "op-cost-layers.rkt" pure-overhead-ops)
          (only-in "op-cost-measure.rkt" conditions run-rep sampler-record warm-up!)
          (only-in "op-cost-ops.rkt" ladder-ops op-case-layer op-case-name)
@@ -15,11 +17,15 @@
          (only-in "pytorch.rkt" require-pytorch twin-records)
          (only-in "shim.rkt" aten-threads)
          (only-in "summary-op-cost.rkt" op-cost-markdown)
-         (only-in "summary.rkt" read-records))
+         (only-in "summary.rkt" read-records)
+         (only-in "system-tools.rkt" command-output))
 
-(provide default-out-dir
+(provide cpu-list-count
+         cpu-warning
+         default-out-dir
          inside-repo?
-         out-paths)
+         out-paths
+         smoke-settings)
 
 (define-runtime-path repo-root "../..")
 
@@ -45,6 +51,33 @@
   (values (build-path dir (format "op-cost-~a.jsonl" tag))
           (build-path dir (format "op-cost-~a.md" tag))))
 
+;; One timed epoch of 64 samples, with the warm-up epoch kept: PyTorch's
+;; persistent workers start inside the first epoch.
+(define smoke-settings
+  (hasheq 'reps 1 'seconds 0.05 'thread-seconds 0.1 'pipeline-reps 1
+          'warmup 1 'epochs 1 'samples 64))
+
+(define (cpu-list-count text)
+  (for/sum ([part (in-list (string-split (string-trim text) ","))])
+    (match (map string->number (string-split part "-"))
+      [(list lo hi) (add1 (- hi lo))]
+      [(list _) 1])))
+
+(define (affinity-cpus)
+  (define listed (proc-field "/proc/self/status" "Cpus_allowed_list"))
+  (define nproc (and (not listed) (command-output "nproc")))
+  (cond
+    [listed (cpu-list-count listed)]
+    [nproc (string->number nproc)]
+    [else #f]))
+
+;; main and the reapers run beside n threads or n workers
+(define (cpu-warning cpus #:threads threads #:workers workers)
+  (define n (apply max 0 (append threads workers)))
+  (and cpus (positive? n) (<= cpus n)
+       (format "op-cost: warning: ~a CPUs in the affinity mask for ~a threads or workers; pin ~a"
+               cpus n (add1 n))))
+
 (define (twin-rep rep settings log emit)
   (for ([r (in-list (parameterize ([current-environment-variables
                                     (single-threaded-environment)])
@@ -66,7 +99,8 @@
                         #:pipelines pipelines #:pipeline-workers pipeline-workers
                         #:pipeline-reps pipeline-reps #:pipeline-settings p-settings
                         #:log [log (current-error-port)]
-                        #:aten-threads [aten (aten-threads)])
+                        #:aten-threads [aten (aten-threads)]
+                        #:cpus [cpus (affinity-cpus)])
   (when (inside-repo? dir)
     (raise-user-error 'op-cost "~a is inside the repository; bench results are never committed"
                       dir))
@@ -74,6 +108,11 @@
     (raise-user-error 'op-cost "needs one ATen intra-op thread, got ~a: set OMP_NUM_THREADS=1"
                       aten))
   (define-values (jsonl md) (out-paths dir))
+  (define warning
+    (cpu-warning cpus
+                 #:threads (if (or (memq 'ops chosen) (memq 'pytorch chosen)) threads '())
+                 #:workers (if (memq 'pipelines chosen) pipeline-workers '())))
+  (when warning (displayln warning log))
   (when (file-exists? jsonl)
     (raise-user-error 'op-cost "~a exists; one records file holds one run (set BASELINE_DATE anew)"
                       jsonl))
@@ -162,7 +201,13 @@
                   (set! samples (let ([v (string->number n)]) (and v (positive? v) v)))]
    [("--cell") name workers "Run one rktorch pipeline cell and print its record"
                (set! cell (list (string->symbol name) (string->number workers)))]
-   [("--summarize") p "Print the markdown summary of a records file" (set! summary p)])
+   [("--summarize") p "Print the markdown summary of a records file" (set! summary p)]
+   [("--smoke") "Smallest settings, warm-up epoch kept; flags after it override"
+                (set!-values (reps seconds thread-seconds pipeline-reps warmup epochs samples)
+                             (apply values
+                                    (map (lambda (k) (hash-ref smoke-settings k))
+                                         '(reps seconds thread-seconds pipeline-reps warmup
+                                                epochs samples))))])
   (cond
     [cell
      (match-define (list name workers) cell)
@@ -182,13 +227,47 @@
            (only-in racket/port open-output-nowhere)
            rackunit)
 
-  (define (refusal dir #:aten-threads [aten 1])
+  (define (refusal dir #:aten-threads [aten 1] #:log [log (open-output-nowhere)]
+                   #:suites [suites '()] #:workers [workers '()] #:cpus [cpus 64])
     (with-handlers ([exn:fail:user? exn-message])
-      (run-scoreboard #:out-dir dir #:suites '() #:ops '() #:threads '() #:reps 1
-                      #:seconds 0.1 #:thread-seconds 0.1 #:pipelines '() #:pipeline-workers '()
-                      #:pipeline-reps 1 #:pipeline-settings '() #:log (open-output-nowhere)
-                      #:aten-threads aten)
+      (run-scoreboard #:out-dir dir #:suites suites #:ops '() #:threads '() #:reps 1
+                      #:seconds 0.1 #:thread-seconds 0.1 #:pipelines '()
+                      #:pipeline-workers workers #:pipeline-reps 1 #:pipeline-settings '()
+                      #:log log #:aten-threads aten #:cpus cpus)
       #f))
+
+  (test-case "an affinity mask of n CPUs or fewer for n threads or workers draws one warning"
+    (check-equal? (cpu-list-count "0-8") 9)
+    (check-equal? (cpu-list-count "0,2,4-7\n") 6)
+    (check-equal? (cpu-warning 2 #:threads '(1 2) #:workers '())
+                  "op-cost: warning: 2 CPUs in the affinity mask for 2 threads or workers; pin 3")
+    (check-false (cpu-warning 2 #:threads '(1) #:workers '()))
+    (check-false (cpu-warning 9 #:threads '(1 2 4 8) #:workers '(0 8)))
+    (check-regexp-match #rx"for 8 threads or workers"
+                        (cpu-warning 8 #:threads '() #:workers '(0 8)))
+    (check-false (cpu-warning #f #:threads '(8) #:workers '()))
+    (check-false (cpu-warning 1 #:threads '() #:workers '(0))))
+
+  (test-case "the driver writes the warning for the cells it will run, on one line"
+    (define dir (make-temporary-directory))
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (putenv "BASELINE_DATE" "2026-11-11")
+      (define-values (jsonl _md) (out-paths dir))
+      (call-with-output-file jsonl (lambda (out) (write-string "{}\n" out)))
+      (define (logged suites cpus)
+        (define log (open-output-string))
+        (refusal dir #:suites suites #:workers '(2) #:cpus cpus #:log log)
+        (get-output-string log))
+      (check-equal? (logged '(pipelines) 2)
+                    (string-append (cpu-warning 2 #:threads '() #:workers '(2)) "\n"))
+      (check-equal? (logged '(pipelines) 3) "")
+      (check-equal? (logged '(ops) 2) ""))
+    (delete-directory/files dir))
+
+  (test-case "smoke settings keep the warm-up epoch, so worker start-up is never timed"
+    (check-true (>= (hash-ref smoke-settings 'warmup) 1))
+    (check-true (>= (hash-ref smoke-settings 'reps) 1)))
 
   (test-case "a run refuses a directory inside the repository, and more than one ATen thread"
     (check-regexp-match #rx"is inside the repository" (refusal (build-path repo-root "scripts")))
