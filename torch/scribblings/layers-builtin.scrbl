@@ -62,10 +62,22 @@ Each size is an integer for a square one, or a two-element list
 (shape ((Conv2d 1 4 3) (zeros 1 1 8 8)))
 ]}
 
-@defproc[(Dropout [#:p p (and/c real? (>=/c 0) (</c 1)) 0.5]) layer?]{
-Zeroes each element independently with probability @racket[p] while the
-layer is in training mode, and is the identity while it is evaluating. See
-@secref["Layers"] for the mode flag.}
+@defproc[(Dropout [#:p p (and/c real? (>=/c 0) (<=/c 1)) 0.5]) layer?]{
+@racket[dropout] at @racket[p] while the layer is in training mode, and the
+identity while it is evaluating (see @secref["Layers"]). Its application
+takes @racket[dropout]'s optional @racket[#:generator].}
+
+@defproc[(dropout [x tensor?]
+                  [#:p p (and/c real? (>=/c 0) (<=/c 1)) 0.5]
+                  [#:training? training? boolean? #t]
+                  [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+@tt{torch.nn.functional.dropout}: with @racket[training?], each element is
+zeroed with probability @racket[p] and the rest scaled by
+@tt{1/(1 - p)}; otherwise @racket[x] itself. The mask is drawn from
+@racket[generator], else from @racket[(current-generator)], which must then
+be on @racket[x]'s device, with @racket[x] floating point; with neither, from
+the global stream, as libtorch's own dropout draws it.}
 
 @section{Collecting parameters}
 

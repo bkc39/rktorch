@@ -417,7 +417,9 @@ tensor to a tensor, as PyTorch accepts a callable.
 @racket[dropout] zeroes with that probability, in training mode only, at
 four places: the attention weights, each sublayer's answer before it is
 added back, and the feed-forward's hidden layer. @racket[eval!] turns all
-of them off. @racket[layer-norm-eps] is every @racket[LayerNorm]'s
+of them off. Under a parameterized @racket[current-generator], the
+@racket[Dropout] sites draw from it, while the dropout fused into the
+attention draws from the global stream. @racket[layer-norm-eps] is every @racket[LayerNorm]'s
 @racket[#:eps]. @racket[batch-first?] takes and answers the batch first
 rather than the sequence, as @racket[MultiheadAttention]'s does.
 @racket[bias?] @racket[#f] drops every bias, in the projections, the

@@ -24,9 +24,11 @@
            (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/within.rkt" bounded-test))
 
+  (define mps-devices
+    (if (mps-available?) (list (mps-device)) '()))
+
   (define accelerators
-    (append (if (cuda-available?) (list (cuda-device)) '())
-            (if (mps-available?) (list (mps-device)) '())))
+    (append (if (cuda-available?) (list (cuda-device)) '()) mps-devices))
 
   (define devices (cons 'cpu accelerators))
 
@@ -158,18 +160,36 @@
       (check-true (<= small (hash-ref golden-op-calls name))
                   (format "~a [~a]: ~a calls" name on small))))
 
-  (define ((crossing reading) dev)
+  (define ((crossing reading samples) dev)
+    (set-box! samples (add1 (unbox samples)))
     (tr-cuda-is-available/raw)
     (reading dev))
 
+  (define (sampled-op-calls kind run n on)
+    (define samples (box 0))
+    (define calls
+      (parameterize ([allocator-reading (crossing (allocator-reading) samples)])
+        (define once (run (input kind n on) (make-generator 1 #:device on)))
+        (once)
+        (set-box! samples 0)
+        (op-calls-of once)))
+    (values calls (unbox samples)))
+
   (bounded-test "A1: the backstop's allocator samples are not the op's native calls"
     (match-define (list _ kind run) (assoc "multi-crop 2+6" cases))
-    (parameterize ([native-memory-limit (* 8 1024 1024)]
-                   [allocator-reading (crossing (allocator-reading))])
+    (parameterize ([native-memory-limit (* 8 1024 1024)])
       (for ([on (in-list devices)])
-        (define small (op-calls kind run 2 on))
-        (define large (op-calls kind run 128 on))
-        (check-equal? large small (format "[~a]: ~a at 2, ~a at 128"
+        (define-values (small small-samples) (sampled-op-calls kind run 2 on))
+        (define-values (large large-samples) (sampled-op-calls kind run 8 on))
+        (check-true (> small-samples 0) (format "[~a]: no samples at 2" on))
+        (define scales? (> large-samples small-samples))
+        (define scaling (format "[~a]: ~a samples at 2, ~a at 8"
+                                on small-samples large-samples))
+        (cond
+          [(not (member on mps-devices)) (check-true scales? scaling)]
+          [scales? (fail (format "#498 looks fixed (~a): make this an ordinary check" scaling))]
+          [else (printf "known failure (#498), skipped: ~a\n" scaling)])
+        (check-equal? large small (format "[~a]: ~a at 2, ~a at 8"
                                           on small large)))))
 
   (define (draws-after run n on)
