@@ -51,11 +51,16 @@ class Sample(unittest.TestCase):
         def step():
             return sum(range(10000))
 
+        t0 = time.process_time()
+        for _ in range(200):
+            step()
+        step_cpu_us = 1e6 * (time.process_time() - t0) / 200
         record = sample("scalar-add", 0, step, lambda: step, 0.05, GcClock())
         us, cpu_us = record["us_per_op"], record["cpu_us_per_op"]
         self.assertGreater(us, 0)
-        self.assertLessEqual(0.5 * us, cpu_us, record)
         self.assertLessEqual(cpu_us, 1.5 * us, record)
+        self.assertLessEqual(0.5 * step_cpu_us, cpu_us, (step_cpu_us, record))
+        self.assertLessEqual(cpu_us, 1.5 * step_cpu_us, (step_cpu_us, record))
 
     def test_threaded_cpu_leaves_out_building_the_steps(self):
         def make_step():

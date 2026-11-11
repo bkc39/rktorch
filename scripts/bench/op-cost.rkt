@@ -1,8 +1,7 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
+(require (only-in racket/cmdline command-line)
          (only-in racket/date current-date date->string date-display-format)
-         (only-in racket/cmdline command-line)
          (only-in racket/file make-directory*)
          (only-in racket/hash hash-union)
          (only-in racket/match match match-define)
@@ -33,7 +32,7 @@
 
 (define-runtime-path repo-root "../..")
 
-(define suites '(ops pytorch sampler pipelines))
+(define all-suites '(ops pytorch sampler pipelines))
 
 (define (default-out-dir)
   (or (getenv "BASELINE_DIR")
@@ -154,7 +153,7 @@
   (fprintf log "records: ~a\nsummary: ~a\n" jsonl md))
 
 (define (default-settings)
-  (hasheq 'out-dir (default-out-dir) 'suites suites 'ops op-cost-names 'threads thread-counts
+  (hasheq 'out-dir (default-out-dir) 'suites all-suites 'ops op-cost-names 'threads thread-counts
           'reps 5 'seconds 0.5 'thread-seconds 1.0
           'pipelines pipeline-names 'pipeline-workers '(0 8) 'pipeline-reps 3
           'warmup 1 'epochs 2 'samples #f 'cell #f 'summary #f))
