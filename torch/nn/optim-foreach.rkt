@@ -129,7 +129,8 @@
   (define ds
     (cond
       [decoupled?
-       (g:foreach-mul-scalar! ps (- 1.0 (* lr weight-decay)))
+       (unless (zero? weight-decay)
+         (g:foreach-mul-scalar! ps (- 1.0 (* lr weight-decay))))
        gs]
       [else (decayed state 'scratch ps gs weight-decay)]))
   (define ms (slots! state 'exp-avg ps))
