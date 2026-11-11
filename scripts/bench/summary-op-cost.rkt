@@ -213,13 +213,11 @@
 (define (worker-counts rows)
   (~> (map (lambda (r) (ref r 'workers)) rows) remove-duplicates (sort <)))
 
-;; PyTorch's persistent workers start inside the first epoch, so a cell with
-;; workers and no warm-up epoch times their start-up.
 (define (cold-start? records pipeline workers)
-  (and (positive? workers)
-       (for/or ([r (in-list (kind records "pipeline"))])
-         (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)
-              (eqv? (ref r 'warmup) 0)))))
+  (define (cold-cell? r)
+    (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)
+         (eqv? (ref r 'warmup) 0)))
+  (and (positive? workers) (ormap cold-cell? (kind records "pipeline"))))
 
 (define (k5-pipelines records)
   (define pipes (kind records "pipeline"))
@@ -231,8 +229,6 @@
     (hasheq 'pipeline p 'workers w 'rktorch r 'pytorch py 'cold cold
             'value (and r py (positive? py) (not cold) (/ r py)))))
 
-;; current-gc-milliseconds sums GC CPU over OS threads, so it can exceed wall
-;; time and is no share of it.
 (define (k6-gc-per-sample records #:pipeline [pipeline "cifar"])
   (define pipes (filter (lambda (r) (and (equal? (ref r 'impl) "rktorch")
                                          (equal? (ref r 'pipeline) pipeline)
