@@ -1,4 +1,5 @@
-/* Compile-only: pins C linkage for every public entry point. */
+/* Compile-only: pins C linkage for every public entry point; the global.h
+   family is pinned in c_api_compile_global_test.c. */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -17,20 +18,6 @@ void torchrkt_c_api_compile_check(void) {
       tr_hann_window;
   tr_tensor* (*stft)(const tr_tensor*, int64_t, int64_t, int64_t,
                      const tr_tensor*, bool, bool) = tr_stft;
-  const char* (*version)(void) = tr_version;
-  const char* (*abi_stamp)(void) = tr_abi_stamp;
-  const char* (*last_error)(void) = tr_last_error;
-  int (*last_error_kind)(void) = tr_last_error_kind;
-  int (*manual_seed)(uint64_t) = tr_manual_seed;
-  int (*set_deterministic_algorithms)(int, int) =
-      tr_set_deterministic_algorithms;
-  int (*get_deterministic_algorithms)(int*) = tr_get_deterministic_algorithms;
-  int (*get_deterministic_algorithms_warn_only)(int*) =
-      tr_get_deterministic_algorithms_warn_only;
-  int (*set_cudnn_deterministic)(int) = tr_set_cudnn_deterministic;
-  int (*get_cudnn_deterministic)(int*) = tr_get_cudnn_deterministic;
-  int (*set_cudnn_benchmark)(int) = tr_set_cudnn_benchmark;
-  int (*get_cudnn_benchmark)(int*) = tr_get_cudnn_benchmark;
   tr_tensor* (*randn)(const int64_t*, int64_t) = tr_randn;
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
   int (*numel)(const tr_tensor*, int64_t*) = tr_tensor_numel;
@@ -324,18 +311,6 @@ void torchrkt_c_api_compile_check(void) {
   int (*tensor_device)(const tr_tensor*, tr_device_type*, int64_t*) =
       tr_tensor_device;
 
-  (void)version;
-  (void)abi_stamp;
-  (void)last_error;
-  (void)last_error_kind;
-  (void)manual_seed;
-  (void)set_deterministic_algorithms;
-  (void)get_deterministic_algorithms;
-  (void)get_deterministic_algorithms_warn_only;
-  (void)set_cudnn_deterministic;
-  (void)get_cudnn_deterministic;
-  (void)set_cudnn_benchmark;
-  (void)get_cudnn_benchmark;
   (void)randn;
   (void)tensor_free;
   (void)numel;

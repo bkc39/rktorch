@@ -104,6 +104,7 @@ if(BUILD_TESTING)
   include(GoogleTest)
 
   add_library(torchrkt_c_api_compile_test OBJECT
+    tests/torchrkt/c_api_compile_global_test.c
     tests/torchrkt/c_api_compile_test.c
   )
   target_include_directories(torchrkt_c_api_compile_test
