@@ -8,8 +8,9 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../runtime/reaper.rkt" reap-when-dead! reaped)
          (only-in "../device-type.rkt" device device-index device-type)
-         (only-in "accounts.rkt" with-ledger)
-         (only-in "cas.rkt" cas-add! cas-claim! cas-claim-when! cas-update!)
+         (only-in "accounts.rkt"
+                  count-checked! count-live! ledger-entries tally-of with-ledger)
+         (only-in "cas.rkt" cas-claim! cas-claim-when! cas-update!)
          (only-in "collector.rkt"
                   finalizer-runs
                   note-finalizer-run!)
@@ -26,16 +27,14 @@
                   collect-under-pressure!
                   live-bytes-by-device
                   note-adopted!
-                  note-checked!
-                  note-live!
-                  note-unaccounted!
                   note-unadopted!
                   pressure-diagnostics
                   shadow-generation
                   unaccounted-bytes-by-device)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-cleanup with-uninterruptible)
-         (only-in "syntax.rkt" _Tensor define-torch))
+         (only-in "syntax.rkt" _Tensor define-torch)
+         (only-in "tallies.rkt" flush-tally! tally-op!))
 
 (provide account!
          adopted-bytes
@@ -161,14 +160,12 @@
 (define (finalizer-failures)
   (failed-count (unbox failures)))
 
-(define entries (box 0))
-
 (define (finalizer-diagnostics)
   (match-define (failed count messages) (unbox failures))
   (append (list (cons 'runs (finalizer-runs))
                 (cons 'failures count)
                 (cons 'messages (reverse messages))
-                (cons 'ledger-entries (unbox entries)))
+                (cons 'ledger-entries (ledger-entries)))
           (pressure-diagnostics)))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
@@ -223,7 +220,7 @@
       (release! h lt))]
     [else (void)]))
 
-(define tensor-reaped (reaped 'tensor release-dead-handle!))
+(define tensor-reaped (reaped 'tensor release-dead-handle! #:after-batch flush-tally!))
 
 (define (register-tensor! h)
   (hash-set! lifetimes h (fresh-lifetime))
@@ -297,21 +294,20 @@
   (define lt (lifetime-of! key))
   (define a (account-of dev))
   (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
-  (define (charge!)
+  (define (charge! p)
     (with-uninterruptible
-      (cas-add! entries 1)
-      (note-live! a nbytes)
+      (count-live! a p nbytes 1)
       (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
          (race-point ledger-entry-added key)
-         (note-checked! a nbytes)
+         (count-checked! a p nbytes)
          (when adopt (adopt entry))]
         [else
-         (cas-add! entries -1)
-         (note-unaccounted! a nbytes)
-         (set-phantom-bytes! (allocation-phantom entry) 0)])))
-  (if adopt (with-ledger (charge!)) (charge!)))
+         (count-live! a p (- nbytes) -1)
+         (set-phantom-bytes! (allocation-phantom entry) 0)])
+      (when p (tally-op! p nbytes))))
+  (if adopt (with-ledger (charge! #f)) (charge! (tally-of a))))
 
 (define (unaccount! key)
   (define lt (hash-ref lifetimes key #f))
@@ -325,22 +321,24 @@
       (race-point unaccount-entry-read key)
       (with-uninterruptible
         (when (cas-claim! charge a #f)
-          (cas-add! entries -1)
+          (define account (allocation-account a))
+          (define nbytes (allocation-nbytes a))
+          (define p (and (zero? (allocation-adopted a)) (tally-of account)))
+          (count-live! account p (if p (- nbytes) 0) -1)
           (race-point entry-unaccounted key)
           (set-phantom-bytes! (allocation-phantom a) 0)
           ;; an adoption's bytes leave the ledger and return to the shadow in
           ;; one section: a refresh between them would charge them twice. A
           ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
           (cond
-            [(positive? (allocation-adopted a))
+            [p (tally-op! p nbytes)]
+            [else
              (with-ledger
-               (note-unaccounted! (allocation-account a) (allocation-nbytes a))
+               (count-live! account #f (- nbytes) 0)
                (race-point live-returned key)
                (race-point adoption-returning key)
                (when (positive? (allocation-adopted a))
-                 (unadopt! a)))]
-            [else
-             (note-unaccounted! (allocation-account a) (allocation-nbytes a))]))))))
+                 (unadopt! a)))]))))))
 
 (define (charge-of key)
   (define lt (hash-ref lifetimes key #f))

@@ -9,7 +9,12 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
          (only-in "pressure-settings.rkt" margin-over)
-         (only-in "race-points.rkt" race-point))
+         (only-in "race-points.rkt" race-point)
+         (only-in "tallies.rkt"
+                  counters-entries counters-live counters-since-check
+                  counters-since-sample flush-tallies! forget-mark!
+                  fresh-counters own-pending-checks pending-of tally-checked! tally-live!
+                  [note-mark! note-counters-mark!]))
 
 (provide call-with-ledger
          with-ledger
@@ -20,6 +25,12 @@
          account-sample set-account-sample!
          account-trial set-account-trial!
          live-bytes since-check-bytes since-sample-bytes
+         note-mark!
+         own-checks
+         tally-of
+         count-live!
+         count-checked!
+         ledger-entries
          note-accounted!
          note-checked!
          note-live!
@@ -73,7 +84,7 @@
   (call-with-ledger (lambda () body ...)))
 
 (struct account
-  (live since-check since-sample
+  (counters
    [sample #:mutable] [interval #:mutable] [capacity #:mutable]
    [floor #:mutable] shadow [unaccounted #:mutable] [release-after #:mutable]
    [trial #:mutable]))
@@ -82,13 +93,13 @@
   #:mutable)
 
 (module+ private
-  (provide accounts))
+  (provide account-counters accounts raw-live))
 
 (define accounts (box (hash)))
 (define the-stats (stats 0 0 0 0))
 
 (define (fresh-account)
-  (account (box 0) (box 0) (box 0) 0 #f 'unknown 0 (make-phantom-bytes 0) 0 0.0 #f))
+  (account (fresh-counters) 0 #f 'unknown 0 (make-phantom-bytes 0) 0 0.0 #f))
 
 (define (all-accounts)
   (hash-values (unbox accounts)))
@@ -102,58 +113,96 @@
                                  (if (hash-ref all dev #f) all (hash-set all dev fresh))))
                   dev))))
 
-(define (live-bytes a) (unbox (account-live a)))
-(define (since-check-bytes a) (unbox (account-since-check a)))
-(define (since-sample-bytes a) (unbox (account-since-sample a)))
+(define (raw-live a) (unbox (counters-live (account-counters a))))
+(define (live-of a) (max 0 (raw-live a)))
+(define (since-check-bytes a) (unbox (counters-since-check (account-counters a))))
+(define (since-sample-bytes a) (unbox (counters-since-sample (account-counters a))))
+
+(define (live-bytes a)
+  (flush-tallies!)
+  (live-of a))
+
+(define (note-mark! a mark)
+  (note-counters-mark! (account-counters a) mark))
+
+(define (own-checks a)
+  (own-pending-checks (account-counters a)))
+
+(define (tally-of a)
+  (pending-of (account-counters a)))
 
 (define (note-live! a nbytes)
-  (cas-add! (account-live a) nbytes))
+  (cas-add! (counters-live (account-counters a)) nbytes))
 
 (define (note-checked! a nbytes)
-  (cas-add! (account-since-check a) nbytes)
-  (cas-add! (account-since-sample a) nbytes))
+  (define c (account-counters a))
+  (cas-add! (counters-since-check c) nbytes)
+  (cas-add! (counters-since-sample c) nbytes))
 
 (define (note-accounted! a nbytes)
   (note-live! a nbytes)
   (note-checked! a nbytes))
 
 (define (note-unaccounted! a nbytes)
-  (cas-update! (account-live a) (lambda (live) (max 0 (- live nbytes)))))
+  (note-live! a (- nbytes)))
+
+;; `p` is the caller's tally, or #f for the paths that write the shared
+;; counters under the ledger.
+(define (count-live! a p nbytes entries)
+  (cond
+    [p (tally-live! p nbytes entries)]
+    [else
+     (note-live! a nbytes)
+     (cas-add! (counters-entries (account-counters a)) entries)]))
+
+(define (count-checked! a p nbytes)
+  (if p (tally-checked! p nbytes) (note-checked! a nbytes)))
+
+(define (ledger-entries)
+  (flush-tallies!)
+  (for/sum ([a (in-list (all-accounts))])
+    (unbox (counters-entries (account-counters a)))))
 
 (define (checks-seen)
+  (flush-tallies!)
   (for/list ([a (in-list (all-accounts))])
     (cons a (since-check-bytes a))))
 
 (define (reset-checks! seen)
   (for ([entry (in-list seen)])
     (match-define (cons a bytes) entry)
-    (cas-update! (account-since-check a) (lambda (now) (max 0 (- now bytes))))))
+    (cas-update! (counters-since-check (account-counters a)) (lambda (now) (max 0 (- now bytes))))))
 
 (define (take-since-sample! a)
-  (cas-take! (account-since-sample a)))
+  (cas-take! (counters-since-sample (account-counters a))))
 
 (define (account-over-floor? a)
   (define floor (account-floor a))
-  (> (- (live-bytes a) floor) (margin-over floor)))
+  (> (- (live-of a) floor) (margin-over floor)))
 
 (define (live-bytes-by-device)
+  (flush-tallies!)
   (for/list ([(dev a) (in-hash (unbox accounts))])
-    (cons dev (live-bytes a))))
+    (cons dev (raw-live a))))
 
 (define (since-check-of dev)
+  (flush-tallies!)
   (since-check-bytes (account-of dev)))
 
 (define (unaccounted-bytes-by-device)
+  (flush-tallies!)
   (for/list ([(dev a) (in-hash (unbox accounts))])
     (cons dev (account-unaccounted a))))
 
 (define (ledger-total)
-  (for/sum ([a (in-list (all-accounts))]) (live-bytes a)))
+  (flush-tallies!)
+  (for/sum ([a (in-list (all-accounts))]) (live-of a)))
 
 (define (unaccounted-total)
   (for/sum ([a (in-list (all-accounts))]) (account-unaccounted a)))
 
 (define (devices-over-floor)
+  (flush-tallies!)
   (for/list ([(dev a) (in-hash (unbox accounts))] #:when (account-over-floor? a))
     dev))
 
@@ -169,7 +218,7 @@
   (set-phantom-bytes! (account-shadow a) bytes))
 
 (define (set-shadow! a reading)
-  (charge-shadow! a (max 0 (- reading (live-bytes a)))))
+  (charge-shadow! a (max 0 (- reading (live-of a)))))
 
 (define (note-adopted! a nbytes)
   (define taken (min nbytes (account-unaccounted a)))
@@ -183,7 +232,7 @@
 ;; another moment, and lowers nothing.
 (define (lower-shadow! a reading live)
   (define excess (max 0 (- reading live)))
-  (when (and (= live (live-bytes a))
+  (when (and (= live (live-of a))
              (< excess (account-unaccounted a)))
     (charge-shadow! a excess)))
 
@@ -192,13 +241,14 @@
 (define (next-shadow-generation!) (set! generation (add1 generation)))
 
 (define (lower-floors!)
+  (flush-tallies!)
   (with-ledger
     (for ([a (in-list (all-accounts))])
-      (set-account-floor! a (min (account-floor a) (live-bytes a))))))
+      (set-account-floor! a (min (account-floor a) (live-of a))))))
 
 (define (settle-floors!)
   (for ([a (in-list (all-accounts))])
-    (set-account-floor! a (live-bytes a))))
+    (set-account-floor! a (live-of a))))
 
 (define (count-backstop-collection!)
   (set-stats-backstop-collections! the-stats (add1 (stats-backstop-collections the-stats))))
@@ -215,10 +265,13 @@
                               (account-floor a)))))
 
 (define (reset-accounts!)
+  (flush-tallies!)
   (with-ledger
     (for ([a (in-list (all-accounts))])
-      (set-box! (account-since-check a) 0)
-      (set-box! (account-since-sample a) 0)
+      (define c (account-counters a))
+      (forget-mark! c)
+      (set-box! (counters-since-check c) 0)
+      (set-box! (counters-since-sample c) 0)
       (set-account-sample! a 0)
       (set-account-interval! a #f)
       (set-account-capacity! a 'unknown)
