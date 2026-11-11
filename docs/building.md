@@ -97,7 +97,7 @@ Inside a shell:
 ```bash
 raco test torch/                  # unit tests; the PyTorch parity tests self-skip
                                   # where python3 cannot import torch
-raco test examples/test/          # the literate examples
+raco test --timeout 60 examples/test/  # the literate examples; info.rkt limits apply only with --timeout
 racket -ie "(require torch)"      # a REPL with the package loaded
 scripts/resyntax analyze --local-git-repository .   # the lint gate
 racket scripts/check-paths.rkt    # the paths the prose names exist

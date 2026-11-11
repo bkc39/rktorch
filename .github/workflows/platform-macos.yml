@@ -41,9 +41,9 @@ jobs:
     uses: ./.github/workflows/platform-macos-build.yml
 
   install:
-    name: install (macOS 14, Racket 9.1 and 9.3)
+    name: install (macOS 15, Racket 9.1 and 9.3)
     needs: build
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     defaults:
       run:
