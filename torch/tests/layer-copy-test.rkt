@@ -230,7 +230,7 @@
       [(define (layer-forward self . inputs)
          (* (car inputs) (scaled-w self)))
        (define (layer-parameters self) (list (scaled-w self)))
-       (define (layer-rebuild self child tensor)
+       (define (layer-rebuild-method self child tensor)
          (~> (scaled-w self) tensor scaled))])
     (define s (~> (ones 2) Parameter scaled))
     (define c (layer-copy s))

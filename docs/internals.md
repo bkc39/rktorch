@@ -737,6 +737,16 @@ gets the point's name and a subject (a handle, a device, a thread).
   points; an entry added again under its handle, as an in-place move
   does, starts a fresh count); the ledger back to its baseline after the drop; no finalizer
   failures; the fault latch clear.
+- Crossing counts (`torch/tests/private/op-calls.rkt`): `crossings-of`
+  counts a thunk's crossings on its own thread, and `op-calls-of` leaves
+  out the accounting ones: two placement reads per `ledger-entry-added`
+  that is not a batched fetch's (`ledger-entry-added/batched`), one per
+  explicit free, and one per non-empty `frees-released/batched` whatever
+  number of `free-released` it raised. Both, and the fault sweep's
+  `faulted-at?`, skip the crossing that follows a `finalizer-releasing` or
+  `generator-releasing` on the thread: an op after a collection reaps up
+  to 32 dead tensors inline, and a fault injected into one of those
+  releases is swallowed by the release's total catch.
 - Seeded fuzzing (`torch/tests/race-fuzz-test.rkt`): every point outside atomic mode
   yields or sleeps by a per-thread generator seeded from the run's seed and
   the thread's label. A failure prints the seed;

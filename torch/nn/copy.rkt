@@ -7,7 +7,7 @@
          (only-in "buffer.rkt" Buffer Buffer?)
          (only-in "layer.rkt" layer?)
          (only-in "parameter.rkt" Parameter Parameter?)
-         (only-in "private/layer-core.rkt" layer-rebuild-in)
+         (only-in "private/layer-core.rkt" layer-rebuild-alone layer-rebuild-in)
          (only-in "private/memo.rkt" remembered remembering with-memo))
 
 (define (fresh-tensor t)
@@ -28,4 +28,4 @@
 (define/checked-out (layer-copy m) ;; noqa
   (-> layer? layer?)
   (with-memo (seen 'layer-copy)
-    (layer-rebuild-in m (remembering seen copy-child) (tensor-copier seen))))
+    (layer-rebuild-alone m (remembering seen copy-child) (tensor-copier seen))))

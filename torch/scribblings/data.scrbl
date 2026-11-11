@@ -420,8 +420,12 @@ stream's state may be set on a generator, and back.
                            @racket[GRU] @racket[MultiheadAttention], and layers
                            built on them}
                      fallback "no" @racket[(default-device)])
-               (list @racket[Dropout] "the input device's default stream"
-                     "no" "none")
+               (list @elem{@racket[dropout] @racket[Dropout]}
+                     @elem{@racket[(current-generator)], read once per call, else
+                           libtorch's dropout on the input device's default stream;
+                           a generator draws a float16 or bfloat16 mask at float32;
+                           nothing is drawn at @racket[p] 0 or 1 or evaluating}
+                     "yes" "the input's device")
                (list @elem{dropout inside @racket[scaled-dot-product-attention]
                            @racket[MultiheadAttention] @racket[LSTM] @racket[GRU]}
                      "the device's default stream" "no" "none")
