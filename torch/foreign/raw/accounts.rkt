@@ -15,7 +15,7 @@
                   counters-since-sample flush-tallies! forget-mark!
                   fresh-counters own-pending-checks pending-of tally-staleness
                   tally-checked! tally-live!
-                  [note-mark! note-counters-mark!]))
+                  note-counters-mark!))
 
 (provide call-with-ledger
          with-ledger

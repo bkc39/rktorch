@@ -8,7 +8,7 @@
 
 (provide fresh-counters
          counters-live counters-entries counters-since-check counters-since-sample
-         note-mark!
+         note-counters-mark!
          forget-mark!
          pending-of
          own-pending-checks
@@ -45,7 +45,7 @@
 (define (tally-limit mark)
   (if mark (min limit-cap (quotient mark limit-divisor)) limit-cap))
 
-(define (note-mark! c mark)
+(define (note-counters-mark! c mark)
   (define limit (tally-limit mark))
   (unless (eqv? limit (counters-limit c))
     (set-counters-limit! c limit)))
