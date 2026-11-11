@@ -24,4 +24,4 @@
     ("15-finetune.rkt" 60)
     ("16-style-transfer.rkt" 60)
     ("17-workers.rkt" 60)
-    ("18-vit.rkt" 90)))
+    ("18-vit.rkt" 120)))
