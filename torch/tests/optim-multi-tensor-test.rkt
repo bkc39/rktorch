@@ -14,8 +14,8 @@
                     tensor->list to zeros)
            (only-in "../nn.rkt"
                     Linear Sequential adam adam? adamw adamw? ema ema-update!
-                    parameters rmsprop set-learning-rate! sgd step!
-                    zero-grads!)
+                    exponential-lr param-group param-group-set! parameters rmsprop
+                    scheduler-rate set-learning-rate! sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/resnet.rkt" ResNet)
            (only-in "private/op-calls.rkt" crossings-of op-calls-of)
@@ -234,6 +234,30 @@
                                 #:fused? #t))))
     (check-regexp-match #rx"floating-tensor/c" m)
     (check-regexp-match #rx"blaming: [^\n]*optim-multi-tensor-test" m))
+
+  (define group-violations
+    `(("a fused step over an integer group" #rx"floating-param-group/c"
+       ,(lambda ()
+          (sgd (list (param-group (list (zeros 2 #:dtype 'int64)))) #:lr 0.1 #:fused? #t)))
+      ("a negative eps in an rmsprop group" #rx"eps is negative"
+       ,(lambda () (rmsprop (list (param-group (parameters (Linear 2 2)) #:eps -1e-8)))))
+      ("a negative rate in a group" #rx"param-group: contract violation"
+       ,(lambda () (param-group (parameters (Linear 2 2)) #:lr -0.1)))
+      ("a non-boolean nesterov? written" #rx"param-group-set!: contract violation"
+       ,(lambda () (param-group-set! (sgd (parameters (Linear 2 2)) #:lr 0.1) 0 'nesterov? 1)))
+      ("a group past the last in set-learning-rate!" #rx"no parameter group with this index"
+       ,(lambda () (set-learning-rate! (sgd (parameters (Linear 2 2)) #:lr 0.1) 0.2 #:group 1)))
+      ("a group past the last in scheduler-rate" #rx"no parameter group with this index"
+       ,(lambda ()
+          (~> (Linear 2 2) parameters (sgd #:lr 0.1) (exponential-lr #:gamma 0.5)
+              (scheduler-rate #:group 1))))))
+
+  (for ([case (in-list group-violations)])
+    (match-define (list label rx call) case)
+    (bounded-test (format "~a is the caller's violation" label)
+      (define m (violation call))
+      (check-regexp-match rx m)
+      (check-regexp-match #rx"blaming: [^\n]*optim-multi-tensor-test" m)))
 
   (bounded-test "rmsprop has no fused kernel to ask for"
     (check-exn exn:fail:contract?
