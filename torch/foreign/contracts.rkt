@@ -43,6 +43,7 @@
          reduce-or-variadic/c
          argmax/c
          compare/c
+         extremum/c
          flatten/c)
 
 (define (slice-spec? x)
@@ -186,6 +187,7 @@
         (list/c exact-nonnegative-integer? exact-nonnegative-integer?)))
 
 (define compare/c (-> tensor? tensor-or-real/c tensor?))
+(define extremum/c (-> tensor? tensor? tensor?))
 
 (define flatten/c
   (->i ([v any/c])

@@ -106,6 +106,17 @@ be given.
 (tensor->list (clamp (tensor '(-1.0 0.5 2.0)) #:min 0.0 #:max 1.0))
 ]}
 
+@deftogether[(@defproc[(maximum [a tensor?] [b tensor?]) tensor?]
+              @defproc[(minimum [a tensor?] [b tensor?]) tensor?])]{
+The elementwise larger and smaller of two tensors, which broadcast and
+promote to a common dtype; @tt{torch.maximum} and @tt{torch.minimum}. A NaN
+in either operand gives NaN.
+
+@torch-examples[
+(tensor->list (maximum (tensor '((0.0) (2.0))) (tensor '(-1.0 1.0 3.0))))
+(tensor->list (minimum (tensor '(1 5)) (tensor '(2.5 +nan.0))))
+]}
+
 @defproc[(matmul [a tensor?] [b tensor?]) tensor?]{
 Matrix product, following PyTorch's @tt{torch.matmul} broadcasting rules.
 

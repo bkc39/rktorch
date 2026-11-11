@@ -226,3 +226,8 @@ vision upsample_bicubic2d
 # parameters.
 math floor
 math fmod.Scalar
+# --- tranche 10 (#451): elementwise extrema ----------------------------------
+# torch.maximum and torch.minimum: two tensors, broadcast and promoted, NaN
+# in either operand propagating.
+math maximum
+math minimum

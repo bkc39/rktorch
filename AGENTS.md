@@ -257,7 +257,8 @@ with `backward!` outside the form as PyTorch recommends). From
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack flip`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`
-  (binary ops take a real on either side)
+  (binary ops take a real on either side); `maximum minimum` (tranche 10,
+  #451) take two tensors and propagate NaN
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
   fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
@@ -338,8 +339,9 @@ on the hand-written shim) and the sampling grids (`affine-grid grid-sample
 #:mode #:padding-mode #:align-corners? upsample-bicubic2d`, tranche 9, #389:
 `F.affine_grid`, `F.grid_sample` on a float `[N C H W]` batch with the grid
 on its N, dtype and device, bicubic `F.interpolate(size=)`; `floor-tensor`
-and `fmod-scalar` stay on `torch/generated`) live on
-`torch` beside the other functional ops;
+and `fmod-scalar` stay on `torch/generated`) and the elementwise extrema
+(`maximum minimum`, tranche 10, #451) live on `torch` beside the other
+functional ops;
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'
@@ -741,7 +743,7 @@ its regression test, once a pinned libtorch fixes the kernel.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..9}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..10}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
