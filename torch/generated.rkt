@@ -98,7 +98,9 @@
          masked-select
          matmul
          max-pool2d
+         maximum
          mean-dim
+         minimum
          mm
          mul-tensor!
          multinomial
@@ -365,8 +367,14 @@
 (define-generated-op max-pool2d tr_gen_max_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [dilation int-array] [ceil-mode bool]))
 
+(define-generated-op maximum tr_gen_maximum
+  ([self tensor] [other tensor]))
+
 (define-generated-op mean-dim tr_gen_mean_dim
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
+
+(define-generated-op minimum tr_gen_minimum
+  ([self tensor] [other tensor]))
 
 (define-generated-op mm tr_gen_mm
   ([self tensor] [mat2 tensor]))
