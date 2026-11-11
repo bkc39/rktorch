@@ -186,6 +186,75 @@ Equivalent to @racket[(to t dev)].
 Equivalent to @racket[(to t dtype)].
 }
 
+@section[#:tag "grad-scaling"]{Gradient scaling}
+
+@defmodule[torch/nn #:link-target? #f]
+
+Not implemented yet. A gradient scaler is @tt{torch.amp.GradScaler}: under
+@racket['float16] autocast, small gradients underflow, so the loss is
+multiplied by a large power of two before @racket[backward!] and the
+gradients are divided by it again before the step. Unscale before clipping,
+so the clip sees the true gradients. A step whose gradients hold an inf or a
+NaN is skipped and the scale backs off; after @racket[growth-interval]
+finite steps in a row it grows. A fused @racket[sgd], @racket[adam] or
+@racket[adamw] reads the scale and the inf flag on the device, so a scaled
+step makes no host read; any other optimizer reads the flag once per step.
+
+@racketblock[
+(define scaler (grad-scaler #:device 'cpu))
+(zero-grads! opt)
+(backward! (grad-scaler-scale-loss scaler loss))
+(grad-scaler-unscale! scaler opt)
+(clip-grad-norm! (parameters net) 1.0)
+(grad-scaler-step! scaler opt)
+(grad-scaler-update! scaler)
+]
+
+@defproc[(grad-scaler [#:device device (or/c 'cpu 'cuda 'mps device?) 'cuda]
+                      [#:init-scale init-scale (>/c 0) 65536.0]
+                      [#:growth-factor growth-factor (>/c 1) 2.0]
+                      [#:backoff-factor backoff-factor (and/c (>/c 0) (</c 1)) 0.5]
+                      [#:growth-interval growth-interval exact-positive-integer? 2000]
+                      [#:enabled? enabled? boolean? #t])
+         grad-scaler?]{
+A scaler for @racket[device]'s gradients. The scale is created on the device
+of the first loss it scales. A @racket['cuda] scaler without CUDA logs a
+warning to @racket['rktorch-amp] and is disabled; a disabled scaler answers
+its loss as it is and steps as @racket[step!] does.
+}
+
+@deftogether[(@defproc[(grad-scaler? [v any/c]) boolean?]
+              @defproc[(grad-scaler-scale [s grad-scaler?]) real?]
+              @defproc[(grad-scaler-enabled? [s grad-scaler?]) boolean?])]{
+A scaler, its current scale (@tt{get_scale}, read to the host; 1.0 when
+disabled), and whether it scales.
+}
+
+@defproc[(grad-scaler-scale-loss [s grad-scaler?] [loss tensor?]) tensor?]{
+@racket[loss] times the scale, @tt{scaler.scale(loss)}.
+}
+
+@defproc[(grad-scaler-unscale! [s grad-scaler?] [opt optimizer?]) void?]{
+Divides the gradients of @racket[opt]'s parameters by the scale in place and
+records whether any is non-finite, @tt{unscale_}. Calling it twice before
+@racket[grad-scaler-update!], or after @racket[grad-scaler-step!], is a
+contract violation, as is calling it before any loss was scaled.
+}
+
+@defproc[(grad-scaler-step! [s grad-scaler?] [opt optimizer?]) void?]{
+Unscales if @racket[grad-scaler-unscale!] has not, then steps @racket[opt]
+unless a gradient was non-finite, @tt{scaler.step(opt)}. It answers nothing,
+so a skipped step is not reported.
+}
+
+@defproc[(grad-scaler-update! [s grad-scaler?] [new-scale (or/c #f (>/c 0)) #f])
+         void?]{
+Backs the scale off after a skipped step and grows it after
+@racket[growth-interval] finite ones, or sets it to @racket[new-scale],
+@tt{scaler.update()}. An update with no unscale or step since the last is a
+contract violation.
+}
+
 @section{Choosing a device}
 
 @defproc*[([(device [t tensor?]) device?]

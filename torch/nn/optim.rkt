@@ -4,8 +4,7 @@
                      ;; whole-module require on purpose
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* ->i >=/c and/c any/c contract-out listof or/c
-                  property/c rename-contract unsupplied-arg?)
+                  -> ->* ->i >=/c any/c contract-out listof or/c unsupplied-arg?)
          (only-in racket/flonum flexpt)
          (only-in racket/generic define-generics)
          (only-in racket/list group-by)
@@ -19,8 +18,12 @@
          (only-in "../foreign/ops.rkt" move-generation)
          (prefix-in g: (only-in "../generated.rkt"
                                 add-tensor add-tensor! div-scalar! lerp-scalar!))
-         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/contract.rkt" define/checked-out define/contract-out supplied-or)
          (only-in "../private/step-log.rkt" log-optimizer-step!)
+         (only-in "param-group.rkt" hyperparameter-key/c param-group?)
+         (only-in (submod "param-group.rkt" private)
+                  floating-params/c grouped? groups-distinct? groups-keys-within?
+                  groups-setting-holds? params/c)
          (only-in "optim-foreach.rkt"
                   adam-foreach! adam-fused! bias-correction rmsprop-foreach!
                   sgd-foreach! sgd-fused! slot! slot-ref step-count!))
@@ -31,6 +34,7 @@
          optimizer-parameters
          optimizer-lr
          optimizer-set-lr!
+         optimizer-root
          sgd-lr
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
@@ -47,7 +51,9 @@
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
   (optimizer-lr optimizer)
-  (optimizer-set-lr! optimizer lr))
+  (optimizer-set-lr! optimizer lr)
+  (optimizer-root optimizer)
+  #:fallbacks [(define (optimizer-root opt) opt)])
 
 (struct tracked (state keys [generation #:mutable]))
 
@@ -123,19 +129,38 @@
 (define (hyper x)
   (real->double-flonum x))
 
-(define floating-tensor/c
-  (rename-contract
-   (and/c tensor? (property/c dtype (or/c 'float16 'bfloat16 'float32 'float64)))
-   'floating-tensor/c))
-
 (define (explicit? v)
   (and (not (unsupplied-arg? v)) v))
 
-(define floating-tensors/c (listof floating-tensor/c))
-(define tensors/c (listof tensor?))
-
 (define (fused-parameters/c fused?)
-  (if (explicit? fused?) floating-tensors/c tensors/c))
+  (if (explicit? fused?) floating-params/c params/c))
+
+(define sgd-keys '(lr momentum nesterov? weight-decay))
+(define adam-keys '(lr beta1 beta2 eps weight-decay))
+(define rmsprop-keys '(lr alpha eps weight-decay momentum))
+
+(define (hyperparameter-keys opt)
+  (define root (optimizer-root opt))
+  (cond
+    [(sgd? root) sgd-keys]
+    [(adam? root) adam-keys]
+    [(rmsprop? root) rmsprop-keys]
+    [else '()]))
+
+(define (has-hyperparameter? opt key)
+  (and (memq key (hyperparameter-keys opt)) #t))
+
+(define (group-index? opt i)
+  (or (zero? i) (< i (param-group-count opt))))
+
+(define nonnegative/c (>=/c 0))
+
+(define (hyperparameter-value/c opt key)
+  (match key
+    ['nesterov? boolean?]
+    [(or 'beta1 'beta2) real?]
+    ['eps (if (rmsprop? (optimizer-root opt)) nonnegative/c real?)]
+    [_ nonnegative/c]))
 
 (begin-for-syntax
   (define-syntax-class hyperparameter
@@ -152,6 +177,7 @@
 (define-syntax-parse-rule
   (define-fusable-optimizer (name:id params:id h:hyperparameter ...)
     (~seq #:pre/name pre-ids:expr pre-message:expr pre-test:expr) ...
+    #:keys keys:expr
     #:mode mode:id
     #:result result?:expr
     body:expr ...+)
@@ -161,6 +187,11 @@
          ((~@ h.optional ...) ...
           #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
          (~@ #:pre/name pre-ids pre-message pre-test) ...
+         #:pre/name (params) "a parameter appears in more than one parameter group"
+         (groups-distinct? params)
+         #:pre/name (params)
+         "a parameter group sets a hyperparameter this optimizer does not have"
+         (groups-keys-within? params keys)
          #:pre/name (foreach? fused?)
          "fused and foreach cannot both be requested"
          (not (and (explicit? foreach?) (explicit? fused?)))
@@ -187,10 +218,14 @@
   "Nesterov momentum requires a momentum"
   (or (not (explicit? nesterov?))
       (and (not (unsupplied-arg? momentum)) (> momentum 0)))
+  #:keys sgd-keys
   #:mode mode
   #:result sgd?
-  (make-sgd (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper momentum)
-            nesterov? (hyper weight-decay) mode))
+  (cond
+    [(grouped? params) (error 'unimplemented)]
+    [else
+     (make-sgd (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper momentum)
+               nesterov? (hyper weight-decay) mode)]))
 
 (define (momentum-buffer! state p d momentum)
   (cond
@@ -247,10 +282,14 @@
                                   [#:eps eps real? 1e-8]
                                   [#:weight-decay weight-decay (>=/c 0)
                                    default-decay])
+    #:keys adam-keys
     #:mode mode
     #:result result?
-    (make (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper beta1)
-          (hyper beta2) (hyper eps) (hyper weight-decay) mode (unit-scalar))))
+    (cond
+      [(grouped? params) (error 'unimplemented)]
+      [else
+       (make (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper beta1)
+             (hyper beta2) (hyper eps) (hyper weight-decay) mode (unit-scalar))])))
 
 (define-adam adam make-adam adam? 0.0)
 (define-adam adamw make-adamw adamw? 1e-2)
@@ -303,14 +342,24 @@
                               #:weight-decay [weight-decay 0.0]
                               #:momentum [momentum 0.0]
                               #:foreach? [foreach? #t])
-  (->* [(listof tensor?)]
-       [#:lr (>=/c 0) #:alpha (>=/c 0) #:eps (>=/c 0)
-        #:weight-decay (>=/c 0)
-        #:momentum (>=/c 0) #:foreach? boolean?]
-       rmsprop?)
-  (make-rmsprop (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper alpha)
-                (hyper eps) (hyper weight-decay) (hyper momentum)
-                (update-mode foreach? #f) (unit-scalar)))
+  (->i ([params params/c])
+       (#:lr [lr (>=/c 0)] #:alpha [alpha (>=/c 0)] #:eps [eps (>=/c 0)]
+        #:weight-decay [weight-decay (>=/c 0)]
+        #:momentum [momentum (>=/c 0)] #:foreach? [foreach? boolean?])
+       #:pre/name (params) "a parameter appears in more than one parameter group"
+       (groups-distinct? params)
+       #:pre/name (params)
+       "a parameter group sets a hyperparameter this optimizer does not have"
+       (groups-keys-within? params rmsprop-keys)
+       #:pre/name (params) "a parameter group's eps is negative"
+       (groups-setting-holds? params 'eps (lambda (e) (>= e 0)))
+       [result rmsprop?])
+  (cond
+    [(grouped? params) (error 'unimplemented)]
+    [else
+     (make-rmsprop (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper alpha)
+                   (hyper eps) (hyper weight-decay) (hyper momentum)
+                   (update-mode foreach? #f) (unit-scalar))]))
 
 (define ((rmsprop-loop! one) state p g #:lr lr #:alpha alpha #:eps eps
                              #:weight-decay weight-decay #:momentum momentum)
@@ -351,10 +400,49 @@
       (reset-grads! params)
       (for-each zero-grad! params)))
 
-(define/contract-out (learning-rate opt) ;; noqa
-  (-> optimizer? real?)
-  (optimizer-lr opt))
+(define/checked-out (param-group-count opt)
+  (-> optimizer? exact-positive-integer?)
+  (error 'unimplemented))
 
-(define/contract-out (set-learning-rate! opt lr) ;; noqa
-  (-> optimizer? (>=/c 0) void?)
-  (optimizer-set-lr! opt lr))
+(define/contract-out (optimizer-param-groups opt) ;; noqa
+  (-> optimizer? (listof param-group?))
+  (error 'unimplemented))
+
+(define/contract-out (param-group-ref opt i key) ;; noqa
+  (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c])
+       #:pre/name (opt i) "the optimizer has no parameter group with this index"
+       (group-index? opt i)
+       #:pre/name (opt key) "this optimizer has no such hyperparameter"
+       (has-hyperparameter? opt key)
+       [_ (or/c real? boolean?)])
+  (error 'unimplemented))
+
+(define/contract-out (param-group-set! opt i key v) ;; noqa
+  (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c]
+        [v (opt key) (hyperparameter-value/c opt key)])
+       #:pre/name (opt i) "the optimizer has no parameter group with this index"
+       (group-index? opt i)
+       #:pre/name (opt key) "this optimizer has no such hyperparameter"
+       (has-hyperparameter? opt key)
+       [_ void?])
+  (error 'unimplemented))
+
+(define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
+  (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
+       #:pre/name (opt group) "the optimizer has no parameter group with this index"
+       (or (unsupplied-arg? group) (group-index? opt group))
+       [_ real?])
+  (cond
+    [(zero? group) (optimizer-lr opt)]
+    [else (error 'unimplemented)]))
+
+(define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
+  (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
+       #:pre/name (opt group) "the optimizer has no parameter group with this index"
+       (match (supplied-or group)
+         [#f #t]
+         [i (group-index? opt i)])
+       [_ void?])
+  (cond
+    [group (error 'unimplemented)]
+    [else (optimizer-set-lr! opt lr)]))
