@@ -15,7 +15,8 @@
 ;; An op with several Tensor returns carries #:returns N and answers
 ;; them as multiple values, in schema order. An op that returns
 ;; nothing updates its mutable-tensor-list arguments and answers the
-;; first.
+;; first. An op answering a Tensor list carries #:returns-list arg
+;; and answers a list as long as arg.
 
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
@@ -27,6 +28,8 @@
          addcdiv!
          addcmul!
          affine-grid-generator
+         amp-foreach-non-finite-check-and-unscale!
+         amp-update-scale!
          argsort
          avg-pool2d
          batch-norm
@@ -57,10 +60,14 @@
          foreach-addcdiv-scalar!
          foreach-addcdiv-scalarlist!
          foreach-addcmul-scalar!
+         foreach-clamp-max-scalar!
+         foreach-clamp-min-scalar!
          foreach-copy!
          foreach-div-scalarlist!
          foreach-lerp-scalar!
          foreach-mul-scalar!
+         foreach-mul-tensor!
+         foreach-norm-scalar
          foreach-sqrt!
          fused-adam!
          fused-adamw!
@@ -87,6 +94,7 @@
          leaky-relu
          lerp-scalar!
          lerp-tensor!
+         linalg-vector-norm
          linear
          lstm-input
          lt-scalar
@@ -153,6 +161,12 @@
 
 (define-generated-op affine-grid-generator tr_gen_affine_grid_generator
   ([theta tensor] [size int-array] [align-corners bool]))
+
+(define-generated-op amp-foreach-non-finite-check-and-unscale! tr_gen__amp_foreach_non_finite_check_and_unscale_ #:inplace
+  ([self mutable-tensor-list] [found-inf mutable-tensor] [inv-scale tensor]))
+
+(define-generated-op amp-update-scale! tr_gen__amp_update_scale_ #:inplace
+  ([self tensor] [growth-tracker mutable-tensor] [found-inf tensor] [scale-growth-factor double] [scale-backoff-factor double] [growth-interval int64]))
 
 (define-generated-op argsort tr_gen_argsort
   ([self tensor] [dim int64] [descending bool]))
@@ -244,6 +258,12 @@
 (define-generated-op foreach-addcmul-scalar! tr_gen__foreach_addcmul__scalar #:inplace
   ([self mutable-tensor-list] [tensor1 tensor-list] [tensor2 tensor-list] [value scalar]))
 
+(define-generated-op foreach-clamp-max-scalar! tr_gen__foreach_clamp_max__scalar #:inplace
+  ([self mutable-tensor-list] [scalar-arg scalar]))
+
+(define-generated-op foreach-clamp-min-scalar! tr_gen__foreach_clamp_min__scalar #:inplace
+  ([self mutable-tensor-list] [scalar-arg scalar]))
+
 (define-generated-op foreach-copy! tr_gen__foreach_copy_ #:inplace
   ([self mutable-tensor-list] [src tensor-list] [non-blocking bool]))
 
@@ -255,6 +275,12 @@
 
 (define-generated-op foreach-mul-scalar! tr_gen__foreach_mul__scalar #:inplace
   ([self mutable-tensor-list] [scalar-arg scalar]))
+
+(define-generated-op foreach-mul-tensor! tr_gen__foreach_mul__tensor #:inplace
+  ([self mutable-tensor-list] [other tensor]))
+
+(define-generated-op foreach-norm-scalar tr_gen__foreach_norm_scalar #:returns-list self
+  ([self tensor-list] [ord scalar] [dtype optional-dtype]))
 
 (define-generated-op foreach-sqrt! tr_gen__foreach_sqrt_ #:inplace
   ([self mutable-tensor-list]))
@@ -333,6 +359,9 @@
 
 (define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
   ([self tensor] [end tensor] [weight tensor]))
+
+(define-generated-op linalg-vector-norm tr_gen_linalg_vector_norm
+  ([self tensor] [ord scalar] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
 
 (define-generated-op linear tr_gen_linear
   ([input tensor] [weight tensor] [bias optional-tensor]))

@@ -22,6 +22,7 @@
 (define (opt-dtype->code d)
   (case d
     [(#f) -1]
+    [(int32) 3]
     [(int64) 4]
     [(float32) 6]
     [(float64) 7]
@@ -31,7 +32,7 @@
   (define len-arg (format-id arg "~a-len" arg))
   (define has-arg (format-id arg "~a-has" arg))
   (case kind
-    [(tensor) (values (list #`(#,arg : _Tensor)) (list arg))]
+    [(tensor mutable-tensor) (values (list #`(#,arg : _Tensor)) (list arg))]
     [(optional-tensor)
      (values (list #`(#,arg : _Tensor/null)) (list arg))]
     [(scalar double) (values (list #`(#,arg : _double)) (list arg))]
@@ -125,6 +126,33 @@
            (apply values
                   (map wrap-tensor
                        (check-outputs 'name (raw-name call-arg ...))))))]
+    [(_ name:id c-id:id (~optional (~and #:no-retry no-retry?)) #:returns-list aligned:id
+        ([arg:id kind:id] ...))
+     #:fail-unless (memf (lambda (a) (free-identifier=? a #'aligned))
+                         (syntax->list #'(arg ...)))
+     "the aligned list is one of the arguments"
+     #:do [(define-values (specs call-args)
+             (build-pieces stx
+                           (syntax->list #'(arg ...))
+                           (syntax->datum #'(kind ...))))]
+     #:with raw-name (format-id #'name "~a/raw" #'name)
+     #:with (spec ...) specs
+     #:with (call-arg ...) call-args
+     #:with aligned-len (format-id #'aligned "~a-len" #'aligned)
+     #:with wrap (if (attribute no-retry?)
+                     #'tensor-allocator/outputs/no-retry
+                     #'tensor-allocator/outputs)
+     #'(begin
+         (define-torch raw-name
+           (_fun spec ...
+                 (out : (_list o _Tensor/null aligned-len))
+                 (out-len : _int64 = aligned-len)
+                 -> (rc : _int)
+                 -> (and (zero? rc) out))
+           #:c-id c-id
+           #:wrap wrap)
+         (define (name arg ...)
+           (map wrap-tensor (check-outputs 'name (raw-name call-arg ...)))))]
     [(_ name:id c-id:id #:no-retry ([arg:id kind:id] ...))
      #:do [(define-values (specs call-args)
              (build-pieces stx

@@ -181,4 +181,23 @@
    (kwarg "scales_w" none))
   "[downscale-aligned]")
  (maximum ((tensor 2 1 3) (tensor 4 1)) "[broadcast]")
- (minimum ((tensor 2 1 3) (tensor 4 1)) "[broadcast]"))
+ (minimum ((tensor 2 1 3) (tensor 4 1)) "[broadcast]")
+ (foreach-norm-scalar ((tensors (3) (2 2)) (double +inf.0) (kwarg "dtype" none)) "[inf]")
+ (foreach-norm-scalar ((tensors (3) (2 2)) (double 1.0) (kwarg "dtype" none)) "[l1]")
+ (linalg-vector-norm
+  ((tensor 2 3) (double +inf.0) (optional-int-array #f) (bool #f) (kwarg "dtype" none))
+  "[inf]")
+ (linalg-vector-norm
+  ((tensor 2 3) (double 2.0) (optional-int-array (1)) (bool #t) (kwarg "dtype" none))
+  "[dim-keepdim]")
+ (amp-foreach-non-finite-check-and-unscale!
+  ((nonfinite-tensors (3) (2 2)) (scalar-tensor 0.0) (scalar-tensor 0.5))
+  "[non-finite]")
+ (amp-update-scale!
+  ((scalar-tensor 65536.0) (int32-scalar-tensor 0) (scalar-tensor 1.0)
+   (double 2.0) (double 0.5) (int64 2))
+  "[found-inf]")
+ (amp-update-scale!
+  ((scalar-tensor 65536.0) (int32-scalar-tensor 1) (scalar-tensor 0.0)
+   (double 2.0) (double 0.5) (int64 2))
+  "[grow]"))

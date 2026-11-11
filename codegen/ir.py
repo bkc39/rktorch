@@ -12,8 +12,12 @@ in-place ops (a mutable receiver + integer status, the
 tr_tensor_sub_ shape), #365 to a list of optional Tensors (Tensor?[],
 the TensorList encoding with NULL entries), and #305 to ops that return
 nothing and mutate their Tensor lists (Tensor(a!)[], the _foreach_* and
-_fused_* families) and to Scalar[] (a double array). Everything else is
-skipped with a reason --
+_fused_* families) and to Scalar[] (a double array). #187 adds a
+Tensor[] return aligned with a _foreach_* op's first Tensor[] argument (a
+caller-sized out array beside an integer status), a write-annotated Tensor
+that is not the receiver (Tensor(b!), a non-const handle), and in-place ops
+without a method variant (an at::<base>_ free-function call). Everything
+else is skipped with a reason --
 the generator reports skips instead of guessing.
 """
 
@@ -54,6 +58,9 @@ OPTIONAL_TENSOR_LIST = "optional-tensor-list"
 # #305: Tensor(a!)[] -> (ptr*, len), updated in place; Scalar[] -> (double*, len).
 MUTABLE_TENSOR_LIST = "mutable-tensor-list"
 SCALAR_LIST = "scalar-list"
+# #187: Tensor(b!) beside the receiver (found_inf, growth_tracker), a
+# non-const handle so its value binds ATen's at::Tensor&.
+MUTABLE_TENSOR = "mutable-tensor"
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,13 @@ class Op:
     # status plus one `tr_tensor**` out pointer per return; none (a `()`
     # return) is an op that updates its mutable Tensor lists.
     returns: int = 1
+    # #187: a Tensor[] return, one output per element of the named
+    # Tensor[] argument (ATen's _foreach_* contract), written to a
+    # caller-sized out array beside an integer status. `returns` is 1.
+    list_return: str | None = None
+    # An in-place op with a method variant calls `recv->value.<base>_`;
+    # one without (_amp_update_scale_) calls `at::<base>_(recv->value, ...)`.
+    method_variant: bool = True
 
 
 @dataclass(frozen=True)
@@ -117,6 +131,14 @@ def _int_list(ty) -> bool:
         isinstance(ty, ListType)
         and isinstance(ty.elem, BaseType)
         and ty.elem.name in (BaseTy.int, BaseTy.SymInt)
+    )
+
+
+def _tensor_list(ty) -> bool:
+    return (
+        isinstance(ty, ListType)
+        and isinstance(ty.elem, BaseType)
+        and ty.elem.name is BaseTy.Tensor
     )
 
 
@@ -180,7 +202,15 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip("out variant")
     inplace = func.name.name.inplace
     rets = func.returns
-    if not all(
+    list_rets = [r for r in rets if _tensor_list(r.type)]
+    if list_rets and not (
+        len(rets) == 1
+        and func.name.name.base.startswith("_foreach_")
+        and func.arguments.flat_non_out
+        and _tensor_list(func.arguments.flat_non_out[0].type)
+    ):
+        return skip("Tensor[] return not aligned with a Tensor[] argument")
+    if not list_rets and not all(
         isinstance(r.type, BaseType) and r.type.name is BaseTy.Tensor
         for r in rets
     ):
@@ -192,20 +222,23 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
 
     # Functional ops are emitted as at::<base> free-function calls, so they
     # must expose the function variant. In-place ops are emitted as a method
-    # call on the mutable receiver, so the method variant (which they all
-    # have) suffices -- no torch.* free function is needed.
+    # call on the mutable receiver when they have the method variant, so no
+    # torch.* free function is needed; the few without one
+    # (_amp_update_scale_) call the at::<base>_ free function instead.
     if not inplace and Variant.function not in f.variants:
         return skip("method-only op: the C++ shim calls at::* free "
                     "functions and the parity battery calls torch.*")
 
     params: list[Param] = []
-    for a in func.arguments.flat_non_out:
+    for i, a in enumerate(func.arguments.flat_non_out):
         kind = _param_kind(a.type)
         if kind is None:
             return skip(f"unsupported arg type: {a.name}: {a.type}")
-        if (kind == TENSOR_LIST and a.annotation is not None
-                and a.annotation.is_write):
+        written = a.annotation is not None and a.annotation.is_write
+        if kind == TENSOR_LIST and written:
             kind = MUTABLE_TENSOR_LIST
+        if kind == TENSOR and written and not (inplace and i == 0):
+            kind = MUTABLE_TENSOR
         params.append(Param(a.name, kind))
 
     receiver = MUTABLE_TENSOR_LIST if not rets else TENSOR
@@ -213,6 +246,9 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip("in-place op without a receiver as the first argument")
     if rets and any(p.kind == MUTABLE_TENSOR_LIST for p in params):
         return skip("mutates a Tensor list and returns Tensors")
+    if (not inplace or list_rets) and any(
+            p.kind == MUTABLE_TENSOR for p in params):
+        return skip("mutates a Tensor argument and is not in-place")
 
     rkt_name = _racket_name(func.name)
     if func.name.name.base in _RACKET_COLLISIONS:
@@ -237,4 +273,6 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         shard=shard,
         inplace=inplace,
         returns=len(rets),
+        list_return=params[0].name if list_rets else None,
+        method_variant=Variant.method in f.variants,
     )

@@ -20,6 +20,18 @@ extern "C" {
  * reports a status; a failure partway may leave them partly
  * updated. */
 
+/* An op answering a Tensor list writes one new handle per element
+ * of its first list into the caller's out array, whose length
+ * must equal that list's, every one NULL on error. */
+
+int tr_gen__amp_foreach_non_finite_check_and_unscale_(
+    tr_tensor* const* self, int64_t self_len, tr_tensor* found_inf,
+    const tr_tensor* inv_scale);
+int tr_gen__amp_update_scale_(tr_tensor* self, tr_tensor* growth_tracker,
+                              const tr_tensor* found_inf,
+                              double scale_growth_factor,
+                              double scale_backoff_factor,
+                              int64_t growth_interval);
 int tr_gen__foreach_add__list(tr_tensor* const* self, int64_t self_len,
                               const tr_tensor* const* other, int64_t other_len,
                               double alpha);
@@ -39,6 +51,10 @@ int tr_gen__foreach_addcmul__scalar(tr_tensor* const* self, int64_t self_len,
                                     int64_t tensor1_len,
                                     const tr_tensor* const* tensor2,
                                     int64_t tensor2_len, double value);
+int tr_gen__foreach_clamp_max__scalar(tr_tensor* const* self, int64_t self_len,
+                                      double scalar);
+int tr_gen__foreach_clamp_min__scalar(tr_tensor* const* self, int64_t self_len,
+                                      double scalar);
 int tr_gen__foreach_copy_(tr_tensor* const* self, int64_t self_len,
                           const tr_tensor* const* src, int64_t src_len,
                           bool non_blocking);
@@ -49,6 +65,11 @@ int tr_gen__foreach_lerp__scalar(tr_tensor* const* self, int64_t self_len,
                                  int64_t tensors1_len, double weight);
 int tr_gen__foreach_mul__scalar(tr_tensor* const* self, int64_t self_len,
                                 double scalar);
+int tr_gen__foreach_mul__tensor(tr_tensor* const* self, int64_t self_len,
+                                const tr_tensor* other);
+int tr_gen__foreach_norm_scalar(const tr_tensor* const* self, int64_t self_len,
+                                double ord, int32_t dtype, tr_tensor** out,
+                                int64_t out_len);
 int tr_gen__foreach_sqrt_(tr_tensor* const* self, int64_t self_len);
 int tr_gen__fused_adam_(
     tr_tensor* const* self, int64_t self_len, tr_tensor* const* grads,

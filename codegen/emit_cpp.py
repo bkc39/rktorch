@@ -7,6 +7,7 @@ from .ir import (
     DOUBLE,
     INT64,
     INT_ARRAY,
+    MUTABLE_TENSOR,
     MUTABLE_TENSOR_LIST,
     OPTIONAL_DOUBLE,
     OPTIONAL_DTYPE,
@@ -31,6 +32,7 @@ BANNER = (
 
 _C_DECLS = {
     TENSOR: "const tr_tensor* {n}",
+    MUTABLE_TENSOR: "tr_tensor* {n}",  # its value binds at::Tensor&
     OPTIONAL_TENSOR: "const tr_tensor* {n}",  # NULL == c10::nullopt
     SCALAR: "double {n}",
     DOUBLE: "double {n}",
@@ -79,7 +81,7 @@ def _out_names(op: Op) -> list[str]:
 
 
 def _returns_status(op: Op) -> bool:
-    return op.inplace or op.returns != 1
+    return op.inplace or op.returns != 1 or op.list_return is not None
 
 
 # A list argument whose length may be 0 may also arrive as NULL; only a
@@ -93,11 +95,13 @@ def _c_params(op: Op, *, header: bool = False) -> str:
         for i, p in enumerate(op.params)
     ]
     decls += [f"tr_tensor** {out}" for out in _out_names(op)]
+    if op.list_return is not None:
+        decls += ["tr_tensor** out", "int64_t out_len"]
     return ", ".join(decls)
 
 
 def _arg_expr(p: Param) -> str:
-    if p.kind == TENSOR:
+    if p.kind in (TENSOR, MUTABLE_TENSOR):
         return f"{p.name}->value"
     if p.kind == OPTIONAL_TENSOR:
         return (f"{p.name} ? c10::optional<at::Tensor>({p.name}->value) "
@@ -159,6 +163,13 @@ def emit_header(shard: str, ops: list[Op]) -> str:
         " * updated. */",
         "",
     ]
+    if any(op.list_return is not None for op in ops):
+        lines += [
+            "/* An op answering a Tensor list writes one new handle per element",
+            " * of its first list into the caller's out array, whose length",
+            " * must equal that list's, every one NULL on error. */",
+            "",
+        ]
     for op in ops:
         ret = "int" if _returns_status(op) else "tr_tensor*"
         lines.append(f"{ret} {op.c_name}({_c_params(op, header=True)});")
@@ -178,7 +189,8 @@ def _emit_body(op: Op) -> list[str]:
     # c10::nullopt encoding, so it is not null-guarded.
     guards = []
     for p in op.params:
-        if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST):
+        if p.kind in (TENSOR, MUTABLE_TENSOR, INT_ARRAY, TENSOR_LIST,
+                      OPTIONAL_TENSOR_LIST):
             guards.append(f"!{p.name}")
         if p.kind in (INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST,
                       *_EMPTY_OK_LISTS):
@@ -193,6 +205,8 @@ def _emit_body(op: Op) -> list[str]:
             guards.append(f"({p.name}_has && (!{p.name} || {p.name}_len <= 0))")
     outs = _out_names(op)
     guards += [f"!{out}" for out in outs]
+    if op.list_return is not None:
+        guards += ["!out", f"out_len != {op.list_return}_len"]
     ret_type = "int" if _returns_status(op) else "tr_tensor*"
     lines = [f"{ret_type} {op.c_name}({_c_params(op)}) {{"]
     if guards:
@@ -200,6 +214,9 @@ def _emit_body(op: Op) -> list[str]:
         if outs:
             refuse = (f'torchrkt::null_arg_outputs("{op.c_name}", '
                       f'{{{", ".join(outs)}}})')
+        elif op.list_return is not None:
+            refuse = (f'torchrkt::null_arg_list("{op.c_name}", out, '
+                      "out_len)")
         elif op.inplace:
             refuse = f'torchrkt::null_arg_status("{op.c_name}")'
         else:
@@ -246,7 +263,7 @@ def _emit_body(op: Op) -> list[str]:
         lines += [f'  return torchrkt::status_call("{op.c_name}", [&] {{']
         lines += preamble
         lines += [f"    at::{op.base}_({args});", "  });", "}"]
-    elif op.inplace:
+    elif op.inplace and op.method_variant:
         # self->value.<base>_(<rest>); mutates in place, returns status.
         recv = op.params[0].name
         method_args = ", ".join(_arg_expr(p) for p in op.params[1:])
@@ -254,11 +271,20 @@ def _emit_body(op: Op) -> list[str]:
         lines += preamble
         lines += [f"    {recv}->value.{op.base}_({method_args});",
                   "  });", "}"]
+    elif op.inplace:
+        # at::<base>_(self->value, <rest>); no method variant.
+        args = ", ".join(_arg_expr(p) for p in op.params)
+        lines += [f'  return torchrkt::status_call("{op.c_name}", [&] {{']
+        lines += preamble
+        lines += [f"    at::{op.base}_({args});", "  });", "}"]
     else:
         call = f"at::{op.base}({', '.join(_arg_expr(p) for p in op.params)})"
         if outs:
             lines += [f'  return torchrkt::alloc_results("{op.c_name}", '
                       f'{{{", ".join(outs)}}}, [&] {{']
+        elif op.list_return is not None:
+            lines += [f'  return torchrkt::alloc_result_list("{op.c_name}", '
+                      "out, out_len, [&] {"]
         else:
             lines += [f'  return torchrkt::alloc_result("{op.c_name}", '
                       "[&] {"]

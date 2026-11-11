@@ -39,7 +39,8 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         ";; An op with several Tensor returns carries #:returns N and answers",
         ";; them as multiple values, in schema order. An op that returns",
         ";; nothing updates its mutable-tensor-list arguments and answers the",
-        ";; first.",
+        ";; first. An op answering a Tensor list carries #:returns-list arg",
+        ";; and answers a list as long as arg.",
         "",
         '(require (only-in "foreign/define-generated.rkt"',
         "                  define-generated-op))",
@@ -55,6 +56,9 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
                                         else "")
         if op.returns > 1:
             flag += f" #:returns {op.returns}"
+        if op.list_return is not None:
+            aligned = _rkt_arg(op.list_return, op.params[0].kind)
+            flag += f" #:returns-list {aligned}"
         lines += [
             "",
             f"(define-generated-op {op.racket_name} {op.c_name}{flag}",
@@ -76,15 +80,18 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
         ";; cloned receiver; returns counts the Tensor returns, compared",
         ";; elementwise against the Python tuple when above 1. returns 0:",
         ";; every mutable-tensor-list argument is compared after the call.",
+        ";; returns list: a Tensor list, compared elementwise. Every",
+        ";; mutable-tensor argument is compared after the call too.",
         ";; Consumed by torch/tests/generated-parity-test.rkt.",
         "(",
     ]
     for op in all_ops:
         kinds = " ".join(p.kind for p in op.params)
         flag = "#t" if op.inplace else "#f"
+        returns = "list" if op.list_return is not None else op.returns
         lines.append(
             f' ({op.racket_name} "{op.python_name}" ({kinds}) {flag}'
-            f" {op.returns})"
+            f" {returns})"
         )
     lines.append(")")
     return "\n".join(lines) + "\n"
