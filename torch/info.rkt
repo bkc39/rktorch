@@ -44,6 +44,6 @@
 (define test-timeouts
   '(("tests/finalizer-thread-test.rkt" 120)
     ("tests/foreign-test.rkt" 300)
-    ("tests/generated-parity-test.rkt" 900)
+    ("tests/generated-parity-test.rkt" 120)
     ("tests/loader-workers-test.rkt" 600)
     ("tests/python-cross-test.rkt" 1200)))

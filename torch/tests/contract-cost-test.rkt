@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in racket/list drop)
-           (only-in racket/match match match-define)
+           (only-in racket/match == match match-define)
            (only-in racket/path find-relative-path)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
@@ -132,6 +132,24 @@
                                     helpers))
     (check-false (builds-a-contract? '(flat/c a) helpers))
     (check-false (builds-a-contract? '(if (tensor? a) x/c tensor?) helpers)))
+
+  (test-case "Dropout's forward applies no contract and builds no ->i per call"
+    (define (calls? head form)
+      (match form
+        [(cons (== head) _) #t]
+        [(cons inner more) (or (calls? head inner) (calls? head more))]
+        [_ #f]))
+    (define (contracts-per-call? forms)
+      (for/or ([head (in-list '(->i contract define/contract invariant-assertion))])
+        (calls? head forms)))
+    (define dropout-forms
+      (hash-ref library-forms (simplify-path (build-path torch-dir "nn" "dropout.rkt"))))
+    (check-true (contracts-per-call?
+                 '((define/contract (drop who x p training? generator)
+                     (->* (symbol? any/c real? boolean? any/c) () any/c)
+                     x))))
+    (check-true (contracts-per-call? '((define (drop x) (invariant-assertion tensor? x)))))
+    (check-false (contracts-per-call? dropout-forms)))
 
   (test-case "add rejects two reals in its second argument, blaming the caller"
     (define (rejects-b? e)
