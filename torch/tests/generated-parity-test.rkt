@@ -4,16 +4,16 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in json read-json)
-           (only-in racket/port open-output-nowhere)
+  (require (only-in json jsexpr->string)
+           (only-in racket/match match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-join)
-           (only-in racket/system system*)
            rackunit
            "../main.rkt"
            "private/python-env.rkt")
 
   (define-runtime-path generated-manifest "generated-parity.rktd")
+  (define-runtime-path generated-overrides "generated-parity-overrides.rktd")
   (define-runtime-path generated-rkt "../generated.rkt")
 
   ;; Every op in the codegen manifest needs an input recipe here (a missing
@@ -315,61 +315,64 @@
                #:when (eq? k 'mutable-tensor-list))
       i))
 
-  (define (generated-python-result py-name specs inplace? mutables)
-    (define callee py-name)
+  (struct parity-case (entry specs label))
+
+  (define (parity-check entry [specs-override #f] [label ""])
+    (match-define (cons name _) entry)
+    (parity-case entry
+                 (or specs-override
+                     (hash-ref generated-recipes name
+                               (lambda ()
+                                 (error 'generated-parity
+                                        "no input recipe for generated op ~a; add one to ~a"
+                                        name "generated-parity-test.rkt"))))
+                 label))
+
+  (define (python-snippet check)
+    (match-define (parity-case (list _ py-name kinds inplace? _) specs _) check)
+    (define mutables (mutable-positions kinds))
     (define call-args
       (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
                      (spec->python-call-arg s i))
                    ", "))
-    (define invoke (format "torch.ops.aten.~a(~a)" callee call-args))
-    (define code
-      (string-append
-       "import json, torch\n"
-       "torch.manual_seed(0)\n"
-       (apply string-append
-              (for/list ([s (in-list specs)]
-                         [i (in-naturals)])
-                (format "a~a = ~a\n" i (spec->python-expr s))))
-       (cond
-         [(pair? mutables)
-          (format "~a\nrs = [t for a in (~a) for t in a]\n" invoke
-                  (string-join (for/list ([i (in-list mutables)])
-                                 (format "a~a," i))
-                               " "))]
-         [inplace? (format "~a\nrs = (a0,)\n" invoke)]
-         [else (format "r = ~a\nrs = r if isinstance(r, tuple) else (r,)\n"
-                       invoke)])
-       "print(json.dumps([{\"shape\": list(t.shape),"
-       " \"values\": [float(v) for v in t.flatten().tolist()]}"
-       " for t in rs]))"))
-    (define out (open-output-string))
-    (define ok?
-      (with-python-env
-       (parameterize ([current-output-port out]
-                      [current-error-port (open-output-nowhere)])
-         (system* python "-c" code))))
-    (unless ok?
-      (error 'generated-parity "python failed for ~a" py-name))
-    (read-json (open-input-string (get-output-string out))))
+    (define invoke (format "torch.ops.aten.~a(~a)" py-name call-args))
+    (string-append
+     (apply string-append
+            (for/list ([s (in-list specs)]
+                       [i (in-naturals)])
+              (format "a~a = ~a\n" i (spec->python-expr s))))
+     (cond
+       [(pair? mutables)
+        (format "~a\nrs = [t for a in (~a) for t in a]\n" invoke
+                (string-join (for/list ([i (in-list mutables)])
+                               (format "a~a," i))
+                             " "))]
+       [inplace? (format "~a\nrs = (a0,)\n" invoke)]
+       [else (format "r = ~a\nrs = r if isinstance(r, tuple) else (r,)\n"
+                     invoke)])))
 
-  (define (check-generated-parity entry [specs-override #f] [label ""])
-    (define name (car entry))
-    (define py-name (cadr entry))
-    (define kinds (caddr entry))
-    (define inplace? (list-ref entry 3))
-    (define returns (list-ref entry 4))
-    (define specs
-      (or specs-override
-          (hash-ref generated-recipes name
-                    (lambda ()
-                      (error 'generated-parity
-                             "no input recipe for generated op ~a; add one to ~a"
-                             name "generated-parity-test.rkt")))))
+  (define (python-results snippets)
+    (parameterize ([current-input-port (~> snippets jsexpr->string open-input-string)])
+      (python-check "generated_parity.py")))
+
+  (define (compare-results checks expected #:fail [fail* fail] #:check [check-one check-results])
+    (cond
+      [(= (length expected) (length checks))
+       (for ([check (in-list checks)]
+             [result (in-list expected)])
+         (match-define (parity-case (cons name _) _ label) check)
+         (if (hash? result)
+             (fail* (format "~a~a: python failed: ~a" name label (hash-ref result 'error)))
+             (check-one check result)))]
+      [else
+       (fail* (format "one python result per case: ~a for ~a cases"
+                      (length expected) (length checks)))]))
+
+  (define (check-results check expected)
+    (match-define (parity-case (list name _ kinds _ returns) specs label) check)
     (check-equal? (length specs) (length kinds)
                   (format "~a~a: recipe arity matches manifest" name label))
     (define mutables (mutable-positions kinds))
-    (define expected
-      (generated-python-result py-name specs inplace? mutables))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
@@ -396,243 +399,40 @@
                  (format "~a~a: generated value ~a parity, return ~a"
                          name label i k)))))
 
+  (test-case "a python error fails its case alone, and a short result list fails once"
+    (define checks (list (parity-case '(abs "abs" (tensor) #f 1) '((tensor 2)) "[a]")
+                         (parity-case '(neg "neg" (tensor) #f 1) '((tensor 2)) "")))
+    (define (failures-of expected)
+      (define failed '())
+      (define checked '())
+      (compare-results checks expected
+                       #:fail (lambda (why) (set! failed (cons why failed)))
+                       #:check (lambda (check _) (set! checked (cons check checked))))
+      (list (reverse failed) (length checked)))
+    (check-equal? (failures-of (list (hasheq 'error "RuntimeError: boom") '()))
+                  '(("abs[a]: python failed: RuntimeError: boom") 1))
+    (check-equal? (failures-of (list '()))
+                  '(("one python result per case: 1 for 2 cases") 0)))
+
   (cond
     [(not (python-torch-available?))
      (printf "[generated-parity-test] skipped: python3 `torch` not available ~a\n"
              "(run inside `nix develop`)")]
     [else
+     (test-case "the driver reports a snippet whose returns are not tensors and runs the next"
+       (match (python-results '("rs = (1,)" "rs = (torch.zeros(1),)"))
+         [(list (? hash? failed) second)
+          (check-regexp-match #rx"AttributeError" (hash-ref failed 'error))
+          (check-equal? second (list (hasheq 'shape '(1) 'values '(0.0))))]
+         [results (fail (format "expected an error then a result: ~s" results))]))
      (define manifest (with-input-from-file generated-manifest read))
-     (for ([entry (in-list manifest)]
-           #:unless (eq? 'device-only
-                         (hash-ref generated-recipes (car entry) #f)))
-       (check-generated-parity entry))
-     ;; override drives: optional-argument paths the default recipes leave
-     ;; absent (or vice versa); the labels name the driven path
-     (check-generated-parity
-      (assq 'slice-tensor manifest)
-      '((tensor 6) (int64 0) (optional-int64 #f) (optional-int64 #f)
-        (int64 2))
-      "[open]")
-     (check-generated-parity
-      (assq 'avg-pool2d manifest)
-      '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
-        (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
-      "[divisor=2]")
-     (check-generated-parity
-      (assq 'nll-loss manifest)
-      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
-        (int64 1) (int64 -100))
-      "[weight]")
-     (check-generated-parity
-      (assq 'cross-entropy-loss manifest)
-      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
-        (int64 1) (int64 -100) (double 0.0))
-      "[weight]")
-     (check-generated-parity
-      (assq 'nll-loss manifest)
-      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
-        (int64 0) (int64 -100))
-      "[none]")
-     (check-generated-parity
-      (assq 'cross-entropy-loss manifest)
-      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
-        (int64 0) (int64 -100) (double 0.0))
-      "[none]")
-     (check-generated-parity
-      (assq 'conv2d manifest)
-      '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor #f)
-        (int-array (1 1)) (int-array (0 0)) (int-array (1 1)) (int64 1))
-      "[no-bias]")
-     (check-generated-parity
-      (assq 'sum-dim-intlist manifest)
-      '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
-      "[full]")
-     (check-generated-parity
-      (assq 'mean-dim manifest)
-      '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
-      "[full]")
-     (check-generated-parity
-      (assq 'sum-dim-intlist manifest)
-      '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
-      "[keepdim]")
-     (check-generated-parity
-      (assq 'mean-dim manifest)
-      '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
-      "[keepdim]")
-     (check-generated-parity
-      (assq 'layer-norm manifest)
-      '((tensor 2 3) (int-array (3)) (optional-tensor #f)
-        (optional-tensor #f) (double 1e-5) (bool #t))
-      "[no-affine]")
-     (check-generated-parity
-      (assq 'embedding manifest)
-      '((tensor 5 3) (int-tensor (0 2 4 1)) (int64 2) (bool #f) (bool #f))
-      "[padding-idx=2]")
-     (check-generated-parity
-      (assq 'layer-norm manifest)
-      '((tensor 2 2 3) (int-array (2 3)) (optional-tensor 2 3)
-        (optional-tensor 2 3) (double 1e-5) (bool #t))
-      "[multi-dim]")
-     (check-generated-parity
-      (assq 'tril manifest)
-      '((tensor 4 4) (int64 -1))
-      "[diag=-1]")
-     (check-generated-parity
-      (assq 'triu manifest)
-      '((tensor 4 4) (int64 1))
-      "[diag=1]")
-     (check-generated-parity
-      (assq 'conv-transpose2d-input manifest)
-      '((tensor 1 2 4 4) (tensor 2 3 3 3) (optional-tensor #f)
-        (int-array (1 1)) (int-array (0 0)) (int-array (0 0)) (int64 1)
-        (int-array (1 1)))
-      "[no-bias]")
-     (check-generated-parity
-      (assq 'conv-transpose2d-input manifest)
-      '((tensor 1 2 4 4) (tensor 2 3 3 3) (optional-tensor 3)
-        (int-array (2 2)) (int-array (0 0)) (int-array (1 1)) (int64 1)
-        (int-array (1 1)))
-      "[stride-2+output-padding]")
-     (check-generated-parity
-      (assq 'conv-transpose2d-input manifest)
-      '((tensor 1 4 4 4) (tensor 4 3 3 3) (optional-tensor 6)
-        (int-array (1 1)) (int-array (0 0)) (int-array (0 0)) (int64 2)
-        (int-array (2 2)))
-      "[groups-2+dilation-2]")
-     (check-generated-parity
-      (assq 'group-norm manifest)
-      '((tensor 2 4 3 3) (int64 2) (optional-tensor #f) (optional-tensor #f)
-        (double 1e-5) (bool #t))
-      "[no-affine]")
-     (check-generated-parity
-      (assq 'group-norm manifest)
-      '((tensor 2 4 3 3) (int64 1) (optional-tensor 4) (optional-tensor 4)
-        (double 1e-5) (bool #t))
-      "[one-group]")
-     (check-generated-parity
-      (assq 'clamp manifest)
-      '((tensor 2 3) (optional-scalar -0.5) (optional-scalar #f))
-      "[min-only]")
-     (check-generated-parity
-      (assq 'clamp manifest)
-      '((tensor 2 3) (optional-scalar #f) (optional-scalar 0.5))
-      "[max-only]")
-     (check-generated-parity
-      (assq 'repeat-interleave-self-int manifest)
-      '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" none))
-      "[flattened]")
-     (check-generated-parity
-      (assq 'repeat-interleave-self-int manifest)
-      '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" 18))
-      "[flattened+output-size]")
-     (check-generated-parity
-      (assq 'batch-norm manifest)
-      '((tensor 2 3 4 4) (optional-tensor 3) (optional-tensor 3)
-        (optional-tensor 3) (optional-tensor-ones 3) (bool #t) (double 0.1)
-        (double 1e-5) (bool #t))
-      "[training]")
-     (check-generated-parity
-      (assq 'batch-norm manifest)
-      '((tensor 2 3 4 4) (optional-tensor #f) (optional-tensor #f)
-        (optional-tensor #f) (optional-tensor #f) (bool #t) (double 0.1)
-        (double 1e-5) (bool #t))
-      "[training+no-stats+no-affine]")
-     (check-generated-parity
-      (assq 'leaky-relu manifest)
-      '((tensor 2 3) (double 0.2))
-      "[slope-0.2]")
-     (check-generated-parity
-      (assq 'binary-cross-entropy-with-logits manifest)
-      '((tensor 2 3) (tensor 2 3) (optional-tensor 3) (optional-tensor-ones 3)
-        (int64 2))
-      "[weighted+sum]")
-     (check-generated-parity
-      (assq 'huber-loss manifest)
-      '((tensor 2 3) (tensor 2 3) (int64 0) (double 0.5))
-      "[none+delta-0.5]")
-     (check-generated-parity
-      (assq 'l1-loss manifest)
-      '((tensor 2 3) (tensor 2 3) (int64 2))
-      "[sum]")
-     (check-generated-parity
-      (assq 'flip manifest)
-      '((tensor 2 3) (int-array (0 1)))
-      "[both-dims]")
-     (check-generated-parity
-      (assq 'linear manifest)
-      '((tensor 4 3) (tensor 2 3) (optional-tensor #f))
-      "[no-bias]")
-     (check-generated-parity
-      (assq 'topk manifest)
-      '((tensor 3 5) (int64 3) (int64 0) (bool #f) (bool #t))
-      "[smallest-along-dim-0]")
-     (check-generated-parity
-      (assq 'sort-tensor manifest)
-      '((tensor 3 5) (int64 0) (bool #t))
-      "[descending-dim-0]")
-     (check-generated-parity
-      (assq 'argsort manifest)
-      '((tensor 3 5) (int64 0) (bool #t))
-      "[descending-dim-0]")
-     (check-generated-parity
-      (assq 'multinomial manifest)
-      '((uniform-tensor 3 6) (int64 8) (bool #t) (kwarg "generator" none))
-      "[replacement]")
-     (check-generated-parity
-      (assq 'lstm-input manifest)
-      '((tensor 2 5 3) (tensors (4 2 4) (4 2 4))
-        (tensors (16 3) (16 4) (16 3) (16 4)
-                 (16 8) (16 4) (16 8) (16 4))
-        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
-      "[2-layer-bidirectional-batch-first-no-bias]")
-     (check-generated-parity
-      (assq 'gru-input manifest)
-      '((tensor 2 5 3) (tensor 4 2 4)
-        (tensors (12 3) (12 4) (12 3) (12 4)
-                 (12 8) (12 4) (12 8) (12 4))
-        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
-      "[2-layer-bidirectional-batch-first-no-bias]")
-     (check-generated-parity
-      (assq 'scaled-dot-product-attention manifest)
-      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor #f)
-        (double 0.0) (bool #f) (kwarg "scale" 0.5) (kwarg "enable_gqa" #f))
-      "[scale=0.5]")
-     (check-generated-parity
-      (assq 'scaled-dot-product-attention manifest)
-      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor 3 5)
-        (double 0.0) (bool #f) (kwarg "scale" none) (kwarg "enable_gqa" #f))
-      "[float-mask]")
-     (check-generated-parity
-      (assq 'scaled-dot-product-attention manifest)
-      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6)
-        (bool-tensor (1 0 1 1 0)) (double 0.0) (bool #f) (kwarg "scale" none)
-        (kwarg "enable_gqa" #f))
-      "[bool-mask]")
-     (check-generated-parity
-      (assq 'scaled-dot-product-attention manifest)
-      '((tensor 2 5 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor #f)
-        (double 0.0) (bool #t) (kwarg "scale" none) (kwarg "enable_gqa" #f))
-      "[causal]")
-     (check-generated-parity
-      (assq 'scaled-dot-product-attention manifest)
-      '((tensor 2 4 3 8) (tensor 2 2 5 8) (tensor 2 2 5 8)
-        (optional-tensor #f) (double 0.0) (bool #f) (kwarg "scale" none)
-        (kwarg "enable_gqa" #t))
-      "[grouped-query]")
-     (check-generated-parity
-      (assq 'grid-sampler-2d manifest)
-      '((tensor 2 3 4 5) (tensor 2 6 7 2) (int64 1) (int64 1) (bool #t))
-      "[nearest-border-aligned]")
-     (check-generated-parity
-      (assq 'grid-sampler-2d manifest)
-      '((tensor 2 3 4 5) (tensor 2 6 7 2) (int64 2) (int64 2) (bool #f))
-      "[bicubic-reflection]")
-     (check-generated-parity
-      (assq 'affine-grid-generator manifest)
-      '((tensor 2 2 3) (int-array (2 3 4 5)) (bool #t))
-      "[aligned]")
-     (check-generated-parity
-      (assq 'upsample-bicubic2d manifest)
-      '((tensor 1 2 8 8) (int-array (4 4)) (bool #t) (kwarg "scales_h" none)
-        (kwarg "scales_w" none))
-      "[downscale-aligned]")]))
+     (define checks
+       (append
+        (for/list ([entry (in-list manifest)]
+                   #:unless (eq? 'device-only
+                                 (hash-ref generated-recipes (car entry) #f)))
+          (parity-check entry))
+        (for/list ([drive (in-list (with-input-from-file generated-overrides read))])
+          (match-define (list name specs label) drive)
+          (parity-check (assq name manifest) specs label))))
+     (compare-results checks (python-results (map python-snippet checks)))]))

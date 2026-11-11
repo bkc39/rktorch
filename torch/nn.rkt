@@ -117,6 +117,7 @@
          Flatten
          flatten?
          Dropout
+         dropout
          dropout?
          Embedding
          embedding?
