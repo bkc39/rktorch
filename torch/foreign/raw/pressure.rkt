@@ -10,7 +10,7 @@
                   live-bytes-by-device lower-floors! lower-shadow!
                   next-shadow-generation! note-adopted! note-checked! note-live!
                   note-mark! note-reclaimed! note-unaccounted! note-unadopted!
-                  own-checks
+                  own-checks staleness-bound unflushed-reading
                   pressure-diagnostics pressure-reading reset-accounts!
                   reset-checks! set-account-capacity! set-account-interval!
                   set-account-release-after! set-account-sample!
@@ -171,17 +171,27 @@
   (define-values (gate-open? sample-due?)
     (if mark (gate-state dev mark base) (values #f #f)))
   (race-point gate-read dev)
-  (when gate-open?
+  (define measured? (and gate-open? (or sample-due? (could-cross? dev mark))))
+  (when measured?
     (flush-tallies!))
   (when (and gate-open? sample-due?)
     (sample-allocator! dev))
   (cond
-    [(and gate-open? (> (pressure-reading dev) mark))
+    [(and measured? (> (pressure-reading dev) mark))
      (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
     [(and gate-open? sample-due?)
      (with-ledger (end-trial! (account-of dev) base))]
     [else (void)])
   (wake-after-collection!))
+
+;; Nothing resets the gate's count but a collection, so a gate stays open
+;; until one; a flush of every tally on each op would then cost more than the
+;; shared counters did. Short of a sample, an open gate flushes only when the
+;; unflushed reading, plus the most the tallies can hold back, is over the
+;; mark: below that the flushed reading would be too.
+(define (could-cross? dev mark)
+  (define a (account-of dev))
+  (> (+ (unflushed-reading a) (staleness-bound a)) mark))
 
 ;; whether the backstop looks at all, and whether that look samples: the
 ;; caller's own unflushed bytes count, so its crossing opens the gate

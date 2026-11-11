@@ -13,7 +13,8 @@
          (only-in "tallies.rkt"
                   counters-entries counters-live counters-since-check
                   counters-since-sample flush-tallies! forget-mark!
-                  fresh-counters own-pending-checks pending-of tally-checked! tally-live!
+                  fresh-counters own-pending-checks pending-of tally-staleness
+                  tally-checked! tally-live!
                   [note-mark! note-counters-mark!]))
 
 (provide call-with-ledger
@@ -27,6 +28,8 @@
          live-bytes since-check-bytes since-sample-bytes
          note-mark!
          own-checks
+         staleness-bound
+         unflushed-reading
          tally-of
          count-live!
          count-checked!
@@ -209,6 +212,12 @@
 (define (pressure-reading dev)
   (define a (account-of dev))
   (max (live-bytes a) (account-sample a)))
+
+(define (unflushed-reading a)
+  (max (live-of a) (account-sample a)))
+
+(define (staleness-bound a)
+  (tally-staleness (account-counters a)))
 
 (define (backstop-interval dev)
   (account-interval (account-of dev)))

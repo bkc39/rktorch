@@ -274,6 +274,29 @@
     (unaccount-all! (list key))
     (forget-account! dev))
 
+  (bounded-test "an open gate flushes only when the reading could cross the mark"
+    (define dev (batched-device 54))
+    (define a (account-of dev))
+    (define n 4096)
+    (define (flushed-after sample)
+      (call-with-held-charge
+       dev n
+       (lambda ()
+         (define before (shared-live dev))
+         (parameterize ([native-memory-limit mark]
+                        [allocator-reading (lambda (_) #f)])
+           (with-ledger
+             (set-account-interval! a 0)
+             (set-account-sample! a sample))
+           (collect-under-pressure! dev))
+         (- (shared-live dev) before))))
+    (check-equal? (flushed-after 0) 0 "far under the mark, the other thread's bytes stay pending")
+    (check-equal? (flushed-after (- mark n)) n "near the mark, the gate flushes them")
+    (with-ledger
+      (set-account-interval! a #f)
+      (set-account-sample! a 0))
+    (forget-account! dev))
+
   (bounded-test "L8: spurious CAS failures at the tallies lose nothing"
     (define dev (batched-device 47))
     (define start (ledger-entries))

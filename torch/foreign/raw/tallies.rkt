@@ -12,6 +12,7 @@
          forget-mark!
          pending-of
          own-pending-checks
+         tally-staleness
          tally-live!
          tally-checked!
          tally-op!
@@ -96,6 +97,11 @@
       (map unbox (list (pending-live p) (pending-entries p)
                        (pending-since-check p) (pending-since-sample p)))
       '(0 0 0 0)))
+
+;; I4's bound: each tally holds back under the limit between its ops, and
+;; at most one more tensor, under the limit too, inside one.
+(define (tally-staleness c)
+  (* 2 (length (unbox tallies)) (counters-limit c)))
 
 (define (tally-live! p nbytes entries)
   (cas-add! (pending-live p) nbytes #:site 'tally)
