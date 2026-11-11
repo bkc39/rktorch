@@ -7,8 +7,6 @@
     "clip-grad-test.rkt"
     "grad-scaler-parity-test.rkt"
     "grad-scaler-test.rkt"
-    "optim-param-groups-parity-test.rkt"
-    "optim-param-groups-test.rkt"
     "scheduler-chain-test.rkt"
     "scheduler-parity-test.rkt"
     "trainer-accumulation-test.rkt"

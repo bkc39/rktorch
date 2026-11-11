@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list filter-not last split-at)
+  (require (only-in racket/list filter-not last remove-duplicates split-at)
            (only-in racket/match match match-define)
            (only-in racket/string string-split)
            rackunit
@@ -37,7 +37,8 @@
       ['fused '((#:fused? . #t))]))
 
   (define (build optimizer options params)
-    (match-define (list (cons kws vals) ...) (sort options keyword<? #:key car))
+    (match-define (list (cons kws vals) ...)
+      (sort (remove-duplicates options eq? #:key car) keyword<? #:key car))
     (keyword-apply optimizer kws vals (list params)))
 
   (define (flat t)
@@ -48,6 +49,7 @@
     (Sequential (Linear 4 8) (Linear 8 2)))
 
   (define (train! net opts [steps 5] #:after [after void])
+    (manual-seed! 1)
     (define x (randn 3 4))
     (for ([n (in-range 1 (add1 steps))])
       (for-each zero-grads! opts)
