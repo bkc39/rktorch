@@ -4,6 +4,7 @@
          (only-in racket/file file->string)
          (only-in racket/match match match-define match-lambda)
          (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/vector vector-map)
          (only-in torch
                   + * / < narrow rand select shape tensor to-dtype unsqueeze where ~>)
          (only-in torch/data/loader define-dataset)
@@ -18,12 +19,18 @@
 
 (provide cifar-augment
          cifar-sources
+         jpeg-stage-dataset
+         jpeg-stages
          pipeline
          pipeline-names)
 
 (define-runtime-path text-fixture "../../../torch/text/fixtures/heart-of-darkness-excerpt.txt")
 
 (define pipeline-names '(jpeg cifar text))
+
+;; jpeg's halves, run by name and never by default: decode alone, and the
+;; augmentation alone on images decoded once up front
+(define jpeg-stages '(jpeg-decode jpeg-transforms))
 
 (define cifar-mean '(0.4914 0.4822 0.4465))
 (define cifar-std '(0.2470 0.2435 0.2616))
@@ -66,13 +73,26 @@
   (define vocab (text->vocab text))
   (values (encode vocab text) (vector-length vocab)))
 
-(define-dataset jpeg-cycle (files labels n)
+(define (decode-rgb file)
+  (match-define (cons path _label) file)
+  (read-image path #:mode 'rgb))
+
+;; one pixel, so decode alone collates images of any size
+(define (corner image)
+  (~> image (select 0 0) (select 0 0) (select 0 0)))
+
+(define-dataset jpeg-cycle (sources labels n item)
   #:length n
   #:ref (i)
-  (define k (modulo i (vector-length files)))
-  (match-define (cons path _label) (vector-ref files k))
-  (values (~> path (read-image #:mode 'rgb) jpeg-augment)
-          (select labels 0 k)))
+  (define k (modulo i (vector-length sources)))
+  (values (item (vector-ref sources k)) (select labels 0 k)))
+
+(define (jpeg-stage-dataset stage files n)
+  (define labels (jpeg-labels files))
+  (match stage
+    ['jpeg (jpeg-cycle files labels n (lambda (file) (jpeg-augment (decode-rgb file))))]
+    ['jpeg-decode (jpeg-cycle files labels n (lambda (file) (corner (decode-rgb file))))]
+    ['jpeg-transforms (jpeg-cycle (vector-map decode-rgb files) labels n jpeg-augment)]))
 
 (define-dataset cifar-cycle (images labels n)
   #:length n
@@ -92,9 +112,8 @@
 (define (pipeline name #:samples [samples #f])
   (define (n default) (or samples default))
   (match name
-    ['jpeg
-     (define files (jpeg-files))
-     (values (jpeg-cycle files (jpeg-labels files) (n 2048)) 32)]
+    [(or 'jpeg 'jpeg-decode 'jpeg-transforms)
+     (values (jpeg-stage-dataset name (jpeg-files) (n 2048)) 32)]
     ['cifar
      (define-values (images labels) (cifar-sources))
      (values (cifar-cycle images labels (n 8192)) 128)]

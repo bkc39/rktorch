@@ -180,7 +180,22 @@
 (module+ test
   (require (only-in racket/file delete-directory/files file->string make-temporary-directory)
            (only-in racket/port open-output-nowhere)
+           (only-in torch shape)
+           (only-in torch/data/dataset dataset-ref)
+           (only-in torch/vision/image-folder image-folder-samples)
+           (only-in "workloads/pipelines.rkt" jpeg-stage-dataset jpeg-stages pipeline-names)
            rackunit)
+
+  (test-case "jpeg's stages run by name only: decode alone yields a pixel, transforms an image"
+    (check-false (ormap (lambda (s) (memq s pipeline-names)) jpeg-stages))
+    (define files
+      (~> (build-path repo-root "torch" "vision" "fixtures" "hymenoptera")
+          image-folder-samples
+          list->vector))
+    (define (item-shape stage)
+      (define-values (x _label) (dataset-ref (jpeg-stage-dataset stage files 8) 5))
+      (shape x))
+    (check-equal? (map item-shape (cons 'jpeg jpeg-stages)) '((3 224 224) () (3 224 224))))
 
   (define (refusal dir #:aten-threads [aten 1])
     (with-handlers ([exn:fail:user? exn-message])
