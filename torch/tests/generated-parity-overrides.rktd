@@ -179,4 +179,6 @@
  (upsample-bicubic2d
   ((tensor 1 2 8 8) (int-array (4 4)) (bool #t) (kwarg "scales_h" none)
    (kwarg "scales_w" none))
-  "[downscale-aligned]"))
+  "[downscale-aligned]")
+ (maximum ((tensor 2 1 3) (tensor 4 1)) "[broadcast]")
+ (minimum ((tensor 2 1 3) (tensor 4 1)) "[broadcast]"))

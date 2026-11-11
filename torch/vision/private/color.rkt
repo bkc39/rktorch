@@ -2,8 +2,8 @@
 
 (require (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  * + - / <= >= cat clamp device dtype eq full narrow reshape
-                  tensor? to-dtype where)
+                  * + - / >= cat clamp device dtype eq full maximum minimum
+                  narrow reshape tensor? to-dtype where)
          (only-in "../../generated.rkt" floor-tensor fmod-scalar mean-dim))
 
 (provide blend
@@ -37,18 +37,12 @@
 (define (solarized x threshold)
   (where (>= x threshold) (- 1.0 x) x))
 
-(define (larger a b)
-  (where (>= a b) a b))
-
-(define (smaller a b)
-  (where (<= a b) a b))
-
 (define (rgb->hsv x)
   (define r (channel x 0))
   (define g (channel x 1))
   (define b (channel x 2))
-  (define maxc (larger (larger r g) b))
-  (define minc (smaller (smaller r g) b))
+  (define maxc (maximum (maximum r g) b))
+  (define minc (minimum (minimum r g) b))
   (define flat (eq maxc minc))
   (define span (- maxc minc))
   (define s (/ span (where flat 1.0 maxc)))

@@ -65,6 +65,22 @@ tr_tensor* tr_gen_fmod_scalar(const tr_tensor* self, double other) {
                                 [&] { return at::fmod(self->value, other); });
 }
 
+tr_tensor* tr_gen_maximum(const tr_tensor* self, const tr_tensor* other) {
+  if (!self || !other) {
+    return torchrkt::null_arg("tr_gen_maximum");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_maximum", [&] { return at::maximum(self->value, other->value); });
+}
+
+tr_tensor* tr_gen_minimum(const tr_tensor* self, const tr_tensor* other) {
+  if (!self || !other) {
+    return torchrkt::null_arg("tr_gen_minimum");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_minimum", [&] { return at::minimum(self->value, other->value); });
+}
+
 tr_tensor* tr_gen_sin(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_sin");
