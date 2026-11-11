@@ -1,6 +1,7 @@
 #lang scribble/manual
 
-@(require torch/scribblings/labels)
+@(require "common.rkt"
+          torch/scribblings/labels)
 
 @title{Recurrent layers}
 
@@ -92,8 +93,8 @@ Whether @racket[v] was built by @racket[LSTM] or by @racket[GRU].
                           [#:error-if-nonfinite? error-if-nonfinite? boolean? #f]
                           [#:foreach? foreach? boolean? #t])
          tensor?]{
-Scales the gradients of @racket[params] in place so that their joint L2
-norm, taken over all of them as one vector, is at most
+Scales the gradients of @racket[params] in place so that their joint norm,
+taken over all of them as one vector, is at most
 @racket[max-norm], and answers the norm they had before, as PyTorch's
 @tt{clip_grad_norm_}. Gradients already within the bound are left as they
 are, and parameters without a gradient are skipped; a bound of zero zeroes
@@ -116,9 +117,15 @@ magnitude, as @tt{norm_type}. The gradients are grouped by device and dtype
 and each group is reduced and scaled in one native call, @tt{foreach=True};
 @racket[#:foreach? #f] goes one gradient at a time, with the same bits on the
 CPU. With @racket[error-if-nonfinite?], a non-finite norm raises before any
-gradient changes, which reads the norm to the host. A @racket[norm-type]
-other than 2, @racket[#:error-if-nonfinite? #t] and @racket[#:foreach? #f]
-are not implemented yet.
+gradient changes, which reads the norm to the host.
+
+@torch-examples[
+(manual-seed! 0)
+(define net (Sequential (Linear 3 2) relu (Linear 2 1)))
+(~> (randn 4 3) net sum backward!)
+(item (clip-grad-norm! (parameters net) 0.5 #:norm-type +inf.0))
+(item (clip-grad-norm! (parameters net) 0.5 #:norm-type +inf.0))
+]
 }
 
 @defproc[(clip-grad-value! [params (listof tensor?)]
@@ -127,10 +134,16 @@ are not implemented yet.
          void?]{
 Clamps every gradient of @racket[params] into
 [@racket[(- clip-value)], @racket[clip-value]] in place, @tt{clip_grad_value_}.
-Not implemented yet.
 
-@racketblock[
-(define ps (append (parameters (Linear 3 2)) (parameters (Linear 2 1))))
+@torch-examples[
+(manual-seed! 0)
+(define first-layer (Linear 3 2))
+(define second-layer (Linear 2 1))
+(~> (randn 4 3) first-layer second-layer (* 10) sum backward!)
+(define ps (append (parameters first-layer) (parameters second-layer)))
 (clip-grad-value! ps 0.1)
+(for*/and ([p (in-list ps)]
+           [x (in-list (~> p grad (reshape -1) tensor->list))])
+  (<= (magnitude x) 0.1))
 ]
 }

@@ -6,8 +6,8 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * backward! grad item manual-seed! randn reshape sum tensor tensor->list
-                    zeros)
+                    * backward! grad has-grad? item manual-seed! randn reshape sum tensor
+                    tensor->list zeros)
            (only-in "../nn.rkt" Parameter clip-grad-norm! clip-grad-value!)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/op-calls.rkt" crossings-of op-calls-of)
@@ -33,7 +33,7 @@
     (append used (list (Parameter (zeros 2)))))
 
   (define (gradients ps)
-    (for/list ([p (in-list ps)] #:when (grad p))
+    (for/list ([p (in-list ps)] #:when (has-grad? p))
       (flat (grad p))))
 
   (define norm-types '(2.0 1.0 0.5 +inf.0))

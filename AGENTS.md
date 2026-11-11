@@ -251,7 +251,10 @@ with `backward!` outside the form as PyTorch recommends). From
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`
   (binary ops take a real on either side); `maximum minimum` (tranche 10,
-  #451) take two tensors and propagate NaN
+  #451) take two tensors and propagate NaN; tranche 11 (#187) binds
+  `_foreach_norm`, `_foreach_mul_.Tensor`, `_foreach_clamp_{min,max}_`,
+  `linalg_vector_norm` and the grad scaler's `_amp_*` pair on
+  `torch/generated` only
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
   fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
@@ -312,7 +315,7 @@ Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
 TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
 layer-copy layer-rebuild
-sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+sgd adam rmsprop step! zero-grads! clip-grad-norm! clip-grad-value! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
@@ -457,8 +460,12 @@ hand-written `gen:layer` without the method refuses, naming
 `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
 position tensor) and `causal-mask` (`#t` above the diagonal, or the float
-`-inf` form) live in `torch/nn/positions.rkt`. `clip-grad-norm!` (`torch/nn/clip.rkt`) keeps its scale on the
-device. Layer init mirrors
+`-inf` form) live in `torch/nn/positions.rkt`. `clip-grad-norm!` and
+`clip-grad-value!` (`torch/nn/clip.rkt`, tranche 11, #187) keep the scale on
+the device and bucket the gradients by device and dtype, one
+`_foreach_norm`/`_foreach_mul_` (or two `_foreach_clamp_*_`) call per bucket,
+as `torch.nn.utils.clip_grad_norm_` with `foreach=True`; `#:foreach? #f` is
+the per-gradient loop, bit-identical on the CPU. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
 on this.
@@ -733,9 +740,10 @@ its regression test, once a pinned libtorch fixes the kernel.
   opaque handle; `status_call` and `null_arg_status` for the int-status
   in-place shape; `alloc_results` for an op with several Tensor returns,
   an int status plus one `tr_tensor**` out pointer per return, every one
-  NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
+  NULL unless the whole call succeeded; `alloc_result_list` for a
+  `Tensor[]` return into a caller-sized out array) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..10}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..11}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -991,7 +999,16 @@ Conventions:
   its first list. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
-  in schema order; any non-Tensor return still skips. A private ATen name
+  in schema order. A `Tensor[]` return (#187, `_foreach_norm`) is admitted
+  only on a `_foreach_*` op whose first argument is a `Tensor[]`, output i
+  belonging to input i: C takes a caller-sized `tr_tensor** out, int64_t
+  out_len` that must equal the list's length and fills it through
+  `alloc_result_list` (every slot NULL on error), and Racket's
+  `#:returns-list arg` clause answers a list. A write-annotated `Tensor(b!)`
+  beside the receiver (`found_inf`, `growth_tracker`) is a `mutable-tensor`,
+  a non-const `tr_tensor*`, and an in-place op without a method variant
+  (`_amp_update_scale_`) calls the `at::<base>_` free function on its
+  receiver. Any other non-Tensor return still skips. A private ATen name
   loses its leading underscore on the Racket side
   (`_cudnn_rnn_flatten_weight` is `cudnn-rnn-flatten-weight`). Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
