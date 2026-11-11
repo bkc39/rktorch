@@ -29,11 +29,11 @@
   #:c-id tr_mps_empty_cache)
 
 (define (collect-and-drain!)
-  (define-values (observed _drained?) (collect-and-wait!))
+  (define drained? (collect-and-wait!))
   (void (tr-cuda-empty-cache/raw))
   (void (tr-mps-empty-cache/raw))
   (lower-shadows!)
-  observed)
+  drained?)
 
 ;; one retry after a collect when a failed call was an OOM; the two
 ;; wrappers below differ only in how a raw result reports failure

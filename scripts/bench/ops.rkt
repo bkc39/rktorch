@@ -45,7 +45,7 @@
 
 (define (settle-native-memory!)
   (let loop ([prev (ledger-bytes)] [rounds 4])
-    (define-values (_observed drained?) (collect-and-wait!))
+    (define drained? (collect-and-wait!))
     (define now (ledger-bytes))
     (cond
       [(and (> rounds 1) (or (< now prev) (not drained?))) (loop now (sub1 rounds))]

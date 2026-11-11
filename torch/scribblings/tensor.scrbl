@@ -110,6 +110,12 @@ It stays @racket['float32] by default, so
          tensor?]{
 As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
 
+@defproc[(uniform! [t tensor?] [low real?] [high real?]) void?]{
+Fills @racket[t] in place with draws uniform on @tt{[low, high)}, as
+@tt{Tensor.uniform_}. It takes no @racket[#:generator]: it draws from
+@racket[(current-generator)], which must live on @racket[t]'s device, or
+from the global stream when that is @racket[#f].}
+
 @defproc[(full [value real?] [dim exact-nonnegative-integer?] ...
                [#:device device device/c #f]
                [#:dtype dtype dtype/c #f]

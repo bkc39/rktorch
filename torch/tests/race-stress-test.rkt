@@ -132,7 +132,8 @@
            rackunit
            (only-in "../foreign/raw/fault.rkt"
                     native-fault-policy note-native-fault! reset-native-fault-latch!)
-           (submod ".." stress))
+           (submod ".." stress)
+           (only-in "private/wedge.rkt" exit-status-of))
 
   (define widths '(2 4 8 16))
 
@@ -357,4 +358,36 @@
                (quotient rss-before mib) (quotient rss-after mib))
        (check-true (< (- rss-after rss-before) (* 512 mib))
                    "RSS grew past the churn's working set")]
-      [else (void)])))
+      [else (void)]))
+
+  (define (reapers-environment k)
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"RKTORCH_REAPERS" (string->bytes/utf-8 (number->string k)))
+    env)
+
+  (define (reaper-phases-program k)
+    `(begin
+       (require (only-in rackunit current-check-handler)
+                (only-in torch/runtime/reaper reaper-count)
+                (only-in (submod torch/runtime/reaper private) reaper-statistics)
+                (only-in (submod torch/tests/race-stress-test stress) phase sleep-through-phase)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (call-with-process-deadline
+        240
+        (lambda ()
+          (parameterize ([current-check-handler
+                          (lambda (e)
+                            (eprintf "~a\n" (if (exn? e) (exn-message e) e))
+                            (exit 1))])
+            (phase (build-list 8 values) sleep-through-phase)
+            (phase (build-list 16 values) sleep-through-phase))
+          (define escapes (hash-ref (reaper-statistics) 'escapes))
+          (eprintf "reapers ~a, escapes ~a\n" reaper-count escapes)
+          (exit (if (and (= reaper-count ,k) (zero? escapes)) 0 2))))))
+
+  (test-case "L6: 8 and 16 churners keep the ledger invariants with 1, 2 and 4 reapers"
+    (for ([k (in-list '(1 2 4))])
+      (with-check-info (['reapers k])
+        (check-equal? (parameterize ([current-environment-variables (reapers-environment k)])
+                        (exit-status-of (reaper-phases-program k) #:within 300))
+                      0)))))

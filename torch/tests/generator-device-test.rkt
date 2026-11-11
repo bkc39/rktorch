@@ -8,11 +8,12 @@
            "../data/loader.rkt"
            (only-in "../main.rkt"
                     arange cpu-device cpu-generator/c cuda-available?
-                    cuda-device current-generator device draw-seed
+                    cuda-device current-generator device draw-seed dtype
                     generator-device in-flattened-tensor make-generator
-                    mps-available? mps-device multinomial rand rand-like randn
+                    mps-available? mps-device multinomial ones rand rand-like randn
                     randn-like randperm reshape tensor to uniform! zeros)
-           (only-in "../nn.rkt" kaiming-uniform trunc-normal-init uniform-init)
+           (only-in "../nn.rkt"
+                    Dropout dropout kaiming-uniform trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blames-caller?)
@@ -145,6 +146,27 @@
                   (multinomial probabilities 2
                                #:generator (make-generator 1))))))
 
+  (define ((raised-by who) e)
+    (and (exn:fail:contract? e)
+         (regexp-match? (regexp (format "^~a: contract violation" who)) (exn-message e))
+         (regexp-match? #rx"the generator lives on the tensor's device" (exn-message e))))
+
+  (define (raised-on accelerator)
+    (define elsewhere (make-generator 1 #:device accelerator))
+    (define (on-accelerator) (to (zeros 3) accelerator))
+    (list (list 'dropout "dropout on cpu, accelerator generator"
+                (lambda () (dropout (zeros 3) #:generator elsewhere)))
+          (list 'dropout "dropout through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (dropout (zeros 3)))))
+          (list 'dropout "dropout on the accelerator, cpu generator"
+                (lambda () (dropout (on-accelerator) #:generator (make-generator 1))))
+          (list 'Dropout "Dropout on the accelerator through a cpu current-generator"
+                (lambda ()
+                  (parameterize ([current-generator (make-generator 1)])
+                    ((Dropout) (on-accelerator)))))))
+
   (bounded-test "R4: a CPU generator drawing for CUDA blames the caller, CUDA or not"
     (for ([thunk (in-list
                   (list (lambda ()
@@ -162,6 +184,11 @@
          (match-define (cons label thunk) row)
          (check-exn (blames-caller? "generator-device-test") thunk
                     (format "~a: ~a" accelerator label))))
+     (bounded-test "R4: dropout drawing with a generator on another device is the caller's error"
+       (for* ([accelerator (in-list accelerators)]
+              [row (in-list (raised-on accelerator))])
+         (match-define (list who label thunk) row)
+         (check-exn (raised-by who) thunk (format "~a: ~a" accelerator label))))
      (bounded-test "R4: rand-like moved to the CPU takes a CPU generator"
        (for ([accelerator (in-list accelerators)])
          (check-equal? (~> (zeros 3)
@@ -173,6 +200,26 @@
     [else
      (printf "[generator-device-test] skipped R4 rows: needs an ~a\n"
              "accelerator (CUDA or MPS) for a generator on another device")])
+
+  (cond
+    [(cuda-available?)
+     (bounded-test "R5: a CUDA generator draws dropout's mask for half CUDA tensors"
+       (define cuda (cuda-device))
+       (for ([type '(float16 bfloat16)])
+         (define x (to (ones 4 64 #:dtype type) cuda))
+         (define (drawn) (dropout x #:p 0.3 #:generator (make-generator 5 #:device cuda)))
+         (define out (drawn))
+         (check-equal? (dtype out) type (format "~a: dtype" type))
+         (check-equal? (device out) cuda (format "~a: device" type))
+         (check-not-false (memv 0.0 (host out)) (format "~a: drops some" type))
+         (check-equal? (host (drawn)) (host out) (format "~a: one seed, one mask" type))
+         (check-equal? (host (parameterize ([current-generator
+                                              (make-generator 5 #:device cuda)])
+                               ((Dropout #:p 0.3) x)))
+                       (host out)
+                       (format "~a: the layer under current-generator" type))))]
+    [else
+     (displayln "[generator-device-test] skipped R5: needs CUDA")])
 
   (cond
     [(and (cuda-available?)

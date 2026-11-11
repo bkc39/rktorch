@@ -34,8 +34,8 @@
 (define test-omit-paths
   (if (getenv "PLT_PKG_BUILD_SERVICE")
       '("audio" "data" "foreign" "foreign.rkt" "generated.rkt" "info.rkt" "main.rkt"
-        "nn" "nn.rkt" "operators.rkt" "private" "safe.rkt" "scribblings" "tests"
-        "text" "train" "train.rkt" "vision")
+        "nn" "nn.rkt" "operators.rkt" "private" "runtime" "safe.rkt" "scribblings"
+        "tests" "text" "train" "train.rkt" "vision")
       '()))
 
 ;; Enforced under `raco test --timeout` (the flake's check passes 300s as the
@@ -44,6 +44,6 @@
 (define test-timeouts
   '(("tests/finalizer-thread-test.rkt" 120)
     ("tests/foreign-test.rkt" 300)
-    ("tests/generated-parity-test.rkt" 900)
+    ("tests/generated-parity-test.rkt" 120)
     ("tests/loader-workers-test.rkt" 600)
     ("tests/python-cross-test.rkt" 1200)))

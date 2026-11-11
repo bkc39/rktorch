@@ -98,7 +98,8 @@ with `backward!` outside the form as PyTorch recommends). From
   `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
   tensor is on the CPU) blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
-  tensor; `dataloader` and the augmentations of
+  tensor, and `torch/nn`'s `dropout` and `Dropout` raise for one when they
+  draw; `dataloader` and the augmentations of
   `torch/vision/transforms.rkt` take only a CPU generator
   (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
@@ -306,7 +307,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `torch/foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
 TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
@@ -406,15 +407,22 @@ its own values); the stack contract rejects layer keywords or `#:norm #t`
 beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is Python's
 `copy.deepcopy` with no RNG draws: fresh tensors with the same values,
 device, dtype and requires-grad (no gradients), modes kept, sharing and
-cycles kept, over the `gen:layer` method `layer-rebuild layer child tensor`
-that `define-layer` derives (`LSTM`'s plain `entries` list is why plain
-fields are walked). Invariants of the walk:
+cycles kept, over the `gen:layer` method `layer-rebuild-method` that
+`define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
+are walked). Invariants of the walk:
 - One memo per call (`torch/nn/private/memo.rkt`), carried by `layer-copy`'s
-  `remembering` child. `layer-rebuild-in`
-  (`torch/nn/private/layer-core.rkt`) is the one dispatch, behind
-  `layer-copy`, `layer-rebuild` and the registry method. A
-  `define/generic` call into a hand-written layer bypasses it, so a cycle
-  through that layer does not terminate (#466).
+  `remembering` child. `layer-rebuild-in` (`torch/nn/private/layer-core.rkt`)
+  is the dispatch behind `layer-copy`, `layer-rebuild` and the registry
+  method. A direct `layer-rebuild` pushes its memo on a continuation mark,
+  which a nested call on `equal-always?` callbacks joins (contracts re-wrap
+  them at each call). The mark sits under a private prompt tag, so a default
+  prompt (`eval`, `call-with-continuation-prompt`) does not hide it; a new
+  thread starts without it, and `layer-copy` clears it. A `define/generic`
+  of `layer-rebuild-method` on a hand-written layer skips the memo, as a
+  direct `__deepcopy__` call does in Python; on a `define-layer` layer it
+  uses the memo. A cycle of such direct calls never terminates (Python
+  raises `RecursionError`; Racket CS grows the stack until memory runs out)
+  (#466).
 - Layers, mutable containers and mutable strings are recorded empty, then
   filled (`allocated`): a back edge gets the part-built copy, as in Python.
 - Immutable values, `Children` and `Parameters` included, copy their parts
@@ -817,6 +825,15 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
+- `torch/runtime/reaper.rkt` — the reapers: one ordered Chez guardian per
+  kind (`reaped`), `reap-when-dead!` (the hot registration, no contract),
+  `drain-reapers!`, `collect-and-drain-reapers!`, `wake-reapers!`, and
+  `RKTORCH_REAPERS` parallel threads that release dead handles off main
+  (#439), in the main place only; any other place falls back to
+  `register-finalizer`. It requires nothing from `memory`, `pressure` or
+  `collector`. `torch/runtime/main-thread.rkt` — `on-main-os-thread?`,
+  `main-place?`. The loader's own "reaper" in
+  `torch/data/workers.rkt` is unrelated.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
   rules agents must not break: every tensor-returning binding carries
@@ -830,31 +847,34 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   update twice; `tr_tensor_grad`
   carries `tensor-allocator/gradient`; a binding with several tensor
   outputs carries `tensor-allocator/outputs` (or `/outputs/no-retry`).
-  Every wrap runs the raw call and registers each handle's finalizer in one
-  `call-as-uninterruptible` region (a kill or break waits for it), then
-  charges the ledger in a second region; never a bare `register-finalizer`
-  (skips the ledger). `torch/tests/source-rules-test.rkt` enforces three
-  rules: nothing under `torch/foreign/` enters atomic mode (a parallel
-  thread's atomic section runs on the main OS thread) or requires
-  `ffi/unsafe/alloc`; nothing under `torch/` but
+  Every wrap runs the raw call and registers each handle with its kind's
+  guardian (`reap-when-dead!`) in one `call-as-uninterruptible` region (a
+  kill or break waits for it), then charges the ledger in a second region.
+  `torch/tests/source-rules-test.rkt` enforces these
+  rules: nothing under `torch/foreign/` or `torch/runtime/` enters atomic
+  mode (a parallel thread's atomic section runs on the main OS thread) or
+  requires `ffi/unsafe/alloc`; nothing under `torch/foreign/` calls
+  `register-finalizer`; no library module but `torch/runtime/reaper.rkt`
+  names `make-guardian`; nothing under `torch/` but
   `torch/foreign/raw/cas.rkt` calls `box-cas!` or `unsafe-struct*-cas!`, so
   every CAS goes through its retry loops (`cas-update!`, `cas-add!`,
   `cas-take!`, `cas-claim!`, `cas-claim-when!`, `cas-field-claim!`), whose
   `#:site` must be one of `torch/foreign/raw/cas.rkt`'s enumerated sites or the call is a
-  syntax error; and no comment under `torch/foreign/` cites an issue
-  number. The rarely touched ledger fields are written only under
+  syntax error; and no comment under `torch/foreign/` or `torch/runtime/`
+  cites an issue number. Reapers run only in the main place, and nothing
+  kills, breaks or stops one; process exit leaves them parked. The rarely touched ledger fields are written only under
   `with-ledger`, inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the
   wrapper's `state`, from `'live` to `'freeing`. A loser raises
   `exn:fail:contract`. The winner goes through the raising
   `tr-tensor-free/checked`, which claims the handle's lifetime for its
-  thread with the CAS the finalizer makes, and releases, tags and marks it
+  thread with the CAS the reaper makes, and releases, tags and marks it
   in one region; a free killed before that region leaves the handle
-  to the finalizer. OOM reaches users as
+  to the reapers. OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
   enough to catch an `invalid memory reference` either lets it through to
   the caller, which latches nothing, or, where no caller is waiting (a
-  finalizer guard, the printer, `account!`), calls `note-native-fault!`
+  reaper's release, the printer, `account!`), calls `note-native-fault!`
   when `native-fault?` holds, so that fault latches the library; never bind
   native code with `define-ffi-definer` or `get-ffi-obj` directly, which
   bypasses the latch.
@@ -872,7 +892,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   values (structs and mpairs are not looked inside); `torch/nn/layer.rkt` holds the
   contracted public definitions and the macros over
   `torch/nn/private/layer-core.rkt` (`gen:layer`, the registry struct,
-  moves, `call-layer`, `layer-rebuild-in`, `layer-rebuild-joined`),
+  moves, `call-layer`, `layer-rebuild-in`),
   `torch/nn/private/layer-containers.rkt` (the `Fn`, `Parameters` and
   `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`

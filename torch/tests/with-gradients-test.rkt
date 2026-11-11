@@ -6,33 +6,21 @@
            rackunit
            (only-in threading ~>)
            (only-in "../foreign/autograd-ops.rkt" with-gradient with-gradients)
-           (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/gradients.rkt" fetched-gradient gradients-allocator)
            (only-in "../foreign/raw/memory.rkt" _tr-device-type adopted-bytes free-handles!)
            (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "../generated.rkt" embedding)
-           (only-in "../foreign/raw/pressure-settings.rkt"
-                    native-collect-at-troughs)
            (only-in "../main.rkt"
                     backward! grad manual-seed! randn requires-grad! reshape sum tensor
                     tensor->list)
            (only-in "../nn.rkt" Linear parameters sgd step!)
+           (only-in "private/op-calls.rkt" crossings-of op-calls-of)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/unseen-gradient.rkt" with-unseen-gradient)
            (only-in "private/within.rkt" bounded-test))
 
   (define (flat t) (~> t (reshape -1) tensor->list))
-
-  (define (crossings-of thunk)
-    (define here (current-thread))
-    (define n 0)
-    (parameterize ([native-collect-at-troughs #f])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! n (add1 n))))
-        (thunk)))
-    n)
 
   (define (balance-of thunk)
     (define here (current-thread))
@@ -61,6 +49,11 @@
       (define ps (params-of (layers depth)))
       (check-equal? (crossings-of (lambda () (with-gradients ([qs gs] ps) (void)))) 2)
       (check-equal? (crossings-of (lambda () (with-gradients (gs ps) (void)))) 2)))
+
+  (bounded-test "op-calls-of counts a fetch and its batched release as the one fetch"
+    (for ([depth (in-list '(1 4))])
+      (define ps (params-of (layers depth)))
+      (check-equal? (op-calls-of (lambda () (with-gradients (gs ps) (void)))) 1)))
 
   (bounded-test "pairs each parameter that has a gradient with it, in order"
     (define ls (layers 3 #:through 2))

@@ -1,17 +1,19 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe
-                  _enum _fun _int _int64 _list _ptr _void register-finalizer
-                  set-cpointer-tag!)
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe
+                  _enum _fun _int _int64 _list _ptr _void set-cpointer-tag!)
          (only-in racket/list filter-map remove-duplicates)
          (only-in racket/match match-define match-lambda)
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "../../runtime/reaper.rkt" reap-when-dead! reaped)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "accounts.rkt" with-ledger)
          (only-in "cas.rkt" cas-add! cas-claim! cas-claim-when! cas-update!)
          (only-in "collector.rkt"
                   finalizer-runs
                   note-finalizer-run!)
-         (only-in "fault.rkt" native-fault? note-native-fault!)
+         (only-in "fault.rkt" native-fault? note-native-fault! with-fault-handlers)
          (only-in "oom.rkt"
                   collect-and-drain!
                   oom-retry
@@ -116,6 +118,12 @@
 (define (claim-lifetime! lt by)
   (cas-claim-when! (lifetime-state lt) claimable? by #:site 'lifetime))
 
+(define (orphaned? held)
+  (or (eq? held 'live) (thread? held)))
+
+(define (claim-dead-lifetime! lt)
+  (cas-claim-when! (lifetime-state lt) orphaned? 'finalizing #:site 'lifetime))
+
 (define (tr-tensor-free/checked h)
   (parameterize-break #f
     (define lt (hash-ref lifetimes h #f))
@@ -195,28 +203,31 @@
   (note-finalizer-run!)
   (record-failure! e))
 
-(define ((swallow-and-count-failure release) t)
+(define-syntax-parse-rule (counting-failures body:expr ...+)
   (with-uninterruptible
-    (with-handlers ([(lambda (_) #t) count-failed-run!])
-      (release t)
+    (with-fault-handlers ([(lambda (_) #t) count-failed-run!])
+      body ...
       (note-finalizer-run!))))
 
-(define (finalizer-for lt)
-  (define release-claimed
-    (swallow-and-count-failure
-     (lambda (h)
-       (race-point finalizer-releasing h)
-       (unaccount-lifetime! h lt)
-       (release! h lt))))
-  (lambda (h)
-    (with-uninterruptible
-      (when (claim-lifetime! lt 'finalizing)
-        (release-claimed h)))))
+(define ((swallow-and-count-failure release) t)
+  (counting-failures (release t)))
+
+(define (release-dead-handle! h)
+  (define lt (hash-ref lifetimes h #f))
+  (cond
+    [(not lt) (count-failed-run! "a dead handle with no lifetime")]
+    [(claim-dead-lifetime! lt)
+     (counting-failures
+      (race-point finalizer-releasing h)
+      (unaccount-lifetime! h lt)
+      (release! h lt))]
+    [else (void)]))
+
+(define tensor-reaped (reaped 'tensor release-dead-handle!))
 
 (define (register-tensor! h)
-  (define lt (fresh-lifetime))
-  (hash-set! lifetimes h lt)
-  (register-finalizer h (finalizer-for lt))
+  (hash-set! lifetimes h (fresh-lifetime))
+  (reap-when-dead! tensor-reaped h)
   (race-point handle-registered h))
 
 ;; One uninterruptible region on the caller's OS thread: a kill or a break
@@ -236,8 +247,11 @@
 (define registering/outputs (registered register-tensors!))
 
 (define (registering/release release)
-  (define finalize (swallow-and-count-failure release))
-  (registered (lambda (h) (register-finalizer h finalize))))
+  (define (release-generator! h)
+    (race-point generator-releasing h)
+    (release h))
+  (define kind (reaped 'generator (swallow-and-count-failure release-generator!)))
+  (registered (lambda (h) (reap-when-dead! kind h))))
 
 (struct allocation (phantom nbytes device account [adopted #:mutable] [adopter #:mutable]))
 
@@ -257,10 +271,10 @@
   #:c-id tr_tensor_device)
 
 (define (native-placement t)
-  (with-handlers ([exn:fail? (lambda (e)
-                               (when (native-fault? e)
-                                 (note-native-fault! "accounting a tensor"))
-                               (values #f #f))])
+  (with-fault-handlers ([exn:fail? (lambda (e)
+                                     (when (native-fault? e)
+                                       (note-native-fault! "accounting a tensor"))
+                                     (values #f #f))])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (cond
