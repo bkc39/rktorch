@@ -98,7 +98,8 @@ with `backward!` outside the form as PyTorch recommends). From
   `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
   tensor is on the CPU) blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
-  tensor; `dataloader` and the augmentations of
+  tensor, and `torch/nn`'s `dropout` and `Dropout` raise for one when they
+  draw; `dataloader` and the augmentations of
   `torch/vision/transforms.rkt` take only a CPU generator
   (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
@@ -305,7 +306,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `torch/foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
 TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask

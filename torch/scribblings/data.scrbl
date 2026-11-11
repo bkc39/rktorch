@@ -340,12 +340,14 @@ One int64 drawn from @racket[generator] or else from @racket[(current-generator)
 The generator a random operation draws from when its @racket[#:generator]
 is @racket[#f]: @racket[rand], @racket[randn], @racket[rand-like],
 @racket[randn-like], @racket[randperm], @racket[draw-seed],
-@racket[multinomial], the random transforms, the seeds a loader draws, and
+@racket[multinomial], @racket[uniform!], @racket[dropout] and
+@racket[Dropout], the random transforms, the seeds a loader draws, and
 the initializers (@racket[uniform-init], @racket[kaiming-uniform],
 @racket[trunc-normal-init]). @racket[#f], the default, is the global stream
 seeded by @racket[manual-seed!]. An explicit @racket[#:generator] wins. Each
-loader worker sets it to its own generator. Dropout draws from the global
-stream whatever it holds.
+loader worker sets it to its own generator. The dropout fused into
+@racket[scaled-dot-product-attention], @racket[MultiheadAttention] and the
+recurrent layers draws from the global stream whatever it holds.
 @torch-examples[
 (parameterize ([current-generator (make-generator 0)])
   (randperm 5))
