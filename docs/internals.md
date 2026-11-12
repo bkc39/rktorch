@@ -291,8 +291,12 @@ per entry; the pair runs the per-entry count (331).
   `young-count` is the pair of an epoch and its bytes, so the first count
   after a collection starts a new one, and a young phantom of a dead epoch
   rolls into the old one at the next sync. A tally's pending young bytes
-  count toward the epoch they are flushed in: across a collection the young
-  figure is off by at most a tally's limit. The count never goes below 0. A
+  carry the epoch they were gathered in: once that epoch has ended, a later
+  charge or the flush carries only what is above 0 into the next one, so a
+  release pending across a collection never lowers the next epoch's count.
+  Pending charges do carry over, so across a collection the young figure can
+  over-count by what the tallies held pending, which only adds pressure; it
+  never under-counts. The shared count never goes below 0 either. A
   release counted young and flushed after its epoch ended would otherwise
   start the next epoch below 0, and that epoch's charges would land on the
   old phantom, the only pressure that could end it: charging 8 MiB and
@@ -303,14 +307,39 @@ per entry; the pair runs the per-entry count (331).
   shared counters, then `sync-phantoms!` sets the pair to the counters, one
   or two `set-phantom-bytes!`, lowering before raising. The sync is claimed
   by a CAS; a thread that finds it claimed leaves its bytes to the claimant,
-  which looks again after letting go (a CAS, so the look cannot pass it)
+  which looks again after letting go (fenced, so the look cannot pass it)
   and at most four rounds in all, so threads that keep flushing cannot keep
   it there. Every reader's `flush-tallies!` syncs every account it has a
   slot for, so what a claimant left reaches the pair at the next reader or
   flush. Concurrent flushes of one account cost one claimant's sets, not
-  one per thread. The claim is taken inside the flush's uninterruptible
-  region, so a kill never strands it, and it is no lock: nobody waits on it,
-  and the lock order (take lock, then ledger lock) is unchanged.
+  one per thread. A sync that finds the claim free and the pair already at
+  its targets returns without claiming: a reader's `flush-tallies!` syncs
+  every slot, and a claim, which installs a cleanup, allocates (about 12 KB
+  per item on `librispeech-dataset-test`'s heap check without the shortcut). The claim is taken inside the flush's uninterruptible
+  region, so a kill never strands it; `with-claim`
+  (`torch/foreign/raw/cas.rkt`) lets it go in a cleanup, so an exception
+  does not either. It is no lock: nobody waits on it, and the lock order
+  (take lock, then ledger lock) is unchanged.
+- **Fences.** The claim guards plain fields (the cached byte counts, the
+  young phantom, its epoch), and Chez's CAS on arm64 is a bare
+  `ldxr`/`stxr` with no barrier (`asm-cas`, `s/arm64.ss:1991-2003`, Racket
+  9.3), so `with-claim` fences as rumble's own lock does
+  (`rumble/lock.ss:94,129`):
+  `memory-order-acquire` after taking the claim, `memory-order-release`
+  before letting it go. The look again is a store-load race on both sides
+  (a flusher adds to live and then reads the claim; the claimant lets go and
+  then reads live), which needs a full fence, and Racket has no
+  `memory-order-full`. `memory-order-release` is one where it matters: on
+  arm64 it emits `dmb ish`, a full barrier, while acquire emits only
+  `dmb ishld` (`asm-fence`, `s/arm64.ss:2008-2014`); on x86_64 both are no-ops
+  (`cpprim.ss:3339-3350`), and the store before each look is a CAS, which
+  is `lock cmpxchg` there (`s/x86_64.ss:1194-1198`) and so already a full
+  barrier. `with-claim` therefore issues `memory-order-release` before
+  taking the claim, after the caller's add to live, and again after letting
+  it go, before the claimant's look. The settled check reads the cached
+  fields outside the claim only after the same fence, a free claim and
+  `memory-order-acquire`, so it sees the last claimant's writes. riscv64 and loongarch64 take the same
+  inline but are not checked here.
 - Adoptions and adopted releases, which write the shared counters under the
   ledger, sync the pair there.
 
@@ -339,7 +368,7 @@ mid-collection, whose `dynamic-wind` exit never runs, stops holding it.
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
 the step, provided the reapers release them. A collection only finds a
-dead handle; its storage and its phantom stay until a reaper releases
+dead handle; its storage and its charge stay until a reaper releases
 it. Without that the charge of every dead result piles up until Racket's
 next major, which reclaims nothing but that backlog: 8 MiB results ran
 three majors per hundred calls, about 1 ms a call on any device (#377).

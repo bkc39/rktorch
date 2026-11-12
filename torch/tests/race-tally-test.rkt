@@ -13,7 +13,7 @@
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/raw/accounts.rkt"
                     account-of checks-seen devices-over-floor ledger-entries live-bytes
-                    account-trial pressure-reading set-account-interval!
+                    account-trial note-unadopted! pressure-reading set-account-interval!
                     set-account-sample! set-account-trial! since-check-bytes
                     take-since-sample! with-ledger)
            (only-in (submod "../foreign/raw/accounts.rkt" private)
@@ -22,7 +22,7 @@
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/memory.rkt"
-                    adopted-bytes finalizer-diagnostics native-memory-use/fold
+                    adopt-gradient! adopted-bytes finalizer-diagnostics native-memory-use/fold
                     record-allocation! unaccount!)
            (only-in "../foreign/raw/pressure.rkt"
                     collect-under-pressure! lower-shadows! native-collect-margin
@@ -437,6 +437,29 @@
                   "an adopted release reached the shared counter unflushed")
     (void (sum p))
     (settle!))
+
+  (bounded-test "L10: an adopted release killed at its entry still returns its live bytes"
+    (with-batched-device (dev 47)
+      (define key (box 'adopted))
+      (define param (box 'param))
+      (with-ledger (note-unadopted! (account-of dev) n))
+      (record-allocation! key n dev #:adopt (lambda (e) (adopt-gradient! (list param) key e)))
+      (check-equal? (adopted-bytes key) n "the charge was adopted")
+      (define releaser (box #f))
+      (define (kill-at-entry name subject)
+        (when (and (eq? name 'entry-unaccounted) (eq? subject key)
+                   (eq? (current-thread) (unbox releaser)))
+          (kill-thread (current-thread))))
+      (define start (make-semaphore 0))
+      (with-race-hook kill-at-entry
+        (define w (spawn (lambda () (semaphore-wait start) (unaccount! key))))
+        (set-box! releaser (worker-thread w))
+        (semaphore-post start)
+        (check-not-false (sync/timeout 30 (thread-dead-evt (worker-thread w)))
+                         "the releaser died"))
+      (flush-tallies!)
+      (check-equal? (list (shared-live dev) (fold-of dev)) (list 0 0)
+                    "(shared live, fold) after the killed release")))
 
   (bounded-test "L12: eight churners at the default limit keep the ledger"
     (settle!)

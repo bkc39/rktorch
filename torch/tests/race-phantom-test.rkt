@@ -1,58 +1,24 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base syntax/parse)
-           (only-in racket/dict dict-ref)
+  (require (only-in racket/dict dict-ref)
            (only-in racket/list append-map shuffle)
            rackunit
-           (only-in syntax/parse/define define-syntax-parse-rule)
-           (only-in "../foreign/device-type.rkt" device)
-           (only-in "../foreign/raw/accounts.rkt" account-of note-mark!)
-           (only-in (submod "../foreign/raw/accounts.rkt" private)
-                    account-counters accounts raw-live)
-           (only-in "../foreign/raw/cas.rkt" cas-update!)
            (only-in "../foreign/raw/memory.rkt"
                     native-memory-use/fold record-allocation! unaccount!)
-           (only-in (submod "../foreign/raw/phantoms.rkt" private) phantom-bytes)
-           (only-in "../foreign/raw/tallies.rkt" counters-phantoms flush-tallies!)
+           (only-in "../foreign/raw/phantoms.rkt" charge-epoch young-epoch?)
+           (only-in (submod "../foreign/raw/phantoms.rkt" private) rounds young-count-of)
+           (only-in "../foreign/raw/tallies.rkt" flush-tallies! flush-tally!)
            (only-in "private/race-harness.rkt"
                     join spawn stop! with-race-hook worker-thread)
            (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
-           (only-in "private/within.rkt" bounded-test))
+           (only-in "private/tally-devices.rkt"
+                    charged kib mib phantoms-of shared-live with-batched-device
+                    with-unmarked-device young-charged)
+           (only-in "private/within.rkt" bounded-test)
+           (only-in "private/within-memory.rkt" memory-after-majors minors-during))
 
-  (define kib 1024)
-  (define mib (* 1024 kib))
-
-  (define (shared-live dev) (raw-live (account-of dev)))
   (define (fold-of dev) (dict-ref (native-memory-use/fold) dev 0))
-
-  (define (phantoms-of dev)
-    (counters-phantoms (account-counters (account-of dev))))
-
-  (define (charged dev)
-    (define-values (old young) (phantom-bytes (phantoms-of dev)))
-    (+ old young))
-
-  (define (young-charged dev)
-    (define-values (_old young) (phantom-bytes (phantoms-of dev)))
-    young)
-
-  (define (call-with-fake-device index proc #:mark [mark #f])
-    (define dev (device 'cuda index))
-    (dynamic-wind
-     (lambda ()
-       (when mark (note-mark! (account-of dev) mark))
-       (flush-tallies!))
-     (lambda () (proc dev))
-     (lambda ()
-       (flush-tallies!)
-       (void (cas-update! accounts (lambda (all) (hash-remove all dev)))))))
-
-  (define-syntax-parse-rule (with-fake-device (dev:id index:expr
-                                                (~optional (~seq #:mark mark:expr)
-                                                           #:defaults ([mark #'#f])))
-                              body:expr ...+)
-    (call-with-fake-device index (lambda (dev) body ...) #:mark mark))
 
   (define (unaccount-all! keys)
     (for-each unaccount! keys)
@@ -63,19 +29,22 @@
     (check-equal? live (fold-of dev) (format "~a: shared live against the fold" what))
     (check-equal? (charged dev) (max 0 live) (format "~a: the phantoms against live" what)))
 
-  (define (memory-after-majors)
-    (for ([_ (in-range 2)]) (collect-garbage 'major))
-    (current-memory-use))
-
-  (define (minors-during thunk)
-    (define receiver (make-log-receiver (current-logger) 'debug 'GC))
-    (thunk)
-    (for/sum ([event (in-producer (lambda () (sync/timeout 0 receiver)) #f)])
-      (define mode (vector-ref (struct->vector (vector-ref event 2)) 1))
-      (if (memq mode '(minor minor-incremental)) 1 0)))
+  (define (call-with-other-thread proc)
+    (define asks (make-channel))
+    (define answers (make-channel))
+    (define other
+      (thread (lambda ()
+                (let loop ()
+                  (channel-put answers ((channel-get asks)))
+                  (loop)))))
+    (define (on-other thunk)
+      (channel-put asks thunk)
+      (channel-get answers))
+    (begin0 (proc on-other)
+            (kill-thread other)))
 
   (bounded-test "L14: churners killed at random leave the phantoms at the ledger"
-    (with-fake-device (dev 60 #:mark (* 512 mib))
+    (with-batched-device (dev 60)
       (define rng (make-pseudo-random-generator))
       (define stop? (box #f))
       (define (churn! mine)
@@ -110,8 +79,7 @@
       (check-equal? (charged dev) 0)
       (define counted (- charging (memory-after-majors)))
       (check-true (< (abs (- counted live)) (+ mib (quotient live 256)))
-                  (format "the collector counted ~a phantom bytes against ~a live" counted live))
-      (check-equal? (length held) 8)))
+                  (format "the collector counted ~a phantom bytes against ~a live" counted live))))
 
   (define (churner-killed-in-charge dev at)
     (define worker (box #f))
@@ -136,7 +104,7 @@
     (unbox keys))
 
   (bounded-test "L14: a churner killed in the middle of a charge leaves the phantoms at the ledger"
-    (with-fake-device (dev 68 #:mark (* 512 mib))
+    (with-batched-device (dev 68)
       (define keys (churner-killed-in-charge dev 8))
       (check-equal? (length keys) 9 "the kill came at the ninth charge")
       (flush-tallies!)
@@ -145,12 +113,6 @@
       (unaccount-all! keys)
       (check-conserved dev "after the releases")
       (check-equal? (charged dev) 0)))
-
-  (define (spin-until done?)
-    (define deadline (+ (current-inexact-milliseconds) 10000))
-    (let spin ()
-      (unless (or (done?) (> (current-inexact-milliseconds) deadline))
-        (spin))))
 
   (define (call-with-claim-held dev on-hold)
     (define me (current-thread))
@@ -165,33 +127,39 @@
       (record-allocation! key mib dev))
     (values key (unbox hits)))
 
+  (define (spin-until done?)
+    (define deadline (+ (current-inexact-milliseconds) 10000))
+    (let spin ()
+      (unless (or (done?) (> (current-inexact-milliseconds) deadline))
+        (spin))))
+
   (define (charger dev)
     (define asked (box 0))
-    (define charged (box '()))
+    (define keys (box '()))
     (define stop? (box #f))
+    (define (behind?) (> (unbox asked) (length (unbox keys))))
     (define w
       (spawn (lambda ()
                (let loop ()
-                 (spin-until (lambda () (or (unbox stop?)
-                                            (> (unbox asked) (length (unbox charged))))))
-                 (when (> (unbox asked) (length (unbox charged)))
+                 (spin-until (lambda () (or (unbox stop?) (behind?))))
+                 (when (behind?)
                    (define key (box (unbox asked)))
                    (record-allocation! key mib dev)
-                   (set-box! charged (cons key (unbox charged)))
+                   (set-box! keys (cons key (unbox keys)))
                    (loop))))
              #:pool 'own))
     (define (charge-while-held! hit)
       (when (<= hit 100)
         (set-box! asked hit)
-        (spin-until (lambda () (= hit (length (unbox charged)))))))
+        (spin-until (lambda () (= hit (length (unbox keys)))))))
     (define (finish!)
       (set-box! stop? #t)
       (join w)
-      (unbox charged))
+      (unbox keys))
     (values charge-while-held! finish!))
 
   (bounded-test "L14: a flush that finds the phantoms claimed leaves its bytes to the claimant"
-    (with-fake-device (dev 61)
+    (with-unmarked-device (dev 61)
       (define-values (charge-while-held! finish!) (charger dev))
       (define-values (key _hits)
         (call-with-claim-held dev (lambda (hit) (when (= hit 1) (charge-while-held! hit)))))
@@ -202,11 +170,11 @@
       (check-conserved dev "after the releases")))
 
   (bounded-test "L14: a claimant kept busy leaves after a few rounds, and a reader syncs the rest"
-    (with-fake-device (dev 64)
+    (with-unmarked-device (dev 64)
       (define-values (charge-while-held! finish!) (charger dev))
       (define-values (key hits) (call-with-claim-held dev charge-while-held!))
       (define others (finish!))
-      (check-true (< hits 10) (format "the claimant ran ~a rounds" hits))
+      (check-equal? hits rounds "the claimant ran its rounds")
       (check-equal? (length others) hits)
       (check-equal? (shared-live dev) (* (add1 hits) mib))
       (check-true (< (charged dev) (shared-live dev)) "the last round's charge waits for a sync")
@@ -233,20 +201,35 @@
     (unbox hits))
 
   (bounded-test "L14: a reader killed while it holds the claim does not strand it"
-    (with-fake-device (dev 66)
+    (with-batched-device (dev 66)
       (define first (box 'first))
-      (record-allocation! first mib dev)
+      (record-allocation! first (* 64 kib) dev)
       (check-equal? (reader-killed-at-claim dev) 1 "the kill came at the claim")
       (define second (box 'second))
       (record-allocation! second mib dev)
       (flush-tallies!)
       (check-conserved dev "after the kill")
-      (check-equal? (charged dev) (* 2 mib) "a later sync took the claim")
+      (check-equal? (charged dev) (+ (* 64 kib) mib) "a later sync took the claim")
+      (unaccount-all! (list first second))
+      (check-conserved dev "after the releases")))
+
+  (bounded-test "L14: a sync that raises lets the claim go"
+    (with-unmarked-device (dev 72)
+      (define target (phantoms-of dev))
+      (define (raise-at-claim name subject)
+        (when (and (eq? name 'phantoms-applied) (eq? subject target))
+          (error 'sync-phantoms! "raised with the claim held")))
+      (define first (box 'first))
+      (check-exn #rx"raised with the claim held"
+                 (lambda () (with-race-hook raise-at-claim (record-allocation! first mib dev))))
+      (define second (box 'second))
+      (record-allocation! second mib dev)
+      (check-equal? (charged dev) (* 2 mib) "the next sync took the claim")
       (unaccount-all! (list first second))
       (check-conserved dev "after the releases")))
 
   (bounded-test "L14: spurious CAS failures at the phantoms lose nothing"
-    (with-fake-device (dev 62)
+    (with-unmarked-device (dev 62)
       (define (check-synced what)
         (check-equal? (charged dev) (max 0 (shared-live dev)) what))
       (define keys
@@ -271,7 +254,7 @@
       (check-equal? (charged dev) 0)))
 
   (bounded-test "L14: the first charge after a collection lands on the young phantom"
-    (with-fake-device (dev 65)
+    (with-unmarked-device (dev 65)
       (define first (box 'first))
       (define second (box 'second))
       (record-allocation! first mib dev)
@@ -283,7 +266,7 @@
       (check-conserved dev "after the releases")))
 
   (bounded-test "L14: a release flushed after its epoch ended leaves the next charges young"
-    (with-fake-device (dev 67 #:mark (* 512 mib))
+    (with-batched-device (dev 67)
       (define released (box 'released))
       (define charged-after (box 'charged-after))
       (record-allocation! released (* 8 kib) dev)
@@ -298,24 +281,91 @@
       (unaccount-all! (list charged-after))
       (check-conserved dev "after the releases")))
 
-  (bounded-test "L14: charges keep the nursery collections a per-entry phantom ran"
-    (with-fake-device (dev 63)
-      (define ring 10)
-      (define ops 2000)
-      (define keys (for/vector #:length ring ([i (in-range ring)]) (box i)))
-      (for ([k (in-vector keys)]) (record-allocation! k mib dev))
-      (collect-garbage 'major)
-      (define minors
-        (minors-during
-         (lambda ()
-           (for ([i (in-range ops)])
-             (define j (modulo i ring))
-             (unaccount! (vector-ref keys j))
-             (define k (box i))
-             (vector-set! keys j k)
-             (record-allocation! k mib dev)))))
-      (check-true (> minors (quotient ops 40))
-                  (format "~a minor collections over ~a ops of 1 MiB" minors ops))
-      (check-true (<= (young-charged dev) (charged dev)))
+  (bounded-test "L14: a release pending across a collection leaves the next charge young"
+    (with-batched-device (dev 69)
+      (define released (box 'released))
+      (define charged-after (box 'charged-after))
+      (record-allocation! released (* 8 kib) dev)
+      (flush-tallies!)
+      (unaccount! released)
+      (collect-garbage 'minor)
+      (record-allocation! charged-after (* 8 kib) dev)
+      (flush-tallies!)
+      (check-equal? (young-charged dev) (* 8 kib) "the charge after the pending release")
+      (unaccount-all! (list charged-after))
+      (check-conserved dev "after the releases")))
+
+  (define (within-one-epoch first scenario)
+    (for/or ([index (in-range first (+ first 10))])
+      (with-batched-device (dev index)
+        (call-with-other-thread (lambda (on-other) (scenario dev on-other))))))
+
+  (define (other-release-across-a-collection dev on-other)
+    (define released (box 'released))
+    (define charged-after (box 'charged-after))
+    (record-allocation! released (* 8 kib) dev)
+    (flush-tally!)
+    (on-other (lambda () (unaccount! released)))
+    (collect-garbage 'minor)
+    (define e (charge-epoch))
+    (record-allocation! charged-after (* 4 kib) dev)
+    (flush-tally!)
+    (on-other flush-tally!)
+    (define young (young-charged dev))
+    (unaccount-all! (list charged-after))
+    (check-conserved dev "after the releases")
+    (and (young-epoch? e) young))
+
+  (bounded-test "L14: another tally's release pending across a collection leaves this one's charge young"
+    (check-equal? (within-one-epoch 70 other-release-across-a-collection) (* 4 kib)
+                  "this tally's charge after the other's release"))
+
+  (define (release-flushed-before-charge dev on-other)
+    (define e (charge-epoch))
+    (define key (box 'charged-elsewhere))
+    (on-other (lambda () (record-allocation! key (* 8 kib) dev)))
+    (unaccount! key)
+    (flush-tally!)
+    (define count (young-count-of (phantoms-of dev)))
+    (on-other flush-tally!)
+    (check-conserved dev "after both flushes")
+    (and (young-epoch? e) count))
+
+  (bounded-test "L14: a release flushed before its charge holds the young count at 0"
+    (check-equal? (within-one-epoch 80 release-flushed-before-charge) 0
+                  "the young count after the release's flush, within one epoch"))
+
+  (define ring 40)
+  (define ring-ops 2000)
+
+  (define (ring-size i)
+    (* 64 kib (add1 (modulo (* 7 i) 8))))
+
+  (define (ring-minors charge! release!)
+    (define held (for/vector #:length ring ([i (in-range ring)]) (charge! i)))
+    (collect-garbage 'major)
+    (define minors
+      (minors-during
+       (lambda ()
+         (for ([i (in-range ring-ops)])
+           (define j (modulo i ring))
+           (release! (vector-ref held j))
+           (vector-set! held j (charge! (+ ring i)))))))
+    (values minors held))
+
+  (bounded-test "L14: charges keep the nursery collections a phantom per entry runs"
+    (define-values (control _phantoms)
+      (ring-minors (lambda (i) (make-phantom-bytes (ring-size i)))
+                   (lambda (p) (set-phantom-bytes! p 0))))
+    (with-batched-device (dev 63)
+      (define-values (minors keys)
+        (ring-minors (lambda (i)
+                       (define key (box i))
+                       (record-allocation! key (ring-size i) dev)
+                       key)
+                     unaccount!))
+      (check-true (>= minors (* 0.7 control))
+                  (format "~a minor collections over ~a ops against ~a with a phantom per entry"
+                          minors ring-ops control))
       (unaccount-all! (vector->list keys))
       (check-conserved dev "after the ring"))))

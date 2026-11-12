@@ -5,14 +5,14 @@
          (only-in racket/list filter-not)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
-         (only-in "phantoms.rkt" fresh-phantoms note-young! sync-phantoms!)
+         (only-in "phantoms.rkt"
+                  flushed-young fresh-phantoms gather-young no-young note-young! sync-phantoms!)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
          counters-live counters-entries counters-since-check counters-since-sample
-         counters-phantoms
-         sync-counters-phantoms!
+         note-counters-live!
          note-counters-mark!
          forget-mark!
          pending-of
@@ -25,13 +25,15 @@
          flush-tallies!)
 
 (module+ private
-  (provide own-pending registered-tallies tally-count tally-limit tally-owner))
+  (provide counters-phantoms own-pending registered-tallies tally-count tally-limit tally-owner))
 
 (define-syntax-parse-rule (tally-add! b:expr n:expr)
   (cas-add! b n #:site 'tally))
 
-(define-syntax-parse-rule (tally-take! b:expr)
-  (cas-take! b #:site 'tally))
+(define-syntax-parse-rule (tally-take! b:expr
+                                      (~optional (~seq #:leaving empty:expr)
+                                                 #:defaults ([empty #'0])))
+  (cas-take! b #:leaving empty #:site 'tally))
 
 (define-syntax-parse-rule (tally-update! b:expr f:expr)
   (cas-update! b f #:site 'tally))
@@ -45,6 +47,12 @@
 
 (define (sync-counters-phantoms! c)
   (sync-phantoms! (counters-phantoms c) (counters-live c)))
+
+(define (note-counters-live! c nbytes young)
+  (cas-add! (counters-live c) nbytes)
+  (note-young! (counters-phantoms c) young)
+  (with-uninterruptible
+    (sync-counters-phantoms! c)))
 
 (struct pending (tally counters live entries since-check since-sample young))
 
@@ -109,7 +117,7 @@
 (define (pending-of c)
   (define t (own-tally))
   (or (slot-of t c)
-      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0) (box 0))])
+      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0) (box no-young))])
         (tally-update! (tally-slots t)
                        (lambda (slots) (with-slot slots (counters-index c) p)))
         p)))
@@ -138,7 +146,7 @@
   (tally-add! (pending-live p) nbytes)
   (tally-add! (pending-entries p) entries)
   (unless (eqv? 0 young)
-    (tally-add! (pending-young p) young)))
+    (tally-update! (pending-young p) (lambda (held) (gather-young held young)))))
 
 (define (tally-checked! p nbytes)
   (tally-add! (pending-since-check p) nbytes)
@@ -156,26 +164,29 @@
      (flush! t)]
     [else (set-tally-ops! t ops)]))
 
-(define (move! from to)
-  (unless (eqv? 0 (unbox from))
-    (cas-add! to (tally-take! from))))
+(define (take! from #:as [amount values] #:leaving [empty 0])
+  (if (eqv? 0 (amount (unbox from)))
+      0
+      (amount (tally-take! from #:leaving empty))))
 
-(define (take! from)
-  (if (eqv? 0 (unbox from)) 0 (tally-take! from)))
+(define (move! from to)
+  (define n (take! from))
+  (unless (eqv? 0 n)
+    (cas-add! to n))
+  n)
 
 (define (flush! t #:sync-all? [sync-all? #f])
   (with-uninterruptible
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
       (define c (pending-counters p))
-      (define live (take! (pending-live p)))
-      (define young (take! (pending-young p)))
-      (unless (eqv? 0 live)
-        (cas-add! (counters-live c) live))
+      (define live (move! (pending-live p) (counters-live c)))
+      (define young (take! (pending-young p) #:as flushed-young #:leaving no-young))
       (move! (pending-entries p) (counters-entries c))
       (move! (pending-since-check p) (counters-since-check c))
       (move! (pending-since-sample p) (counters-since-sample c))
       (note-young! (counters-phantoms c) young)
-      (unless (and (eqv? 0 live) (eqv? 0 young) (not sync-all?))
+      (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
+      (unless quiet?
         (sync-counters-phantoms! c)))
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))

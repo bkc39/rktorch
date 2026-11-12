@@ -297,7 +297,7 @@
   (define entry (allocation (charge-epoch) nbytes dev a 0 #f))
   (define (charge! p)
     (with-uninterruptible
-      (count-live! a p nbytes 1 nbytes)
+      (count-live! a p nbytes 1 #:young nbytes)
       (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
@@ -305,7 +305,7 @@
          (count-checked! a p nbytes)
          (when adopt (adopt entry))]
         [else
-         (count-live! a p (- nbytes) -1 (- nbytes))])
+         (count-live! a p (- nbytes) -1 #:young (- nbytes))])
       (when p (tally-op! p nbytes))))
   (if adopt (with-ledger (charge! #f)) (charge! (tally-of a))))
 
@@ -327,7 +327,8 @@
   (match-define (allocation epoch nbytes _ account adopted _) a)
   (define p (and (zero? adopted) (tally-of account)))
   (define young (if (young-epoch? epoch) (- nbytes) 0))
-  (count-live! account p (if p (- nbytes) 0) -1 (if p young 0))
+  (define-values (live-delta young-delta) (if p (values (- nbytes) young) (values 0 0)))
+  (count-live! account p live-delta -1 #:young young-delta)
   (race-point entry-unaccounted key)
   ;; an adoption's bytes leave the ledger and return to the shadow in
   ;; one section: a refresh between them would charge them twice. A
@@ -336,7 +337,7 @@
     [p (tally-op! p nbytes)]
     [else
      (with-ledger
-       (count-live! account #f (- nbytes) 0 young)
+       (count-live! account #f (- nbytes) 0 #:young young)
        (race-point live-returned key)
        (race-point adoption-returning key)
        (when (positive? (allocation-adopted a))
