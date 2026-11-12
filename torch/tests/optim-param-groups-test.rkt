@@ -13,8 +13,8 @@
                     lambda-lr learning-rate linear-lr multi-step-lr named-parameters
                     one-cycle-lr optimizer-param-groups param-group param-group-count
                     param-group-hyperparameters param-group-params param-group-ref
-                    param-group-set! parameters rmsprop scheduler-rate set-learning-rate! sgd
-                    step! step-lr weight-decay-param-groups zero-grads!)
+                    param-group-set! parameters rmsprop scheduler-rate scheduler-step-count
+                    set-learning-rate! sgd step! step-lr weight-decay-param-groups zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/vit.rkt" VisionTransformer)
            (only-in "private/blame.rkt" blamed contract-violation?)
@@ -247,11 +247,20 @@
 
   (bounded-test "a write while a schedule steps on another thread is never lost"
     (define opt (two-group-sgd))
-    (define s (step-lr opt #:step-size 3 #:gamma 0.5))
-    (define t (thread (lambda () (for ([_ (in-range race-writes)]) (step! s)))))
+    (define s (step-lr opt #:step-size 1 #:gamma 0.9999))
+    (define (stale) (if (eqv? (param-group-ref opt 0 'lr) (scheduler-rate s)) 0 1))
+    (define stale-lrs (box #f))
+    (define t
+      (thread (lambda ()
+                (set-box! stale-lrs (for/sum ([_ (in-range race-writes)])
+                                      (define before (stale))
+                                      (step! s)
+                                      (+ before (stale)))))))
     (define lost (lost-writes opt 1 'weight-decay))
     (thread-wait t)
-    (check-equal? lost 0)
+    (check-equal? (scheduler-step-count s) race-writes)
+    (check-true (positive? (scheduler-rate s)))
+    (check-equal? (list lost (unbox stale-lrs)) '(0 0))
     (check-equal? (param-group-ref opt 1 'weight-decay) (* 1e-6 race-writes)))
 
   (define shapes
