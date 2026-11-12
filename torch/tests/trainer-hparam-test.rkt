@@ -55,12 +55,11 @@
       (set! lr "fast")
       (mse-loss (net x) y)))
 
-  (define (names-the-field? who)
-    (lambda (e)
-      (and (exn:fail:contract? e)
-           (not (exn:fail:contract:blame? e))
-           (regexp-match? (pregexp (format "^~a: an hparam must hold a real.*hparam: 'lr" who))
-                          (exn-message e)))))
+  (define ((names-the-field? who) e)
+    (and (exn:fail:contract? e)
+         (not (exn:fail:contract:blame? e))
+         (regexp-match? (pregexp (format "^~a: an hparam must hold a real.*hparam: 'lr" who))
+                        (exn-message e))))
 
   (bounded-test "G2-U1: a field a step set to a non-real is reported naming it, not as blame"
     (define tr (Retyped))
