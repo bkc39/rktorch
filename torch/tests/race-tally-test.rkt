@@ -11,15 +11,14 @@
                     native-memory-use sum zeros
                     [finalizer-diagnostics checked-finalizer-diagnostics])
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
-           (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/accounts.rkt"
                     account-of checks-seen devices-over-floor ledger-entries live-bytes
-                    account-trial note-mark! pressure-reading set-account-interval!
+                    account-trial pressure-reading set-account-interval!
                     set-account-sample! set-account-trial! since-check-bytes
                     take-since-sample! with-ledger)
            (only-in (submod "../foreign/raw/accounts.rkt" private)
-                    account-counters accounts raw-live)
-           (only-in "../foreign/raw/cas.rkt" cas-add! cas-update!)
+                    account-counters)
+           (only-in "../foreign/raw/cas.rkt" cas-add!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/memory.rkt"
@@ -30,48 +29,24 @@
                     native-memory-limit refresh-shadows! reset-pressure-state!
                     since-check-of)
            (only-in "../foreign/raw/tallies.rkt"
-                    counters-entries counters-since-sample flush-tallies! flush-tally!)
+                    counters-entries counters-since-sample flush-tallies! flush-tally!
+                    pending-of)
            (only-in (submod "../foreign/raw/tallies.rkt" private)
-                    own-pending registered-tallies tally-count tally-limit tally-owner)
+                    own-pending tally-count tally-limit)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
                     check-ledger churn-once! join join-all ledger-snapshot settle! spawn
                     stop! with-race-hook worker-thread)
            (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
+           (only-in "private/tally-devices.rkt"
+                    kib mark mib shared-live with-batched-device with-unmarked-device)
            (only-in "private/within.rkt" bounded-test))
 
-  (define kib 1024)
-  (define mib (* 1024 kib))
-  (define mark (* 512 mib))
   (define limit (tally-limit mark))
   (define n 4096)
 
-  (define (shared-live dev) (raw-live (account-of dev)))
   (define (fold-of dev) (dict-ref (native-memory-use/fold) dev 0))
   (define (pending dev) (own-pending (account-counters (account-of dev))))
-
-  (define (tally-of-thread th)
-    (memf (lambda (t) (eq? (weak-box-value (tally-owner t)) th)) (registered-tallies)))
-
-  (define (forget-account! dev)
-    (flush-tallies!)
-    (void (cas-update! accounts (lambda (all) (hash-remove all dev)))))
-
-  (define (call-with-fake-device index proc #:mark [device-mark mark])
-    (define dev (device 'cuda index))
-    (dynamic-wind
-     (lambda ()
-       (when device-mark
-         (note-mark! (account-of dev) device-mark))
-       (flush-tallies!))
-     (lambda () (proc dev))
-     (lambda () (forget-account! dev))))
-
-  (define-syntax-parse-rule (with-batched-device (dev:id index:expr) body:expr ...+)
-    (call-with-fake-device index (lambda (dev) body ...)))
-
-  (define-syntax-parse-rule (with-unmarked-device (dev:id index:expr) body:expr ...+)
-    (call-with-fake-device index (lambda (dev) body ...) #:mark #f))
 
   (define (unaccount-all! keys)
     (for-each unaccount! keys)
@@ -220,7 +195,12 @@
                      [allocator-reading (lambda (_) #f)])
         (collect-under-pressure! dev))
       (with-parked (_w (charging dev (list parked) (* 900 kib)))
-        (record-allocation! crossing (- device-mark (* 300 kib)) dev)
+        (void (pending-of (account-counters a)))
+        (define gap (add1 (* 2 (tally-count) (tally-limit device-mark))))
+        (check-true (< gap (* 900 kib))
+                    (format "~a tallies leave a gap of ~a bytes, which the parked charge cannot cross"
+                            (tally-count) gap))
+        (record-allocation! crossing (- device-mark gap) dev)
         (flush-tally!)
         (parameterize ([native-memory-limit device-mark]
                        [allocator-reading (lambda (_) #f)])
@@ -457,47 +437,6 @@
                   "an adopted release reached the shared counter unflushed")
     (void (sum p))
     (settle!))
-
-  (define (one-op-threads! dev pool-of)
-    (for ([i (in-range 1000)])
-      (join (spawn (lambda ()
-                     (define key (box i))
-                     (record-allocation! key 64 dev)
-                     (unaccount! key))
-                   #:pool (pool-of i)))))
-
-  (bounded-test "L11: one-op threads leave no tally behind"
-    (with-batched-device (dev 50)
-      (define before (tally-count))
-      (one-op-threads! dev (lambda (i) (and (odd? i) 'own)))
-      (flush-tallies!)
-      (check-true (<= (tally-count) before)
-                  (format "~a tallies registered after, ~a before" (tally-count) before))
-      (check-equal? (shared-live dev) 0)))
-
-  (bounded-test "a parallel thread's flush prunes the tallies of collected threads"
-    (with-batched-device (dev 56)
-      (define before (tally-count))
-      (one-op-threads! dev (lambda (_) 'own))
-      (collect-garbage)
-      (join (spawn flush-tallies! #:pool 'own))
-      (check-equal? (tally-count) (length (registered-tallies)) "the count is the list's length")
-      (check-true (<= (tally-count) before)
-                  (format "~a tallies registered after, ~a before" (tally-count) before))
-      (check-equal? (shared-live dev) 0)))
-
-  (bounded-test "a parallel thread's flush in the ledger leaves dead tallies to the place's thread"
-    (with-batched-device (dev 53)
-      (define gone (spawn (lambda () (record-allocation! (box 'gone) 64 dev))))
-      (join gone)
-      (define flusher (spawn (lambda () (with-ledger (flush-tallies!))) #:pool 'own))
-      (check-not-false (sync/timeout 10 (thread-dead-evt (worker-thread flusher)))
-                       "a parallel thread's flush inside the ledger finished")
-      (join flusher)
-      (check-not-false (tally-of-thread (worker-thread gone))
-                       "a parallel thread's flush pruned a dead tally")
-      (flush-tallies!)
-      (check-false (tally-of-thread (worker-thread gone)) "the place's thread prunes it")))
 
   (bounded-test "L12: eight churners at the default limit keep the ledger"
     (settle!)
