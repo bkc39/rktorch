@@ -129,7 +129,7 @@
                (let loop ()
                  (spin-until (lambda () (or (unbox stop?)
                                             (> (unbox asked) (length (unbox charged))))))
-                 (unless (unbox stop?)
+                 (when (> (unbox asked) (length (unbox charged)))
                    (define key (box (unbox asked)))
                    (record-allocation! key mib dev)
                    (set-box! charged (cons key (unbox charged)))
@@ -199,7 +199,7 @@
     (with-fake-device (dev 63)
       (define ring 10)
       (define ops 2000)
-      (define keys (for/vector ([i (in-range ring)]) (box i)))
+      (define keys (for/vector #:length ring ([i (in-range ring)]) (box i)))
       (for ([k (in-vector keys)]) (record-allocation! k mib dev))
       (collect-garbage 'major)
       (define minors
