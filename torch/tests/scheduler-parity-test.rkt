@@ -51,6 +51,10 @@
                                                       (step-lr o #:step-size 3 #:gamma 0.5)))
                              (linear-lr o #:start-factor 0.5 #:end-factor 1.0 #:total-iters 3))
                      #:milestones '(5))))
+      (sequential_step_lambda
+       ,(lambda (o) (sequential-lr o (list (step-lr o #:step-size 2 #:gamma 0.5)
+                                           (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))
+                                   #:milestones '(4))))
       (warm_restarts_3_2
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 3 #:t-mult 2 #:eta-min 0.01)))
       (warm_restarts_4_1

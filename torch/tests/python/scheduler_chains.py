@@ -1,11 +1,11 @@
 """torch.optim.lr_scheduler's rates over two parameter groups (lr 0.1 and
 0.02): get_last_lr() at construction and after each of twelve
 optimizer-then-scheduler steps, for each shape the Racket schedulers
-implement, chains, sequences and warm restarts, including a sequence that
-starts a warm restart at a milestone and one that starts on a chain (G2-L1).
-Under "groups", the seven single shapes' _get_closed_form_lr() at each of
-those steps, or get_last_lr() where torch has no closed form (G1-L10). The
-Racket twin is scheduler-parity-test.rkt.
+implement, chains, sequences and warm restarts, including sequences that
+start a warm restart or a lambda at a milestone and one that starts on a
+chain (G2-L1). Under "groups", the seven single shapes'
+_get_closed_form_lr() at each of those steps, or get_last_lr() where torch
+has no closed form (G1-L10). The Racket twin is scheduler-parity-test.rkt.
 """
 import json
 import warnings
@@ -76,6 +76,9 @@ composites = {
                                 S.StepLR(o, step_size=3, gamma=0.5)]),
             S.LinearLR(o, start_factor=0.5, end_factor=1.0, total_iters=3)],
         milestones=[5]),
+    "sequential_step_lambda": lambda o: S.SequentialLR(
+        o, [S.StepLR(o, step_size=2, gamma=0.5),
+            S.LambdaLR(o, lambda t: 1.0 / (t + 1))], milestones=[4]),
     "warm_restarts_3_2": lambda o: S.CosineAnnealingWarmRestarts(
         o, T_0=3, T_mult=2, eta_min=0.01),
     "warm_restarts_4_1": lambda o: S.CosineAnnealingWarmRestarts(

@@ -19,9 +19,6 @@
 (define (curve/c key)
   (if (memq key '(beta1 beta2 eps)) real-curve/c nonnegative-curve/c))
 
-(define (refuse who problem . fields)
-  (apply raise-arguments-error who problem fields))
-
 (define (scheduled-at r interval at)
   (and (eq? interval at)
        (if (eq? at 'step) (run-global-step r) (run-epoch r))))
@@ -37,8 +34,9 @@
   (define-hook (on-train-start)
     (define tr (run-trainer run))
     (unless (memq name (trainer-hparam-names tr))
-      (refuse 'hparam-scheduler "the trainer has no define-hparams field of this name"
-              "name" name "hparams" (trainer-hparam-names tr))))
+      (raise-arguments-error 'hparam-scheduler
+                             "the trainer has no define-hparams field of this name"
+                             "name" name "hparams" (trainer-hparam-names tr))))
   (define-hook (on-train-epoch-start)
     (write-hparam! run name curve (scheduled-at run interval 'epoch)))
   (define-hook (on-train-batch-start . _)
@@ -51,9 +49,6 @@
 (define (selected-groups opt groups)
   (or groups (range (param-group-count opt))))
 
-(define (scheduled-optimizer r index)
-  (list-ref (run-optimizers r) index))
-
 (define (check-schedulable! r key index groups)
   (define optimizers (run-optimizers r))
   (define opt (and (< index (length optimizers)) (list-ref optimizers index)))
@@ -61,18 +56,21 @@
     (and opt (findf (lambda (g) (>= g (param-group-count opt))) (or groups '()))))
   (cond
     [(not opt)
-     (refuse 'param-group-scheduler "define-optimizers returned no optimizer at this index"
-             "optimizer" index "optimizers" (length optimizers))]
+     (raise-arguments-error 'param-group-scheduler
+                            "define-optimizers returned no optimizer at this index"
+                            "optimizer" index "optimizers" (length optimizers))]
     [missing
-     (refuse 'param-group-scheduler "the optimizer has no parameter group at this index"
-             "group" missing "groups" (param-group-count opt))]
+     (raise-arguments-error 'param-group-scheduler
+                            "the optimizer has no parameter group at this index"
+                            "group" missing "groups" (param-group-count opt))]
     [(not (has-hyperparameter? opt key))
-     (refuse 'param-group-scheduler "the optimizer has no such hyperparameter" "key" key)]
+     (raise-arguments-error 'param-group-scheduler "the optimizer has no such hyperparameter"
+                            "key" key)]
     [else (void)]))
 
 (define (write-groups! r key curve index groups at)
   (when at
-    (define opt (scheduled-optimizer r index))
+    (define opt (list-ref (run-optimizers r) index))
     (define v (curve at))
     (for ([g (in-list (selected-groups opt groups))])
       (param-group-set! opt g key v))))

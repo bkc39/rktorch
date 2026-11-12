@@ -252,7 +252,7 @@
        #:pre/name (schedulers) "every schedule in a chain wraps the same optimizer"
        (andmap (lambda (s) (wraps? s (car schedulers))) schedulers)
        [_ scheduler?])
-  (define first (car schedulers))
+  (match-define (cons first _) schedulers)
   (make-scheduler (scheduler-optimizer first) (chain schedulers) 0 (current-lrs first)))
 
 (define/contract-out (sequential-lr opt schedulers #:milestones milestones) ;; noqa
