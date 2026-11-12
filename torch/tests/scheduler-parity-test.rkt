@@ -7,9 +7,10 @@
            (only-in "../nn.rkt"
                     Parameter chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
                     exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr param-group
-                    scheduler-rate sequential-lr sgd step! step-lr)
+                    scheduler-rate sequential-lr sgd step-lr)
            (only-in (submod "../nn/scheduler.rkt" private) closed-form-rates)
-           (only-in "private/python-env.rkt" python-check python-torch-available?))
+           (only-in "private/python-env.rkt" python-check python-torch-available?)
+           (only-in "private/scheduler-steps.rkt" stepped-reads))
 
   (define (two-group-opt)
     (sgd (list (param-group (list (Parameter (zeros 1))) #:lr 0.1)
@@ -71,8 +72,7 @@
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 4 #:t-mult 1 #:eta-min 0)))))
 
   (define (stepped make read)
-    (define s (make (two-group-opt)))
-    (cons (read s) (for/list ([_ (in-range 12)]) (step! s) (read s))))
+    (stepped-reads (make (two-group-opt)) read 12))
 
   (define (rates make)
     (stepped make (lambda (s) (list (scheduler-rate s #:group 0) (scheduler-rate s #:group 1)))))

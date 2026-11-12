@@ -50,11 +50,14 @@
 (define (store-count st)
   (length (store-groups st)))
 
+(define (setting-of g key)
+  (hash-ref (param-group-settings g) key))
+
 (define (store-ref st i key)
-  (hash-ref (param-group-settings (list-ref (store-groups st) i)) key))
+  (setting-of (list-ref (store-groups st) i) key))
 
 (define (settings-values groups key)
-  (map (lambda (g) (hash-ref (param-group-settings g) key)) groups))
+  (map (lambda (g) (setting-of g key)) groups))
 
 (define (store-values st key)
   (settings-values (store-groups st) key))
@@ -72,20 +75,23 @@
 (define (store-set-all! st key v)
   (update-groups! st (lambda (gs) (map (lambda (g) (with-setting g key v)) gs))))
 
-(define (store-set-each! st key vs)
-  (update-groups! st (lambda (gs) (map (lambda (g v) (with-setting g key v)) gs vs))))
-
 (define (store-update-each! st key f xs)
+  (define (updated-group g x)
+    (with-setting g key (f x (setting-of g key))))
   (define (updated gs)
-    (map (lambda (g x) (with-setting g key (f x (hash-ref (param-group-settings g) key)))) gs xs))
+    (map updated-group gs xs))
   (settings-values (cas-update! (store-groups-box st) updated) key))
+
+(define (store-set-each! st key vs)
+  (store-update-each! st key (lambda (v _) v) vs)
+  (void))
 
 (define (store-initial-lrs! st initial)
   (define groups (store-groups st))
   (cas-update! (store-initial-lrs st)
                (lambda (initials)
                  (for/list ([g (in-list groups)] [recorded (in-list initials)])
-                   (or initial recorded (hash-ref (param-group-settings g) 'lr))))))
+                   (or initial recorded (setting-of g 'lr))))))
 
 (define (store-partition st qs gs)
   (match (store-groups st)

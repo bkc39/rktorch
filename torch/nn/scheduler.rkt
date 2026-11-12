@@ -34,6 +34,8 @@
 
 (struct shape (bases next closed))
 
+(struct rated (bases rate))
+
 (struct restarts (bases t-0 t-mult eta-min [t-cur #:mutable] [t-i #:mutable]))
 
 (struct chain (schedulers))
@@ -47,17 +49,20 @@
   (set-scheduler-last! s t)
   (set-scheduler-last-rates! s rates))
 
-(define (write! s t f xs)
+(define (update-lrs! s t f xs)
   (settle! s t (store-update-each! (optimizer-store s) 'lr f xs)))
 
 (define (absolute rate _lr)
   rate)
 
 (define (write-rates! s t rates)
-  (write! s t absolute rates))
+  (update-lrs! s t absolute rates))
 
 (define (write-shape! s bases next t initial?)
-  (write! s t (lambda (base lr) (next base lr t initial?)) bases))
+  (update-lrs! s t (lambda (base lr) (next base lr t initial?)) bases))
+
+(define (write-rated! s bases rate t)
+  (write-rates! s t (map (lambda (base) (rate base t)) bases)))
 
 (define (restart-rate eta-min base cur period)
   (+ eta-min (/ (* (- base eta-min) (+ 1.0 (cos (/ (* pi (->fl cur)) (->fl period))))) 2.0)))
@@ -101,6 +106,7 @@
   (define t (add1 (scheduler-last s)))
   (match (scheduler-rule s)
     [(struct* shape ([bases bases] [next next])) (write-shape! s bases next t #f)]
+    [(struct* rated ([bases bases] [rate rate])) (write-rated! s bases rate t)]
     [(and (struct* restarts ()) r) (restart-step! s r)]
     [(struct* chain ([schedulers subs]))
      (for-each advance! subs)
@@ -119,6 +125,7 @@
     [(struct* shape ([bases bases] [closed (? procedure? closed)]))
      (write-rates! s 0 (map (lambda (b) (closed b 0)) bases))]
     [(struct* shape ([bases bases] [next next])) (write-shape! s bases next 0 #f)]
+    [(struct* rated ([bases bases] [rate rate])) (write-rated! s bases rate 0)]
     [(struct* restarts ([bases bases] [eta-min eta-min] [t-cur t-cur] [t-i t-i]))
      (write-rates! s 0 (restart-rates bases eta-min t-cur t-i))]
     [_ (raise-arguments-error 'sequential-lr
@@ -142,8 +149,14 @@
   (initial-step! s)
   s)
 
-(define (shaped opt next #:closed [closed #f] #:initial [initial #f])
-  (build opt (lambda (bases) (shape bases next closed)) #:initial initial))
+(define (shaped opt next #:closed [closed #f])
+  (build opt (lambda (bases) (shape bases next closed))))
+
+(define (rated-by opt rate #:initial [initial #f])
+  (build opt (lambda (bases) (rated bases rate)) #:initial initial))
+
+(define (started opt rule rates)
+  (make-scheduler opt rule 0 rates))
 
 (define (closed-form-rates s)
   (match (scheduler-rule s)
@@ -247,21 +260,21 @@
   (define down-end (- total-steps 1.0))
   (define (anneal start end pct)
     (+ end (* (/ (- start end) 2.0) (+ 1.0 (cos (* pi pct))))))
-  (shaped opt
-         #:initial initial
-         (lambda (_base _lr t _initial?)
-           (when (> t total-steps)
-             (raise-arguments-error 'one-cycle-lr
-                                    "stepped past the cycle"
-                                    "total-steps" total-steps
-                                    "step" t))
-           (if (<= t up-end)
-               (anneal initial max-lr (/ t up-end))
-               (anneal max-lr final (/ (- t up-end) (- down-end up-end)))))))
+  (rated-by opt
+            #:initial initial
+            (lambda (_base t)
+              (when (> t total-steps)
+                (raise-arguments-error 'one-cycle-lr
+                                       "stepped past the cycle"
+                                       "total-steps" total-steps
+                                       "step" t))
+              (if (<= t up-end)
+                  (anneal initial max-lr (/ t up-end))
+                  (anneal max-lr final (/ (- t up-end) (- down-end up-end)))))))
 
 (define/contract-out (lambda-lr opt factor) ;; noqa
   (-> optimizer? (-> exact-nonnegative-integer? real?) scheduler?)
-  (shaped opt (lambda (base _lr t _initial?) (* base (real->double-flonum (factor t))))))
+  (rated-by opt (lambda (base t) (* base (real->double-flonum (factor t))))))
 
 (define/contract-out (scheduler-optimizer-of s) ;; noqa
   (-> scheduler? any/c)
@@ -275,8 +288,8 @@
        #:pre/name (schedulers) "every schedule in a chain wraps the same optimizer"
        (andmap (lambda (s) (wraps? s (car schedulers))) schedulers)
        [_ scheduler?])
-  (match-define (cons first _) schedulers)
-  (make-scheduler (scheduler-optimizer first) (chain schedulers) 0 (current-lrs first)))
+  (define lead (car schedulers))
+  (started (scheduler-optimizer lead) (chain schedulers) (current-lrs lead)))
 
 (define/contract-out (sequential-lr opt schedulers #:milestones milestones) ;; noqa
   (->i ([opt optimizer?] [schedulers (non-empty-listof scheduler?)]
@@ -293,9 +306,9 @@
   (for-each undo! schedulers)
   (match-define (and rule (sequence subs marks))
     (sequence (list->vector schedulers) (list->vector milestones)))
-  (define first (vector-ref subs (bisect-right marks 0)))
-  (initial-step! first)
-  (make-scheduler opt rule 0 (scheduler-last-rates first)))
+  (define lead (vector-ref subs (bisect-right marks 0)))
+  (initial-step! lead)
+  (started opt rule (scheduler-last-rates lead)))
 
 (define/contract-out (cosine-annealing-warm-restarts opt ;; noqa
                                                      #:t-0 t-0

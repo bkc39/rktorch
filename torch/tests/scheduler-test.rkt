@@ -211,10 +211,10 @@
 
   (test-case "a chained schedule after a sequence's first milestone raises there, as in torch"
     (define opt (fresh-opt))
-    (define first (exponential-lr opt #:gamma 0.9))
+    (define head (exponential-lr opt #:gamma 0.9))
     (define later (chained-scheduler (list (step-lr opt #:step-size 2))))
-    (define s (sequential-lr opt (list first later) #:milestones '(2)))
-    (check-equal? (scheduler-step-count first) 0)
+    (define s (sequential-lr opt (list head later) #:milestones '(2)))
+    (check-equal? (scheduler-step-count head) 0)
     (check-equal? (scheduler-step-count later) 0)
     (step! s)
     (check-equal? (scheduler-step-count s) 1)
