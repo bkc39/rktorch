@@ -35,6 +35,7 @@
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
          "foreign/autocast.rkt"
+         "foreign/switches.rkt"
          (submod "foreign/slice.rkt" checked))
 
 (provide ref ref! with-no-grad with-autocast with-default-device)
@@ -255,6 +256,13 @@
          autocast-enabled?
          autocast-dtype
          call-with-autocast
+         use-deterministic-algorithms!
+         deterministic-algorithms-enabled?
+         deterministic-algorithms-warn-only?
+         cudnn-deterministic?
+         set-cudnn-deterministic!
+         cudnn-benchmark?
+         set-cudnn-benchmark!
          sub!
          zero!
          mul!

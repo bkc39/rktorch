@@ -1,5 +1,6 @@
 #include "torchrkt/c_api/global.h"
 
+#include <ATen/Context.h>
 #include <torch/torch.h>
 #include <torch/version.h>
 
@@ -8,6 +9,19 @@
 
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
+
+namespace {
+
+template <typename Read>
+int read_flag(const char* who, int* out, Read read) {
+  if (!out) {
+    return torchrkt::null_arg_status(who);
+  }
+  return torchrkt::status_call(
+      who, [&] { *out = read(at::globalContext()) ? 1 : 0; });
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -46,6 +60,47 @@ int tr_manual_seed(uint64_t seed) {
       torch::mps::manual_seed(seed);
     }
   });
+}
+
+int tr_set_deterministic_algorithms(int enabled, int warn_only) {
+  return torchrkt::status_call("tr_set_deterministic_algorithms", [=] {
+    at::globalContext().setDeterministicAlgorithms(enabled != 0,
+                                                   warn_only != 0);
+  });
+}
+
+int tr_get_deterministic_algorithms(int* out) {
+  return read_flag(
+      "tr_get_deterministic_algorithms", out,
+      [](const at::Context& c) { return c.deterministicAlgorithms(); });
+}
+
+int tr_get_deterministic_algorithms_warn_only(int* out) {
+  return read_flag(
+      "tr_get_deterministic_algorithms_warn_only", out,
+      [](const at::Context& c) { return c.deterministicAlgorithmsWarnOnly(); });
+}
+
+int tr_set_cudnn_deterministic(int enabled) {
+  return torchrkt::status_call("tr_set_cudnn_deterministic", [=] {
+    at::globalContext().setDeterministicCuDNN(enabled != 0);
+  });
+}
+
+int tr_get_cudnn_deterministic(int* out) {
+  return read_flag("tr_get_cudnn_deterministic", out,
+                   [](const at::Context& c) { return c.deterministicCuDNN(); });
+}
+
+int tr_set_cudnn_benchmark(int enabled) {
+  return torchrkt::status_call("tr_set_cudnn_benchmark", [=] {
+    at::globalContext().setBenchmarkCuDNN(enabled != 0);
+  });
+}
+
+int tr_get_cudnn_benchmark(int* out) {
+  return read_flag("tr_get_cudnn_benchmark", out,
+                   [](const at::Context& c) { return c.benchmarkCuDNN(); });
 }
 
 }  // extern "C"

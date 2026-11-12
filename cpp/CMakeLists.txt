@@ -104,6 +104,7 @@ if(BUILD_TESTING)
   include(GoogleTest)
 
   add_library(torchrkt_c_api_compile_test OBJECT
+    tests/torchrkt/c_api_compile_global_test.c
     tests/torchrkt/c_api_compile_test.c
   )
   target_include_directories(torchrkt_c_api_compile_test
@@ -139,6 +140,7 @@ if(BUILD_TESTING)
     tests/torchrkt/rng_state_test.cpp
     tests/torchrkt/spectral_test.cpp
     tests/torchrkt/storage_test.cpp
+    tests/torchrkt/switches_test.cpp
     tests/torchrkt/threads_test.cpp
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>

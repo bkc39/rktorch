@@ -186,6 +186,49 @@ Equivalent to @racket[(to t dev)].
 Equivalent to @racket[(to t dtype)].
 }
 
+@section[#:tag "determinism"]{Determinism}
+
+PyTorch's determinism switches, all off by default. Each is a flag of
+libtorch's process-wide context, seen by every thread and place from the
+next op on, so they are setters rather than parameters: set them at the top
+of a program.
+
+@racketblock[
+(manual-seed! 0)
+(use-deterministic-algorithms! #t)
+]
+
+@defproc[(use-deterministic-algorithms! [on? boolean?]
+                                        [#:warn-only? warn-only? boolean? #f])
+         void?]{
+@tt{torch.use_deterministic_algorithms}. With @racket[on?], an op uses its
+deterministic implementation, and an op with none, such as the CUDA
+backward of @racketidfont{adaptive-avg-pool2d}, raises @racket[exn:fail]
+with libtorch's message. With @racket[warn-only?] as well, such an op runs,
+and libtorch warns on the process's standard error, not on
+@racket[current-error-port]. @racket[warn-only?] is stored even when
+@racket[on?] is @racket[#f]. Both start off.}
+
+@deftogether[(@defproc[(deterministic-algorithms-enabled?) boolean?]
+              @defproc[(deterministic-algorithms-warn-only?) boolean?])]{
+The two values @racket[use-deterministic-algorithms!] last stored:
+@tt{torch.are_deterministic_algorithms_enabled()} and
+@tt{torch.is_deterministic_algorithms_warn_only_enabled()}.
+
+@torch-examples[(deterministic-algorithms-enabled?)]}
+
+@deftogether[(@defproc[(cudnn-deterministic?) boolean?]
+              @defproc[(set-cudnn-deterministic! [on? boolean?]) void?])]{
+@tt{torch.backends.cudnn.deterministic}: cuDNN picks only deterministic
+convolution algorithms. Every other op, @racketidfont{index-add!} among them, is
+left as it was. Without CUDA the flag is stored and changes nothing.}
+
+@deftogether[(@defproc[(cudnn-benchmark?) boolean?]
+              @defproc[(set-cudnn-benchmark! [on? boolean?]) void?])]{
+@tt{torch.backends.cudnn.benchmark}: cuDNN times its candidate algorithms
+for each new convolution shape and keeps the fastest. Without CUDA the flag
+is stored and changes nothing.}
+
 @section{Choosing a device}
 
 @defproc*[([(device [t tensor?]) device?]
@@ -583,7 +626,9 @@ shared tensor must synchronise its threads itself. Grad mode, autocast and
 the message of a failed call are kept per OS thread: a thread made with
 @racket[#:pool 'own] has its own, threads of a shared parallel pool share
 their pool thread's, and coroutine threads share the main thread's
-(@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). Two threads may
+(@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). The
+determinism switches are process-wide instead: one setting for every thread
+and place (@secref["determinism"]). Two threads may
 free one tensor explicitly: the handle is released once, and the other
 free raises @racket[exn:fail:contract].
 
