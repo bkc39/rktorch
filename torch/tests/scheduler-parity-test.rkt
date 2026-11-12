@@ -60,6 +60,11 @@
                                                           #:milestones '())
                                            (step-lr o #:step-size 2 #:gamma 0.5))
                                    #:milestones '(3))))
+      (sequential_unsorted_milestones
+       ,(lambda (o) (sequential-lr o (list (exponential-lr o #:gamma 0.5)
+                                           (step-lr o #:step-size 100)
+                                           (linear-lr o #:start-factor 0.5 #:total-iters 2))
+                                   #:milestones '(4 2))))
       (warm_restarts_3_2
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 3 #:t-mult 2 #:eta-min 0.01)))
       (warm_restarts_4_1

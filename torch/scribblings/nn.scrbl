@@ -976,8 +976,10 @@ optimizer.
                         [#:milestones milestones (listof exact-nonnegative-integer?)])
          scheduler?]{
 @tt{SequentialLR}: the i-th schedule runs from milestone i−1; at a milestone
-the next starts from its own step 0. Every schedule wraps @racket[opt], which
-is not itself a schedule, and there is one milestone fewer than schedules.
+the next starts from its own step 0. The milestones are searched as
+@tt{bisect_right} searches them, unsorted ones included. Every schedule wraps
+@racket[opt], which is not itself a schedule, and there is one milestone fewer
+than schedules.
 
 @torch-examples[
 (define opt (sgd (list (Parameter (zeros 1))) #:lr 0.1))
@@ -1004,8 +1006,9 @@ last.
                                        [#:group group exact-nonnegative-integer? 0])
                        real?]
               @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
-A schedule, the number of times it has been stepped, the rate it last
-wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
+A schedule, its step index (@tt{last_epoch}, never below 0; a chain's is
+its schedules'), the rate it last wrote to its optimizer, and that
+optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
 last @racket[step!], and does not call a @racket[lambda-lr] factor again;
 @racket[#:group] is @tt{get_last_lr()[group]}.

@@ -6,10 +6,11 @@
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
          (only-in racket/list count)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match-define struct*)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "optim-groups.rkt" store-initial-lrs! store-set-each! store-values)
+         (only-in "optim-groups.rkt"
+                  store-initial-lrs! store-set-each! store-update-each! store-values)
          (only-in "optim.rkt"
                   gen:optimizer group-index? optimizer-parameters optimizer-root optimizer-store
                   optimizer?))
@@ -46,13 +47,17 @@
   (set-scheduler-last! s t)
   (set-scheduler-last-rates! s rates))
 
-(define (write-rates! s t rates)
-  (define written (map real->double-flonum rates))
-  (store-set-each! (optimizer-store s) 'lr written)
-  (settle! s t written))
+(define (write! s t f xs)
+  (settle! s t (store-update-each! (optimizer-store s) 'lr f xs)))
 
-(define (shape-rates s bases next t initial?)
-  (map (lambda (base lr) (next base lr t initial?)) bases (current-lrs s)))
+(define (absolute rate _lr)
+  rate)
+
+(define (write-rates! s t rates)
+  (write! s t absolute rates))
+
+(define (write-shape! s bases next t initial?)
+  (write! s t (lambda (base lr) (next base lr t initial?)) bases))
 
 (define (restart-rate eta-min base cur period)
   (+ eta-min (/ (* (- base eta-min) (+ 1.0 (cos (/ (* pi (->fl cur)) (->fl period))))) 2.0)))
@@ -76,56 +81,73 @@
 (define (milestones-reached milestones t)
   (count (lambda (m) (<= m t)) milestones))
 
+(define (bisect-right milestones t)
+  (let search ([lo 0] [hi (vector-length milestones)])
+    (define mid (quotient (+ lo hi) 2))
+    (cond
+      [(>= lo hi) lo]
+      [(< t (vector-ref milestones mid)) (search lo mid)]
+      [else (search (add1 mid) hi)])))
+
 (define (sequence-step! s subs milestones)
   (define t (add1 (scheduler-last s)))
-  (define i (milestones-reached milestones t))
-  (define sub (list-ref subs i))
-  (if (and (positive? i) (= (list-ref milestones (sub1 i)) t))
-      (start-at-zero! sub)
-      (advance! sub))
+  (define i (bisect-right milestones t))
+  (define sub (vector-ref subs i))
+  (define crossed? (and (positive? i) (= (vector-ref milestones (sub1 i)) t)))
+  (if crossed? (start-at-zero! sub) (advance! sub))
   (settle! s t (scheduler-last-rates sub)))
 
 (define (advance! s)
   (define t (add1 (scheduler-last s)))
   (match (scheduler-rule s)
-    [(shape bases next _) (write-rates! s t (shape-rates s bases next t #f))]
-    [(? restarts? r) (restart-step! s r)]
-    [(chain subs)
+    [(struct* shape ([bases bases] [next next])) (write-shape! s bases next t #f)]
+    [(and (struct* restarts ()) r) (restart-step! s r)]
+    [(struct* chain ([schedulers subs]))
      (for-each advance! subs)
      (settle! s t (current-lrs s))]
-    [(sequence subs milestones) (sequence-step! s subs milestones)]))
+    [(struct* sequence ([schedulers subs] [milestones milestones]))
+     (sequence-step! s subs milestones)]))
 
 (define (initial-step! s)
   (match (scheduler-rule s)
-    [(shape bases next _)
-     (define t (add1 (scheduler-last s)))
-     (write-rates! s t (shape-rates s bases next t #t))]
+    [(struct* shape ([bases bases] [next next]))
+     (write-shape! s bases next (add1 (scheduler-last s)) #t)]
     [_ (advance! s)]))
 
 (define (start-at-zero! s)
   (match (scheduler-rule s)
-    [(shape bases _ (? procedure? closed)) (write-rates! s 0 (map (lambda (b) (closed b 0)) bases))]
-    [(shape bases next #f) (write-rates! s 0 (shape-rates s bases next 0 #f))]
-    [(restarts bases _ _ eta-min t-cur t-i)
+    [(struct* shape ([bases bases] [closed (? procedure? closed)]))
+     (write-rates! s 0 (map (lambda (b) (closed b 0)) bases))]
+    [(struct* shape ([bases bases] [next next])) (write-shape! s bases next 0 #f)]
+    [(struct* restarts ([bases bases] [eta-min eta-min] [t-cur t-cur] [t-i t-i]))
      (write-rates! s 0 (restart-rates bases eta-min t-cur t-i))]
     [_ (raise-arguments-error 'sequential-lr
                               "a chained or sequential schedule cannot start at a milestone"
                               "schedule" s)]))
 
+(define (step-back! s)
+  (set-scheduler-last! s (sub1 (scheduler-last s))))
+
 (define (undo! s)
   (match (scheduler-rule s)
-    [(or (chain subs) (sequence subs _)) (for-each undo! subs)]
-    [_ (set-scheduler-last! s (sub1 (scheduler-last s)))]))
+    [(struct* chain ([schedulers subs]))
+     (for-each undo! subs)
+     (step-back! s)]
+    [(struct* sequence ([schedulers subs])) (for ([sub (in-vector subs)]) (undo! sub))]
+    [_ (step-back! s)]))
 
-(define (build opt next #:closed [closed #f] #:initial [initial #f])
+(define (build opt rule-of #:initial [initial #f])
   (define bases (store-initial-lrs! (optimizer-store opt) initial))
-  (define s (make-scheduler opt (shape bases next closed) -1 #f))
+  (define s (make-scheduler opt (rule-of bases) -1 #f))
   (initial-step! s)
   s)
 
+(define (shaped opt next #:closed [closed #f] #:initial [initial #f])
+  (build opt (lambda (bases) (shape bases next closed)) #:initial initial))
+
 (define (closed-form-rates s)
   (match (scheduler-rule s)
-    [(shape bases _ (? procedure? closed))
+    [(struct* shape ([bases bases] [closed (? procedure? closed)]))
      (map (lambda (b) (real->double-flonum (closed b (scheduler-last s)))) bases)]
     [_ (scheduler-last-rates s)]))
 
@@ -143,11 +165,11 @@
 (define/contract-out (step-lr opt #:step-size step-size #:gamma [gamma 0.1]) ;; noqa
   (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
        scheduler?)
-  (define g (real->double-flonum gamma))
-  (build opt
-         (lambda (_base lr t _initial?)
-           (if (or (zero? t) (positive? (modulo t step-size))) lr (* lr g)))
-         #:closed (lambda (base t) (* base (flexpt g (->fl (quotient t step-size)))))))
+  (let ([gamma (real->double-flonum gamma)])
+    (shaped opt
+            (lambda (_base lr t _initial?)
+              (if (or (zero? t) (positive? (modulo t step-size))) lr (* lr gamma)))
+            #:closed (lambda (base t) (* base (flexpt gamma (->fl (quotient t step-size))))))))
 
 (define/contract-out (multi-step-lr opt ;; noqa
                                     #:milestones milestones
@@ -155,36 +177,37 @@
   (->* [optimizer? #:milestones (listof exact-nonnegative-integer?)]
        [#:gamma real?]
        scheduler?)
-  (define g (real->double-flonum gamma))
-  (build opt
-         (lambda (_base lr t _initial?)
-           (match (count (lambda (m) (= m t)) milestones)
-             [0 lr]
-             [n (* lr (flexpt g (->fl n)))]))
-         #:closed (lambda (base t) (* base (flexpt g (->fl (milestones-reached milestones t)))))))
+  (let ([gamma (real->double-flonum gamma)])
+    (shaped opt
+            (lambda (_base lr t _initial?)
+              (match (count (lambda (m) (= m t)) milestones)
+                [0 lr]
+                [n (* lr (flexpt gamma (->fl n)))]))
+            #:closed (lambda (base t)
+                       (* base (flexpt gamma (->fl (milestones-reached milestones t))))))))
 
 (define/contract-out (exponential-lr opt #:gamma gamma) ;; noqa
   (-> optimizer? #:gamma real? scheduler?)
-  (define g (real->double-flonum gamma))
-  (build opt
-         (lambda (_base lr _t initial?) (if initial? lr (* lr g)))
-         #:closed (lambda (base t) (* base (flexpt g (->fl t))))))
+  (let ([gamma (real->double-flonum gamma)])
+    (shaped opt
+            (lambda (_base lr _t initial?) (if initial? lr (* lr gamma)))
+            #:closed (lambda (base t) (* base (flexpt gamma (->fl t)))))))
 
 (define/contract-out (cosine-annealing-lr opt ;; noqa
                                           #:t-max t-max
                                           #:eta-min [eta-min 0.0])
   (->* [optimizer? #:t-max exact-positive-integer?] [#:eta-min real?]
        scheduler?)
-  (define e (real->double-flonum eta-min))
-  (define (arc t) (+ 1.0 (cos (/ (* pi (->fl t)) (->fl t-max)))))
-  (build opt
-         (lambda (base lr t initial?)
-           (cond
-             [initial? lr]
-             [(zero? (modulo (- t 1 t-max) (* 2 t-max)))
-              (+ lr (/ (* (- base e) (- 1.0 (cos (/ pi (->fl t-max))))) 2.0))]
-             [else (+ (* (/ (arc t) (arc (sub1 t))) (- lr e)) e)]))
-         #:closed (lambda (base t) (+ e (/ (* (- base e) (arc t)) 2.0)))))
+  (define (one-plus-cos t) (+ 1.0 (cos (/ (* pi (->fl t)) (->fl t-max)))))
+  (let ([eta-min (real->double-flonum eta-min)])
+    (shaped opt
+            (lambda (base lr t initial?)
+              (cond
+                [initial? lr]
+                [(zero? (modulo (- t 1 t-max) (* 2 t-max)))
+                 (+ lr (/ (* (- base eta-min) (- 1.0 (cos (/ pi (->fl t-max))))) 2.0))]
+                [else (+ (* (/ (one-plus-cos t) (one-plus-cos (sub1 t))) (- lr eta-min)) eta-min)]))
+            #:closed (lambda (base t) (+ eta-min (/ (* (- base eta-min) (one-plus-cos t)) 2.0))))))
 
 (define/contract-out (linear-lr opt ;; noqa
                                 #:start-factor [start-factor (/ 1.0 3.0)]
@@ -197,7 +220,7 @@
   (define start (real->double-flonum start-factor))
   (define rise (- (real->double-flonum end-factor) start))
   (define total (->fl total-iters))
-  (build opt
+  (shaped opt
          (lambda (_base lr t initial?)
            (cond
              [(zero? t) (* lr start)]
@@ -224,7 +247,7 @@
   (define down-end (- total-steps 1.0))
   (define (anneal start end pct)
     (+ end (* (/ (- start end) 2.0) (+ 1.0 (cos (* pi pct))))))
-  (build opt
+  (shaped opt
          #:initial initial
          (lambda (_base _lr t _initial?)
            (when (> t total-steps)
@@ -238,7 +261,7 @@
 
 (define/contract-out (lambda-lr opt factor) ;; noqa
   (-> optimizer? (-> exact-nonnegative-integer? real?) scheduler?)
-  (build opt (lambda (base _lr t _initial?) (* base (real->double-flonum (factor t))))))
+  (shaped opt (lambda (base _lr t _initial?) (* base (real->double-flonum (factor t))))))
 
 (define/contract-out (scheduler-optimizer-of s) ;; noqa
   (-> scheduler? any/c)
@@ -268,9 +291,11 @@
   (define st (optimizer-store opt))
   (store-set-each! st 'lr (store-initial-lrs! st #f))
   (for-each undo! schedulers)
-  (define first (list-ref schedulers (milestones-reached milestones 0)))
+  (match-define (and rule (sequence subs marks))
+    (sequence (list->vector schedulers) (list->vector milestones)))
+  (define first (vector-ref subs (bisect-right marks 0)))
   (initial-step! first)
-  (make-scheduler opt (sequence schedulers milestones) 0 (scheduler-last-rates first)))
+  (make-scheduler opt rule 0 (scheduler-last-rates first)))
 
 (define/contract-out (cosine-annealing-warm-restarts opt ;; noqa
                                                      #:t-0 t-0
@@ -279,8 +304,4 @@
   (->* (optimizer? #:t-0 exact-positive-integer?)
        (#:t-mult exact-positive-integer? #:eta-min real?)
        scheduler?)
-  (define bases (store-initial-lrs! (optimizer-store opt) #f))
-  (define rule (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))
-  (define s (make-scheduler opt rule -1 #f))
-  (initial-step! s)
-  s)
+  (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
