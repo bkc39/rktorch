@@ -104,8 +104,7 @@
                                        (stage state found-infs))))
 
 (define (stage-infs s opt)
-  (define st (hash-ref (grad-scaler-stages s) (optimizer-root opt) #f))
-  (if st (stage-found-infs st) '()))
+  (stage-found-infs (hash-ref (grad-scaler-stages s) (optimizer-root opt))))
 
 (define (fresh-found! s dev)
   (define spares (grad-scaler-spares s))
