@@ -68,21 +68,19 @@
     [started (hash-ref scheduling (apply max started))]))
 
 (define (check-schedulable! r)
-  (cond
-    [(not (trainer-automatic? (run-trainer r)))
-     (raise-arguments-error
-      'gradient-accumulation-scheduler
-      (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
-                     " are not supported for manual optimization; remove the callback or"
-                     " switch to automatic optimization"))]
-    [(not (= 1 (run-accumulate-grad-batches r)))
-     (raise-arguments-error
-      'gradient-accumulation-scheduler
-      (string-append "you have set #:accumulate-grad-batches and are using the"
-                     " gradient-accumulation-scheduler callback; either remove"
-                     " #:accumulate-grad-batches from fit or remove the callback")
-      "#:accumulate-grad-batches" (run-accumulate-grad-batches r))]
-    [else (void)]))
+  (unless (trainer-automatic? (run-trainer r))
+    (raise-arguments-error
+     'gradient-accumulation-scheduler
+     (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
+                    " are not supported for manual optimization; remove the callback or"
+                    " switch to automatic optimization")))
+  (unless (= 1 (run-accumulate-grad-batches r))
+    (raise-arguments-error
+     'gradient-accumulation-scheduler
+     (string-append "you have set #:accumulate-grad-batches and are using the"
+                    " gradient-accumulation-scheduler callback; either remove"
+                    " #:accumulate-grad-batches from fit or remove the callback")
+     "#:accumulate-grad-batches" (run-accumulate-grad-batches r))))
 
 (define (accumulation-hook cb name)
   (match name
