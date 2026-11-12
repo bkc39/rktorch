@@ -2,13 +2,15 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i any/c contract-out flat-named-contract hash/c)
-         (only-in "../nn/optim.rkt" optimizer?)
+         (only-in "../nn/optim.rkt" optimizer? zero-grads!)
          (only-in "../nn/scheduler.rkt" scheduler?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" loss/c)
+         (only-in "private/dispatch.rkt" call-hooks)
+         (only-in "private/precision.rkt" backward-pass! manual-optimizer-step!)
          (only-in "private/state.rkt" run-optimizers)
          (only-in "private/types.rkt"
-                  make-scheduler-config not-implemented
+                  make-scheduler-config
                   [scheduler-config-frequency config-frequency]
                   [scheduler-config-interval config-interval]
                   [scheduler-config-scheduler config-scheduler]
@@ -60,18 +62,20 @@
 
 (define/contract-out (manual-backward! r loss)
   (-> manual-run/c loss/c void?)
-  (not-implemented 'manual-backward! 'T2))
+  (backward-pass! r loss))
 
 (define/contract-out (manual-step! r opt)
   (->i ([r manual-run/c] [opt optimizer?])
        #:pre/name (r opt) "opt is not one of define-optimizers' optimizers"
        (configured? r opt)
        [_ void?])
-  (not-implemented 'manual-step! 'T2))
+  (manual-optimizer-step! r opt))
 
 (define/contract-out (manual-zero-grads! r opt)
   (->i ([r manual-run/c] [opt optimizer?])
        #:pre/name (r opt) "opt is not one of define-optimizers' optimizers"
        (configured? r opt)
        [_ void?])
-  (not-implemented 'manual-zero-grads! 'T2))
+  (call-hooks r 'on-before-zero-grad opt)
+  (zero-grads! opt)
+  (void))

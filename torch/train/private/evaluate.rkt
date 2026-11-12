@@ -9,6 +9,7 @@
                   call-hooks call-trainer note-batch-size! publish-epoch! publish-steps!
                   transfer)
          (only-in "hooks.rkt" loop-hook-names)
+         (only-in "precision.rkt" call-in-precision)
          (only-in "state.rkt"
                   run-book run-current-stage run-device run-eval-batches run-global-step
                   run-stepped? run-trainer set-run-batch-index! set-run-current-stage!
@@ -25,7 +26,7 @@
 (define (eval-batch! r stage step batch-start batch-end values-in)
   (note-batch-size! r values-in)
   (apply call-hooks r batch-start values-in)
-  (define out (apply call-trainer r step values-in))
+  (define out (call-in-precision r (lambda () (apply call-trainer r step values-in))))
   (apply call-hooks r batch-end out values-in)
   (unless (eq? stage 'sanity-check)
     (publish-steps! r 'eval (run-eval-batches r))

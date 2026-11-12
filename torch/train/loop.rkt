@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->i >/c listof or/c)
-         (only-in racket/match match match*)
+         (only-in racket/match match)
          (only-in "../data/loader.rkt" dataloader?)
          (only-in "../foreign.rkt" device?)
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
@@ -26,14 +26,9 @@
     [(? list?) spec]
     [l (list l)]))
 
-(define (check-supported! #:precision [precision '32-true] #:clip-val [clip-val #f]
-                          #:ckpt-path [ckpt-path #f] #:automatic? [automatic? #t])
-  (match* (precision clip-val ckpt-path automatic?)
-    [(_ _ (? values) _) (not-implemented '#:ckpt-path 'T3)]
-    [((not '32-true) _ _ _) (not-implemented '#:precision 'T2)]
-    [(_ (? values) _ _) (not-implemented '#:gradient-clip-val 'T2)]
-    [(_ _ _ #f) (not-implemented "manual optimization" 'T2)]
-    [(_ _ _ _) (void)]))
+(define (check-supported! #:ckpt-path [ckpt-path #f])
+  (when ckpt-path
+    (not-implemented '#:ckpt-path 'T3)))
 
 (define (evaluation entry trainer loader
                     #:device device #:loggers loggers #:callbacks callbacks #:limit limit)
@@ -111,8 +106,7 @@
        (or (trainer-automatic? trainer)
            (and (= 1 (supplied-or accumulate 1)) (not (supplied-or clip-val))))
        [result run?])
-  (check-supported! #:precision precision #:clip-val clip-val #:ckpt-path ckpt-path
-                    #:automatic? (trainer-automatic? trainer))
+  (check-supported! #:ckpt-path ckpt-path)
   (run-fit (fresh-run trainer 'fit (or device (trainer-device trainer)))
            (fit-plan train
                      #:val val
@@ -128,7 +122,9 @@
                      #:limit-train limit-train
                      #:limit-val limit-val
                      #:log-every log-every
-                     #:fast-dev-run fast-dev-run)))
+                     #:fast-dev-run fast-dev-run
+                     #:clip (and clip-val (cons clip-val clip-algorithm))
+                     #:precision precision)))
 
 (define/contract-out (test trainer loader
                            #:device [device #f]

@@ -12,8 +12,11 @@
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "private/types.rkt" callback-property callback? prop:callback)
-         (only-in "run.rkt" state-key/c))
+         (only-in "private/state.rkt" run-trainer)
+         (only-in "private/types.rkt"
+                  callback-property callback? prop:callback trainer-automatic?)
+         (only-in "run.rkt" run-accumulate-grad-batches run-epoch state-key/c)
+         (only-in (submod "run.rkt" private) set-run-accumulate-grad-batches!))
 
 (begin-for-syntax
   (define callback-hooks (filter callback-hook? definable-hooks))
@@ -59,6 +62,43 @@
                                       #:immutable #t)
                               (not/c hash-empty?))))
 
+(define (factor-at scheduling epoch)
+  (match (filter (lambda (e) (<= e epoch)) (hash-keys scheduling))
+    ['() 1]
+    [started (hash-ref scheduling (apply max started))]))
+
+(define (check-schedulable! r)
+  (cond
+    [(not (trainer-automatic? (run-trainer r)))
+     (raise-arguments-error
+      'gradient-accumulation-scheduler
+      (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
+                     " are not supported for manual optimization; remove the callback or"
+                     " switch to automatic optimization"))]
+    [(not (= 1 (run-accumulate-grad-batches r)))
+     (raise-arguments-error
+      'gradient-accumulation-scheduler
+      (string-append "you have set #:accumulate-grad-batches and are using the"
+                     " gradient-accumulation-scheduler callback; either remove"
+                     " #:accumulate-grad-batches from fit or remove the callback")
+      "#:accumulate-grad-batches" (run-accumulate-grad-batches r))]
+    [else (void)]))
+
+(define (accumulation-hook cb name)
+  (match name
+    ['on-train-start (lambda (_cb r) (check-schedulable! r))]
+    ['on-train-epoch-start
+     (lambda (cb r)
+       (set-run-accumulate-grad-batches!
+        r (factor-at (accumulation-scheduler-scheduling cb) (run-epoch r))))]
+    [_ #f]))
+
+(struct accumulation-scheduler (scheduling)
+  #:property prop:callback
+  (callback-property 'plain 'gradient-accumulation-scheduler
+                     #:hook-ref accumulation-hook
+                     #:state-key (lambda (_cb) "gradient-accumulation-scheduler")))
+
 (define/contract-out (gradient-accumulation-scheduler scheduling)
   (-> accumulation-scheduling/c callback?)
-  (error 'unimplemented))
+  (accumulation-scheduler scheduling))

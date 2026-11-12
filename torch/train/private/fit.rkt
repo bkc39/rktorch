@@ -4,10 +4,13 @@
          (only-in racket/math exact-floor)
          (only-in (submod "../../data/loader.rkt" private) with-traversal)
          (only-in "../../data/loader.rkt" dataloader-length)
-         (only-in "../../foreign.rkt" / backward! detach to)
+         (only-in "../../foreign.rkt" / detach to)
          (only-in "../../foreign/autograd-ops.rkt" reset-grads!)
          (only-in "../../nn/layer.rkt" layer? parameters)
          (only-in "../../nn/optim.rkt" step! zero-grads!)
+         (only-in "precision.rkt"
+                  backward-pass! call-in-precision check-clippable! configure-precision!
+                  count-step! window-step!)
          (only-in "../../private/contract.rkt" supplied-or)
          (only-in "../logging.rkt" logger-log-hyperparams!)
          (only-in "book.rkt" epoch-end-reached!)
@@ -17,15 +20,15 @@
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
-                  run-book run-callbacks run-device run-epoch run-global-step run-loggers
-                  run-optimizers run-schedulers run-skip-epoch? run-skip-window? run-stop?
-                  run-trainer set-run-batch-index! set-run-current-stage! set-run-epoch!
-                  set-run-global-step! set-run-loggers! set-run-optimizers!
+                  run-accumulate run-book run-callbacks run-device run-epoch run-global-step
+                  run-loggers run-optimizers run-schedulers run-skip-epoch? run-skip-window?
+                  run-stepped? run-stop? run-trainer set-run-accumulate! set-run-batch-index!
+                  set-run-current-stage! set-run-epoch! set-run-loggers! set-run-optimizers!
                   set-run-schedulers! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-step-pending?! set-run-stepped?! set-run-stepping-batches!)
          (only-in "types.rkt"
                   scheduler-config-frequency scheduler-config-interval
-                  scheduler-config-scheduler trainer-hook))
+                  scheduler-config-scheduler trainer-automatic? trainer-hook))
 
 (provide fit-plan
          limited-batches
@@ -40,7 +43,7 @@
 
 (struct plan (device train val callbacks loggers max-epochs max-steps accumulate
               val-every val-interval sanity train-count val-count log-every fast?
-              stepping-batches))
+              stepping-batches clip precision))
 
 (define (stepping-batches max-epochs max-steps accumulate train-count)
   (match max-epochs
@@ -63,7 +66,9 @@
                   #:limit-train limit-train
                   #:limit-val limit-val
                   #:log-every log-every
-                  #:fast-dev-run fast-dev-run)
+                  #:fast-dev-run fast-dev-run
+                  #:clip clip
+                  #:precision precision)
   (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
   (define (unless-fast v fast-v) (if fast fast-v v))
   (define epochs (unless-fast max-epochs 1))
@@ -81,7 +86,9 @@
         (and val (limited-batches val (or fast limit-val)))
         log-every
         (and fast #t)
-        (stepping-batches epochs steps accumulate train-count)))
+        (stepping-batches epochs steps accumulate train-count)
+        clip
+        precision))
 
 (define (start-entry! r who callbacks loggers move-to #:fast? [fast? #f])
   (set-run-loggers! r loggers)
@@ -92,8 +99,11 @@
           #:when (layer? layer))
       (to layer move-to))))
 
+(define (automatic? r)
+  (trainer-automatic? (run-trainer r)))
+
 (define (step-schedulers! r interval index)
-  (for ([c (in-list (run-schedulers r))]
+  (for ([c (in-list (if (automatic? r) (run-schedulers r) '()))]
         #:when (and (eq? (scheduler-config-interval c) interval)
                     (zero? (modulo (add1 index) (scheduler-config-frequency c)))))
     (step! (scheduler-config-scheduler c))))
@@ -109,14 +119,14 @@
 (define (epoch-over? r p)
   (or (run-stop? r) (run-skip-epoch? r) (max-steps-reached? r p)))
 
-(define (window-start? p i)
-  (zero? (modulo i (plan-accumulate p))))
+(define (window-start? r i)
+  (zero? (modulo i (run-accumulate r))))
 
 (define (last-batch? p i)
   (= i (sub1 (plan-train-count p))))
 
-(define (ends-window? p i)
-  (or (last-batch? p i) (zero? (modulo (add1 i) (plan-accumulate p)))))
+(define (ends-window? r p i)
+  (or (last-batch? p i) (zero? (modulo (add1 i) (run-accumulate r)))))
 
 (define (val-check-batches p)
   (match (plan-val-interval p)
@@ -132,38 +142,30 @@
 (define (validate! r p stage count)
   (evaluate r (plan-val p) count stage))
 
-(define (backward-pass! r scaled)
-  (when scaled
-    (call-hooks r 'on-before-backward scaled)
-    (backward! scaled)
-    (call-hooks r 'on-after-backward)))
-
-(define (hooks-keep-step? r)
-  (for ([opt (in-list (run-optimizers r))])
-    (call-hooks r 'on-before-optimizer-step opt))
-  (not (run-skip-window? r)))
-
-(define (optimizer-step! r i)
-  (cond
-    [(run-skip-window? r) (void)]
-    [(hooks-keep-step? r) (for-each step! (run-optimizers r))]
-    [else (void)])
-  (set-run-global-step! r (add1 (run-global-step r)))
-  (set-run-stepped?! r #t)
+(define (optimizer-step! r p i)
+  (unless (run-skip-window? r)
+    (window-step! r (plan-clip p)))
+  (count-step! r)
   (step-schedulers! r 'step i))
 
+(define (step-label r)
+  (if (run-stepped? r) (sub1 (run-global-step r)) (run-global-step r)))
+
 (define (train-step! r p i batch)
-  (match-define (list loss extra) (call-trainer/values r 'training-step batch))
-  (when (window-start? p i)
+  (match-define (list loss extra)
+    (call-in-precision r (lambda () (call-trainer/values r 'training-step batch))))
+  (define auto? (automatic? r))
+  (when (and auto? (window-start? r i))
     (for ([opt (in-list (run-optimizers r))])
       (call-hooks r 'on-before-zero-grad opt)
       (zero-grads! opt)))
-  (define a (plan-accumulate p))
+  (define a (run-accumulate r))
   (define scaled (and loss (if (= a 1) loss (/ loss a))))
-  (backward-pass! r scaled)
-  (define window-end? (ends-window? p i))
-  (when window-end?
-    (optimizer-step! r i))
+  (when (and auto? scaled)
+    (backward-pass! r scaled))
+  (define window-end? (ends-window? r p i))
+  (when (and auto? window-end?)
+    (optimizer-step! r p i))
   (set-run-step-pending?! r #f)
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))
@@ -171,7 +173,7 @@
   (define global-step (run-global-step r))
   (when (and window-end?
              (or (run-stop? r) (zero? (modulo global-step (plan-log-every p)))))
-    (publish-steps! r 'train (sub1 global-step)))
+    (publish-steps! r 'train (step-label r)))
   (define validate? (val-due? r p i))
   (when (and validate? window-end?)
     (reset-grads! (parameters (run-trainer r))))
@@ -181,8 +183,8 @@
 (define (train-batch! r p i raw)
   (set-run-batch-index! r i)
   (set-run-stepped?! r #f)
-  (set-run-step-pending?! r #t)
-  (when (window-start? p i)
+  (set-run-step-pending?! r (automatic? r))
+  (when (window-start? r i)
     (set-run-skip-window?! r #f))
   (define batch (transfer r (run-device r) raw))
   (note-batch-size! r batch)
@@ -223,11 +225,14 @@
 
 (define (run-fit r p)
   (set-run-stepping-batches! r (plan-stepping-batches p))
+  (set-run-accumulate! r (plan-accumulate p))
+  (configure-precision! r (plan-precision p))
   (with-failure-protocol r 'fit
     (set-run-current-stage! r 'train)
     (start-entry! r 'fit (plan-callbacks p) (plan-loggers p) (plan-device p)
                   #:fast? (plan-fast? p))
     (configure-optimizers! r)
+    (check-clippable! r (plan-clip p))
     (log-hyperparameters! r)
     (call-hooks r 'on-fit-start)
     (when (and (plan-val p) (positive? (plan-sanity p)))

@@ -12,11 +12,13 @@
          (only-in "private/book.rkt" book-metric book-metrics)
          (only-in "private/hooks.rkt" hook-log hook-named)
          (only-in "private/state.rkt"
-                  live? run-batch-index run-book run-current-stage run-device run-entry
-                  run-epoch run-global-step run-hook run-loop run-optimizers
-                  [run-schedulers run-scheduler-configs] run-step-pending? run-stepped?
-                  run-stepping-batches run-trainer run? set-run-skip-epoch?!
-                  set-run-skip-window?! set-run-stop?!)
+                  live? [run-accumulate accumulate-of] run-batch-index run-book
+                  run-current-stage run-device run-entry run-epoch run-global-step
+                  [run-grad-scaler grad-scaler-of] run-hook run-loop run-optimizers
+                  [run-precision precision-of] [run-schedulers run-scheduler-configs]
+                  run-step-pending? run-stepped? run-stepping-batches run-trainer run?
+                  set-run-accumulate! set-run-skip-epoch?! set-run-skip-window?!
+                  set-run-stop?!)
          (only-in "private/types.rkt"
                   define-named-contract scheduler-config?
                   trainer-automatic? trainer?))
@@ -116,15 +118,15 @@
 
 (define/contract-out (run-precision r)
   (-> run? (or/c '32-true '16-mixed 'bf16-mixed))
-  (error 'unimplemented))
+  (precision-of r))
 
 (define/contract-out (run-grad-scaler r)
   (-> run? (or/c #f grad-scaler?))
-  (error 'unimplemented))
+  (grad-scaler-of r))
 
 (define/contract-out (run-accumulate-grad-batches r)
   (-> run? exact-positive-integer?)
-  (error 'unimplemented))
+  (accumulate-of r))
 
 (define (set-run-accumulate-grad-batches! r a)
-  (error 'unimplemented))
+  (set-run-accumulate! r a))
