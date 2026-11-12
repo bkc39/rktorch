@@ -292,7 +292,13 @@ per entry; the pair runs the per-entry count (331).
   after a collection starts a new one, and a young phantom of a dead epoch
   rolls into the old one at the next sync. A tally's pending young bytes
   count toward the epoch they are flushed in: across a collection the young
-  figure is off by at most a tally's limit.
+  figure is off by at most a tally's limit. The count never goes below 0. A
+  release counted young and flushed after its epoch ended would otherwise
+  start the next epoch below 0, and that epoch's charges would land on the
+  old phantom, the only pressure that could end it: charging 8 MiB and
+  releasing it at once ran 2 minor collections per 100 calls against
+  master's 11. A count held at 0 can only put bytes on the young phantom
+  that the old one should hold, which adds pressure and ends the epoch.
 - **The sync.** A flush moves its tally's pending live and young bytes to the
   shared counters, then `sync-phantoms!` sets the pair to the counters, one
   or two `set-phantom-bytes!`, lowering before raising. The sync is claimed

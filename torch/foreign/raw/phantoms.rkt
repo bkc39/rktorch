@@ -31,8 +31,8 @@
   (and (weak-box-value e) #t))
 
 ;; `young-count` is the bytes charged in its epoch, net of that epoch's
-;; releases, as flushed: a pair of the epoch and the count, so the first
-;; count after a collection starts a fresh one.
+;; releases, as flushed and never below 0: a pair of the epoch and the count,
+;; so the first count after a collection starts a fresh one.
 (struct phantoms
   (claim young-count old
    [young #:mutable] [epoch #:mutable]
@@ -49,8 +49,8 @@
                  (match-lambda
                    [(cons held n)
                     (if (or (eq? held e) (young-epoch? held))
-                        (cons held (+ n nbytes))
-                        (cons e nbytes))])
+                        (cons held (max 0 (+ n nbytes)))
+                        (cons e (max 0 nbytes)))])
                  #:site 'phantom)))
 
 (define (phantom-bytes ph)
@@ -59,7 +59,7 @@
 (define (targets ph live)
   (define l (max 0 (unbox live)))
   (match-define (cons e n) (unbox (phantoms-young-count ph)))
-  (define y (if (young-epoch? e) (min l (max 0 n)) 0))
+  (define y (if (young-epoch? e) (min l n) 0))
   (values e (- l y) y))
 
 (define (roll! ph e)

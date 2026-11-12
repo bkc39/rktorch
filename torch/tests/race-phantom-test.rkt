@@ -15,7 +15,8 @@
                     native-memory-use/fold record-allocation! unaccount!)
            (only-in (submod "../foreign/raw/phantoms.rkt" private) phantom-bytes)
            (only-in "../foreign/raw/tallies.rkt" counters-phantoms flush-tallies!)
-           (only-in "private/race-harness.rkt" join spawn stop! with-race-hook)
+           (only-in "private/race-harness.rkt"
+                    join spawn stop! with-race-hook worker-thread)
            (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
            (only-in "private/within.rkt" bounded-test))
 
@@ -47,8 +48,11 @@
        (flush-tallies!)
        (void (cas-update! accounts (lambda (all) (hash-remove all dev)))))))
 
-  (define-syntax-parse-rule (with-fake-device (dev:id index:expr) body:expr ...+)
-    (call-with-fake-device index (lambda (dev) body ...)))
+  (define-syntax-parse-rule (with-fake-device (dev:id index:expr
+                                                (~optional (~seq #:mark mark:expr)
+                                                           #:defaults ([mark #'#f])))
+                              body:expr ...+)
+    (call-with-fake-device index (lambda (dev) body ...) #:mark mark))
 
   (define (unaccount-all! keys)
     (for-each unaccount! keys)
@@ -170,6 +174,36 @@
       (unaccount-all! (cons key others))
       (check-conserved dev "after the releases")))
 
+  (define (reader-killed-at-claim dev)
+    (define target (phantoms-of dev))
+    (define start (make-semaphore 0))
+    (define reader (box #f))
+    (define hits (box 0))
+    (define (kill-at-claim name subject)
+      (when (and (eq? name 'phantoms-applied) (eq? subject target)
+                 (eq? (current-thread) (unbox reader)))
+        (set-box! hits (add1 (unbox hits)))
+        (kill-thread (current-thread))))
+    (with-race-hook kill-at-claim
+      (define w (spawn (lambda () (semaphore-wait start) (flush-tallies!))))
+      (set-box! reader (worker-thread w))
+      (semaphore-post start)
+      (check-not-false (sync/timeout 30 (thread-dead-evt (worker-thread w))) "the reader died"))
+    (unbox hits))
+
+  (bounded-test "L14: a reader killed while it holds the claim does not strand it"
+    (with-fake-device (dev 66)
+      (define first (box 'first))
+      (record-allocation! first mib dev)
+      (check-equal? (reader-killed-at-claim dev) 1 "the kill came at the claim")
+      (define second (box 'second))
+      (record-allocation! second mib dev)
+      (flush-tallies!)
+      (check-conserved dev "after the kill")
+      (check-equal? (charged dev) (* 2 mib) "a later sync took the claim")
+      (unaccount-all! (list first second))
+      (check-conserved dev "after the releases")))
+
   (bounded-test "L14: spurious CAS failures at the phantoms lose nothing"
     (with-fake-device (dev 62)
       (define (check-synced what)
@@ -205,6 +239,22 @@
       (check-equal? (young-charged dev) mib "the new epoch's charge")
       (check-equal? (charged dev) (* 2 mib))
       (unaccount-all! (list first second))
+      (check-conserved dev "after the releases")))
+
+  (bounded-test "L14: a release flushed after its epoch ended leaves the next charges young"
+    (with-fake-device (dev 67 #:mark (* 512 mib))
+      (define released (box 'released))
+      (define charged-after (box 'charged-after))
+      (record-allocation! released (* 8 kib) dev)
+      (flush-tallies!)
+      (check-equal? (young-charged dev) (* 8 kib) "the first charge")
+      (unaccount! released)
+      (collect-garbage 'minor)
+      (flush-tallies!)
+      (record-allocation! charged-after (* 8 kib) dev)
+      (flush-tallies!)
+      (check-equal? (young-charged dev) (* 8 kib) "the charge after the late release")
+      (unaccount-all! (list charged-after))
       (check-conserved dev "after the releases")))
 
   (bounded-test "L14: charges keep the nursery collections a per-entry phantom ran"
