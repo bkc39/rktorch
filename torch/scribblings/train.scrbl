@@ -414,7 +414,8 @@ The fields of a @racket[scheduler-config].}
                        (hash/c symbol? real? #:immutable #t)])]{
 Read and write the fields named by @racket[define-hparams]; another
 @racket[name] is a contract violation. The next hook reads the written value
-from the field.
+from the field. Reading a field a hook has set to a non-real raises an error
+naming it.
 @examples[#:eval train-eval
 (define-trainer Tuned (net lr)
   (define-init () (set! net (Linear 1 1)) (set! lr 0.1))
