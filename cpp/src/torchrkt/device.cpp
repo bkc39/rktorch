@@ -415,4 +415,32 @@ int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,
   });
 }
 
+int tr_cuda_bf16_supported(int64_t device_index) {
+  torchrkt::clear_error();
+#ifndef TORCHRKT_WITH_CUDA_ALLOCATOR
+  (void)device_index;
+  return 0;
+#else
+  try {
+    if (!torch::cuda::is_available() || device_index < 0 ||
+        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
+      return 0;
+    }
+    cudaDeviceProp prop{};
+    if (cudaGetDeviceProperties(&prop, static_cast<int>(device_index)) !=
+        cudaSuccess) {
+      static_cast<void>(cudaGetLastError());
+      return 0;
+    }
+    return prop.major >= 8 ? 1 : 0;
+  } catch (const std::exception& e) {
+    torchrkt::record_failure("tr_cuda_bf16_supported", e);
+    return 0;
+  } catch (...) {
+    torchrkt::record_unknown_failure("tr_cuda_bf16_supported");
+    return 0;
+  }
+#endif
+}
+
 }  // extern "C"

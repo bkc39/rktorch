@@ -10,7 +10,8 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
-                    any-float-dtype/c cuda-available? default-device
+                    any-float-dtype/c cuda-available? cuda-bfloat16-supported? default-cuda-index
+                    default-device
                     device->type+index dims-rest/c dtype/c
                     item mps-available? to-dtype tensor-dtype to-device
                     tensor-device tensor-shape tensor->list)
@@ -220,6 +221,7 @@
          cpu-device
          cuda-device
          cuda-available?
+         cuda-bfloat16-supported?
          cuda-if-available
          cuda-device-count
          mps-device

@@ -6,7 +6,9 @@
 (module+ test
   (require rackunit
            "../main.rkt"
-           "../nn.rkt")
+           "../nn.rkt"
+           (only-in "private/python-env.rkt"
+                    python-check python-cuda-available? python-torch-available?))
 
   (test-case "autocast is off by default and reports the device's dtype"
     (check-false (autocast-enabled? 'cpu))
@@ -82,7 +84,7 @@
       (define conv (to (Conv2d 3 8 3) (cuda-device)))
       (define x (to (randn 2 3 8 8) (cuda-device)))
       (check-false (autocast-enabled? 'cuda))
-      (define y (with-autocast #:device 'cuda (conv x)))
+      (define y (with-autocast #:device 'cuda #:dtype 'bfloat16 (conv x)))
       (check-equal? (dtype y) 'bfloat16)
       (check-equal? (device y) (cuda-device))
       (define z (with-autocast #:device 'cuda #:dtype 'float16 (conv x)))
@@ -99,4 +101,22 @@
         (with-autocast #:device 'cuda #:dtype 'float16
           (check-equal? (dtype (lin x)) 'float16
                         "the outer extent's bfloat16 weight cast is not reused"))
-        (check-equal? (dtype (lin x)) 'bfloat16)))))
+        (check-equal? (dtype (lin x)) 'bfloat16))))
+
+  (test-case "G3-L8: the bf16 probe is #f without CUDA and follows the capability with it"
+    (cond
+      [(not (cuda-available?)) (check-false (cuda-bfloat16-supported?))]
+      [(and (python-torch-available?) (python-cuda-available?))
+       (check-equal? (cuda-bfloat16-supported?)
+                     (hash-ref (python-check "cuda_bf16_probe.py") 'bf16))]
+      [else (displayln "[autocast-test] G3-L8 oracle skipped: no CUDA python")])
+    (check-false (cuda-bfloat16-supported? 4096) "an index past the device count"))
+
+  (test-case "G3-L9: with no #:dtype, CUDA autocast follows the probe and the CPU stays bf16"
+    (check-equal? (with-autocast #:device 'cpu (autocast-dtype 'cpu)) 'bfloat16)
+    (check-equal? (call-with-autocast (lambda () (autocast-dtype 'cpu)) #:device (cpu-device))
+                  'bfloat16)
+    (when (cuda-available?)
+      (define expected (if (cuda-bfloat16-supported?) 'bfloat16 'float16))
+      (check-equal? (with-autocast #:device 'cuda (autocast-dtype 'cuda)) expected)
+      (check-equal? (with-autocast #:device (cuda-device) (autocast-dtype 'cuda)) expected))))
