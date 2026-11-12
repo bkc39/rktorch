@@ -204,7 +204,7 @@
     #`(set! #,args (let ([given (readable-arguments '#,ids (list #,@ids))])
                      (lambda () given))))
 
-  (define (init-clauses init-form args field-decls #:then check)
+  (define (init-clauses init-form args field-decls #:check check)
     (syntax-parse (or init-form #`(define-init #,@field-decls))
       [(_ formals:init-formals body ...)
        #`(#:init formals #,(capture args (attribute formals.id)) body ... #,check)]))
@@ -238,21 +238,26 @@
                   (apply append (attribute h))]))
              (define init-form (findf values (forms-of 'define-init forms kinds)))
              (define automatic? (attribute opt.automatic?))]
-       #:with (hparam ...) hparams
-       #:with (args key value) (generate-temporaries '(arguments name value))
-       #:with check-hparams #'(checked-hparams! 'name '(hparam ...) (list hparam ...))
        (match side
          ['trainer
-          #`(define-layer* name (f.id ... args)
-              #,@(init-clauses init-form #'args #'(((~@ f.decl ...) ...)) #:then #'check-hparams)
-              (~? (~@ #:contract opt.ctc))
-              (~? (~@ #:predicate opt.pred))
-              #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
-              #:method (hyperparameters)
-              (hash-set* (args) (~@ 'hparam hparam) ...)
-              #:method (set-hyperparameter! key value)
-              (case key [(hparam) (set! hparam value)] ...)
-              form.clause ... ...)]
+          (syntax-parse #`(#,@hparams)
+            [(hparam ...)
+             #:with (args key value) (generate-temporaries '(arguments name value))
+             #:with check-hparams #'(checked-hparams! 'name '(hparam ...) (list hparam ...))
+             #`(define-layer* name (f.id ... args)
+                 #,@(init-clauses init-form #'args #'(((~@ f.decl ...) ...))
+                                  #:check #'check-hparams)
+                 (~? (~@ #:contract opt.ctc))
+                 (~? (~@ #:predicate opt.pred))
+                 #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
+                 #:method (hyperparameters)
+                 (hash-set* (args) (~@ 'hparam hparam) ...)
+                 #:method (set-hyperparameter! key value)
+                 (case key
+                   [(hparam) (set! hparam value)] ...
+                   [else (raise-arguments-error 'set-hparam! "the trainer has no such hparam"
+                                                "name" key)])
+                 form.clause ... ...)])]
          ['callback
           #`(define-layer* name fields
               #,@(callback-init-clauses init-form)
