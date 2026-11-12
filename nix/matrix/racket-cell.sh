@@ -28,9 +28,9 @@ case "$1" in
     ;;
   test)
     stage test
-    raco test --timeout 300 ./torch/
-    raco test --timeout 60 examples/test/
-    raco test --timeout 1200 scripts/bench/
+    raco test --make --timeout 300 ./torch/
+    raco test --make --timeout 60 examples/test/
+    raco test --make --timeout 1200 scripts/bench/
     ;;
   *)
     echo "usage: racket-cell.sh install <shim> <racket-deps> docs|no-docs | test" >&2
