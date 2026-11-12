@@ -8,14 +8,16 @@
          (only-in "logging.rkt" loss/c)
          (only-in "private/state.rkt" run-optimizers)
          (only-in "private/types.rkt"
-                  make-scheduler-config not-implemented
-                  [scheduler-config-frequency config-frequency]
-                  [scheduler-config-interval config-interval]
-                  [scheduler-config-scheduler config-scheduler]
-                  scheduler-config? trainer-hook trainer-hparam-names trainer?)
+                  make-scheduler-config not-implemented scheduler-config-frequency
+                  scheduler-config-interval scheduler-config-scheduler scheduler-config?
+                  trainer-hook trainer-hparam-names trainer?)
          (only-in "run.rkt" interval/c manual-run/c))
 
-(provide (contract-out [scheduler-config? (-> any/c boolean?)]))
+(provide (contract-out
+          [scheduler-config? (-> any/c boolean?)]
+          [scheduler-config-scheduler (-> scheduler-config? scheduler?)]
+          [scheduler-config-interval (-> scheduler-config? interval/c)]
+          [scheduler-config-frequency (-> scheduler-config? exact-positive-integer?)]))
 
 (define (hparam-name/c tr)
   (flat-named-contract
@@ -28,24 +30,15 @@
        scheduler-config?)
   (make-scheduler-config s interval frequency))
 
-(define/contract-out (scheduler-config-scheduler c)
-  (-> scheduler-config? scheduler?)
-  (config-scheduler c))
-
-(define/contract-out (scheduler-config-interval c)
-  (-> scheduler-config? interval/c)
-  (config-interval c))
-
-(define/contract-out (scheduler-config-frequency c)
-  (-> scheduler-config? exact-positive-integer?)
-  (config-frequency c))
-
 (define (configured? r opt)
   (and (memq opt (run-optimizers r)) #t))
 
+(define (hparam-table tr)
+  ((trainer-hook tr 'hyperparameters) tr))
+
 (define/contract-out (hparam tr name)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)]) [_ real?])
-  (hash-ref ((trainer-hook tr 'hyperparameters) tr) name))
+  (hash-ref (hparam-table tr) name))
 
 (define/contract-out (set-hparam! tr name v)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)] [v real?]) [_ void?])
@@ -54,7 +47,7 @@
 
 (define/contract-out (trainer-hparams tr)
   (-> trainer? (hash/c symbol? real? #:immutable #t))
-  (define all ((trainer-hook tr 'hyperparameters) tr))
+  (define all (hparam-table tr))
   (for/hasheq ([name (in-list (trainer-hparam-names tr))])
     (values name (hash-ref all name))))
 

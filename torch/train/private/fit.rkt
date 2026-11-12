@@ -18,10 +18,10 @@
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
                   run-book run-callbacks run-device run-epoch run-global-step run-loggers
-                  run-optimizers run-schedulers run-skip-epoch? run-skip-window? run-stop?
+                  run-optimizers run-scheduler-configs run-skip-epoch? run-skip-window? run-stop?
                   run-trainer set-run-batch-index! set-run-current-stage! set-run-epoch!
                   set-run-global-step! set-run-loggers! set-run-optimizers!
-                  set-run-schedulers! set-run-skip-epoch?! set-run-skip-window?!
+                  set-run-scheduler-configs! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-step-pending?! set-run-stepped?! set-run-stepping-batches!)
          (only-in "types.rkt"
                   scheduler-config-frequency scheduler-config-interval
@@ -43,10 +43,10 @@
               stepping-batches))
 
 (define (stepping-batches max-epochs max-steps accumulate train-count)
-  (match max-epochs
-    [#f max-steps]
-    [epochs
-     (define estimated (* (ceiling (/ train-count accumulate)) epochs))
+  (cond
+    [(not max-epochs) max-steps]
+    [else
+     (define estimated (* (ceiling (/ train-count accumulate)) max-epochs))
      (if max-steps (min estimated max-steps) estimated)]))
 
 (define (fit-plan train
@@ -93,7 +93,7 @@
       (to layer move-to))))
 
 (define (step-schedulers! r interval index)
-  (for ([c (in-list (run-schedulers r))]
+  (for ([c (in-list (run-scheduler-configs r))]
         #:when (and (eq? (scheduler-config-interval c) interval)
                     (zero? (modulo (add1 index) (scheduler-config-frequency c)))))
     (step! (scheduler-config-scheduler c))))
@@ -213,7 +213,7 @@
       [#f (values '() '())]
       [(list optimizers schedulers) (values optimizers schedulers)]))
   (set-run-optimizers! r optimizers)
-  (set-run-schedulers! r schedulers))
+  (set-run-scheduler-configs! r schedulers))
 
 (define (log-hyperparameters! r)
   (define tr (run-trainer r))

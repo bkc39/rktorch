@@ -14,7 +14,7 @@
          (only-in "private/state.rkt"
                   live? run-batch-index run-book run-current-stage run-device run-entry
                   run-epoch run-global-step run-hook run-loop run-optimizers
-                  [run-schedulers run-scheduler-configs] run-step-pending? run-stepped?
+                  run-scheduler-configs run-step-pending? run-stepped?
                   run-stepping-batches run-trainer run? set-run-skip-epoch?!
                   set-run-skip-window?! set-run-stop?!)
          (only-in "private/types.rkt"

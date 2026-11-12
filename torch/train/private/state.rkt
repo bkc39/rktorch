@@ -14,7 +14,7 @@
              callbacks
              loggers
              optimizers
-             schedulers
+             scheduler-configs
              epoch
              global-step
              batch-size
@@ -40,12 +40,12 @@
                    #:callbacks [callbacks '()]
                    #:loggers [loggers '()]
                    #:optimizers [optimizers '()]
-                   #:schedulers [schedulers '()]
+                   #:scheduler-configs [scheduler-configs '()]
                    #:epoch [epoch 0]
                    #:global-step [global-step 0]
                    #:batch-size [batch-size 1])
   (make-run trainer entry device (make-book)
-            callbacks loggers optimizers schedulers epoch global-step batch-size 0))
+            callbacks loggers optimizers scheduler-configs epoch global-step batch-size 0))
 
 (define (live? r) (and (run? r) (not (run-finished? r))))
 

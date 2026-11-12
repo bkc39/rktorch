@@ -204,7 +204,7 @@
     #`(set! #,args (let ([given (readable-arguments '#,ids (list #,@ids))])
                      (lambda () given))))
 
-  (define (init-clauses init-form args field-decls check)
+  (define (init-clauses init-form args field-decls #:then check)
     (syntax-parse (or init-form #`(define-init #,@field-decls))
       [(_ formals:init-formals body ...)
        #`(#:init formals #,(capture args (attribute formals.id)) body ... #,check)]))
@@ -239,21 +239,19 @@
              (define init-form (findf values (forms-of 'define-init forms kinds)))
              (define automatic? (attribute opt.automatic?))]
        #:with (hparam ...) hparams
+       #:with (args key value) (generate-temporaries '(arguments name value))
+       #:with check-hparams #'(checked-hparams! 'name '(hparam ...) (list hparam ...))
        (match side
          ['trainer
-          (define args (generate-temporary 'arguments))
-          (define key (generate-temporary 'name))
-          (define value (generate-temporary 'value))
-          #`(define-layer* name (f.id ... #,args)
-              #,@(init-clauses init-form args #'(((~@ f.decl ...) ...))
-                               #'(checked-hparams! 'name '(hparam ...) (list hparam ...)))
+          #`(define-layer* name (f.id ... args)
+              #,@(init-clauses init-form #'args #'(((~@ f.decl ...) ...)) #:then #'check-hparams)
               (~? (~@ #:contract opt.ctc))
               (~? (~@ #:predicate opt.pred))
               #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
               #:method (hyperparameters)
-              (hash-set* (#,args) (~@ 'hparam hparam) ...)
-              #:method (set-hyperparameter! #,key #,value)
-              (case #,key [(hparam) (set! hparam #,value)] ...)
+              (hash-set* (args) (~@ 'hparam hparam) ...)
+              #:method (set-hyperparameter! key value)
+              (case key [(hparam) (set! hparam value)] ...)
               form.clause ... ...)]
          ['callback
           #`(define-layer* name fields
