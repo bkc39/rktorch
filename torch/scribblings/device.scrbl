@@ -229,6 +229,56 @@ left as it was. Without CUDA the flag is stored and changes nothing.}
 for each new convolution shape and keeps the fastest. Without CUDA the flag
 is stored and changes nothing.}
 
+@section[#:tag "float32-precision"]{Float32 precision}
+
+PyTorch's TF32 switches, process-wide flags like the determinism switches
+(@secref["determinism"]). TF32 keeps 10 of float32's 23 mantissa bits, on CUDA GPUs of compute
+capability 8.0 and later. By default matmuls run in float32 and cuDNN in
+TF32. @tt{TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1} at process start makes
+@racket['high] the starting precision.
+
+@defproc[(set-float32-matmul-precision!
+          [precision (or/c 'highest 'high 'medium)])
+         void?]{
+@tt{torch.set_float32_matmul_precision}. With @racket['highest], float32
+matmuls compute in float32. @racket['high] lets cuBLAS use TF32 and sets
+@racket[cuda-matmul-allow-tf32?]. On CUDA, @racket['medium] is
+@racket['high]. On a CPU with AVX-512, @racket['medium] also lets oneDNN
+compute in bfloat16. Convolutions follow @racket[cudnn-allow-tf32?]
+instead.}
+
+@defproc[(float32-matmul-precision) (or/c 'highest 'high 'medium)]{
+@tt{torch.get_float32_matmul_precision()}. As in PyTorch, it raises
+@racket[exn:fail] in the states @racket[set-cuda-matmul-allow-tf32!]
+describes.
+
+@torch-examples[(float32-matmul-precision)]}
+
+@deftogether[(@defproc[(cuda-matmul-allow-tf32?) boolean?]
+              @defproc[(set-cuda-matmul-allow-tf32! [on? boolean?]) void?])]{
+@tt{torch.backends.cuda.matmul.allow_tf32}: whether cuBLAS may use TF32
+for float32 matmuls. Setting the precision turns it on for @racket['high]
+or @racket['medium] and off for @racket['highest]. From @racket['highest],
+turning it on sets the precision to @racket['high], and turning it off
+again returns it to @racket['highest]. After
+@racket[(set-float32-matmul-precision! 'high)], turning it off, or after
+@racket['medium], setting it either way, leaves the flag as set and
+@racket[float32-matmul-precision] raising until the precision is set again.
+
+@torch-examples[
+(set-cuda-matmul-allow-tf32! #t)
+(float32-matmul-precision)
+(set-cuda-matmul-allow-tf32! #f)
+(float32-matmul-precision)]}
+
+@deftogether[(@defproc[(cudnn-allow-tf32?) boolean?]
+              @defproc[(set-cudnn-allow-tf32! [on? boolean?]) void?])]{
+@tt{torch.backends.cudnn.allow_tf32}: whether cuDNN convolutions and RNNs
+may use TF32. On by default. Without CUDA the flag is stored and read
+back, and changes nothing.
+
+@torch-examples[(cudnn-allow-tf32?)]}
+
 @section{Choosing a device}
 
 @defproc*[([(device [t tensor?]) device?]
@@ -627,8 +677,9 @@ the message of a failed call are kept per OS thread: a thread made with
 @racket[#:pool 'own] has its own, threads of a shared parallel pool share
 their pool thread's, and coroutine threads share the main thread's
 (@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). The
-determinism switches are process-wide instead: one setting for every thread
-and place (@secref["determinism"]). Two threads may
+determinism and precision switches are process-wide instead: one setting
+for every thread and place (@secref["determinism"],
+@secref["float32-precision"]). Two threads may
 free one tensor explicitly: the handle is released once, and the other
 free raises @racket[exn:fail:contract].
 

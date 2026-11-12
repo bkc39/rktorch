@@ -263,6 +263,12 @@
          set-cudnn-deterministic!
          cudnn-benchmark?
          set-cudnn-benchmark!
+         set-float32-matmul-precision!
+         float32-matmul-precision
+         cuda-matmul-allow-tf32?
+         set-cuda-matmul-allow-tf32!
+         cudnn-allow-tf32?
+         set-cudnn-allow-tf32!
          sub!
          zero!
          mul!

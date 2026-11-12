@@ -11,7 +11,8 @@
                     python-torch-available?)
            (only-in "private/switches.rkt"
                     bounded-switches-test default-switches determinism-rows
-                    switch-values))
+                    precision-sequences sequence-outcome switch-values
+                    witness-values))
 
   (check-equal? (switch-values) default-switches
                 "no flag leaked from an earlier file")
@@ -44,9 +45,27 @@
   (define (warned->ok s)
     (if (regexp-match? #rx"^(ok|warn)" s) "ok" s))
 
+  (define (json->value v)
+    (if (string? v) (string->symbol v) v))
+
+  (define (json-hash j key convert)
+    (for/hasheq ([(k v) (in-hash (hash-ref j key))])
+      (values k (convert v))))
+
+  (define (rktorch-sequences)
+    (for/hasheq ([(name steps) (in-dict precision-sequences)])
+      (values name (sequence-outcome steps))))
+
+  (define (sequence-tests on)
+    (bounded-switches-test (format "P4: on ~a each precision sequence reads as in PyTorch" on)
+      (check-equal? (rktorch-sequences)
+                    (json-hash (twin on) 'sequences
+                               (lambda (outcomes) (map json->value outcomes))))))
+
   (define (cpu-tests)
     (bounded-switches-test "P1: PyTorch's fresh defaults are rktorch's"
-      (check-equal? (switch-values) (hash-ref (twin 'cpu) 'defaults)))
+      (check-equal? (switch-values) (json-hash (twin 'cpu) 'defaults json->value)))
+    (sequence-tests 'cpu)
     (bounded-switches-test
         "P3: on the CPU no row refuses in rktorch, and none refuses or warns in PyTorch"
       (define j (twin 'cpu))
@@ -62,7 +81,11 @@
       (check-equal? (outcomes 'cuda #:warn-only? #f) (hash-ref j 'strict))
       (check-equal? (outcomes 'cuda #:warn-only? #t)
                     (for/hasheq ([(name o) (in-hash (hash-ref j 'warn_only))])
-                      (values name (warned->ok o))))))
+                      (values name (warned->ok o)))))
+    (sequence-tests 'cuda)
+    (bounded-switches-test "P5: on CUDA the TF32 witnesses read as in PyTorch"
+      #:seconds 120
+      (check-equal? (witness-values) (hash-ref (twin 'cuda) 'witness))))
 
   (define python-torch? (python-torch-available?))
   (define cuda-twins? (and python-torch? (cuda-available?) (python-cuda-available?)))
