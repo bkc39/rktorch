@@ -38,6 +38,7 @@
          optimizer-store
          optimizer-root
          group-index?
+         has-hyperparameter?
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
                        [adamw? (-> any/c boolean?)]

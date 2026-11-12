@@ -19,7 +19,7 @@
          (only-in (submod "../nn/layer.rkt" private) define-layer*)
          (only-in "logging.rkt" run-log!)
          (only-in "private/checks.rkt"
-                  checked-state-key configured-callbacks configured-optimizers
+                  checked-hparams! checked-state-key configured-callbacks configured-optimizers
                   readable-arguments training-step-result)
          (only-in "private/types.rkt"
                   callback-property callback? prop:callback prop:trainer trainer-info
@@ -204,10 +204,10 @@
     #`(set! #,args (let ([given (readable-arguments '#,ids (list #,@ids))])
                      (lambda () given))))
 
-  (define (init-clauses init-form args field-decls)
+  (define (init-clauses init-form args field-decls check)
     (syntax-parse (or init-form #`(define-init #,@field-decls))
       [(_ formals:init-formals body ...)
-       #`(#:init formals #,(capture args (attribute formals.id)) body ...)]))
+       #`(#:init formals #,(capture args (attribute formals.id)) body ... #,check)]))
 
   (define (callback-init-clauses init-form)
     (syntax-parse (or init-form #'(_))
@@ -242,13 +242,18 @@
        (match side
          ['trainer
           (define args (generate-temporary 'arguments))
+          (define key (generate-temporary 'name))
+          (define value (generate-temporary 'value))
           #`(define-layer* name (f.id ... #,args)
-              #,@(init-clauses init-form args #'(((~@ f.decl ...) ...)))
+              #,@(init-clauses init-form args #'(((~@ f.decl ...) ...))
+                               #'(checked-hparams! 'name '(hparam ...) (list hparam ...)))
               (~? (~@ #:contract opt.ctc))
               (~? (~@ #:predicate opt.pred))
               #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
               #:method (hyperparameters)
               (hash-set* (#,args) (~@ 'hparam hparam) ...)
+              #:method (set-hyperparameter! #,key #,value)
+              (case #,key [(hparam) (set! hparam #,value)] ...)
               form.clause ... ...)]
          ['callback
           #`(define-layer* name fields

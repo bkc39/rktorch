@@ -19,6 +19,7 @@
              global-step
              batch-size
              eval-batches
+             [stepping-batches #:auto]
              [current-stage #:auto]
              [batch-index #:auto]
              [hook #:auto]

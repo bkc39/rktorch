@@ -13,11 +13,12 @@
          (only-in "private/hooks.rkt" hook-log hook-named)
          (only-in "private/state.rkt"
                   live? run-batch-index run-book run-current-stage run-device run-entry
-                  run-epoch run-global-step run-hook run-loop run-optimizers run-step-pending?
-                  run-stepped? run-trainer run? set-run-skip-epoch?! set-run-skip-window?!
-                  set-run-stop?!)
+                  run-epoch run-global-step run-hook run-loop run-optimizers
+                  [run-schedulers run-scheduler-configs] run-step-pending? run-stepped?
+                  run-stepping-batches run-trainer run? set-run-skip-epoch?!
+                  set-run-skip-window?! set-run-stop?!)
          (only-in "private/types.rkt"
-                  define-named-contract not-implemented scheduler-config?
+                  define-named-contract scheduler-config?
                   trainer-automatic? trainer?))
 
 (provide (contract-out
@@ -107,11 +108,11 @@
 
 (define/contract-out (run-schedulers r)
   (-> run? (listof scheduler-config?))
-  (not-implemented 'run-schedulers 'T2))
+  (run-scheduler-configs r))
 
 (define/contract-out (run-estimated-stepping-batches r)
   (-> fit-run/c exact-nonnegative-integer?)
-  (not-implemented 'run-estimated-stepping-batches 'T2))
+  (run-stepping-batches r))
 
 (define/contract-out (run-precision r)
   (-> run? (or/c '32-true '16-mixed 'bf16-mixed))

@@ -8,8 +8,11 @@
          (only-in "logging.rkt" loss/c)
          (only-in "private/state.rkt" run-optimizers)
          (only-in "private/types.rkt"
-                  make-scheduler-config not-implemented scheduler-config?
-                  trainer-hparam-names trainer?)
+                  make-scheduler-config not-implemented
+                  [scheduler-config-frequency config-frequency]
+                  [scheduler-config-interval config-interval]
+                  [scheduler-config-scheduler config-scheduler]
+                  scheduler-config? trainer-hook trainer-hparam-names trainer?)
          (only-in "run.rkt" interval/c manual-run/c))
 
 (provide (contract-out [scheduler-config? (-> any/c boolean?)]))
@@ -27,30 +30,33 @@
 
 (define/contract-out (scheduler-config-scheduler c)
   (-> scheduler-config? scheduler?)
-  (error 'unimplemented))
+  (config-scheduler c))
 
 (define/contract-out (scheduler-config-interval c)
   (-> scheduler-config? interval/c)
-  (error 'unimplemented))
+  (config-interval c))
 
 (define/contract-out (scheduler-config-frequency c)
   (-> scheduler-config? exact-positive-integer?)
-  (error 'unimplemented))
+  (config-frequency c))
 
 (define (configured? r opt)
   (and (memq opt (run-optimizers r)) #t))
 
 (define/contract-out (hparam tr name)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)]) [_ real?])
-  (not-implemented 'hparam 'T2))
+  (hash-ref ((trainer-hook tr 'hyperparameters) tr) name))
 
 (define/contract-out (set-hparam! tr name v)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)] [v real?]) [_ void?])
-  (not-implemented 'set-hparam! 'T2))
+  ((trainer-hook tr 'set-hyperparameter!) tr name v)
+  (void))
 
 (define/contract-out (trainer-hparams tr)
   (-> trainer? (hash/c symbol? real? #:immutable #t))
-  (not-implemented 'trainer-hparams 'T2))
+  (define all ((trainer-hook tr 'hyperparameters) tr))
+  (for/hasheq ([name (in-list (trainer-hparam-names tr))])
+    (values name (hash-ref all name))))
 
 (define/contract-out (manual-backward! r loss)
   (-> manual-run/c loss/c void?)
