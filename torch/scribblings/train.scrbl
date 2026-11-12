@@ -16,12 +16,8 @@
 @defmodule[torch/train]
 
 A trainer is a layer whose body forms are a method's steps and hooks, and
-@racket[fit] runs it in Lightning 2.6.5's loop order. Mixed precision,
-gradient clipping, manual optimization and @racket[#:ckpt-path] are not
-implemented yet and raise @racket[exn:fail:unsupported];
-@racket[gradient-accumulation-scheduler], @racket[run-precision],
-@racket[run-grad-scaler] and @racket[run-accumulate-grad-batches] are not
-implemented yet either.
+@racket[fit] runs it in Lightning 2.6.5's loop order. @racket[#:ckpt-path]
+is not implemented yet and raises @racket[exn:fail:unsupported].
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
@@ -197,7 +193,23 @@ not yet support training from a loader with @racket[#:workers].
 device supports it and @racket['16-mixed] otherwise; @racket['16-mixed] scales
 the loss with a @racket[grad-scaler], unscales before
 @racket[on-before-optimizer-step], and on the CPU runs as
-@racket['bf16-mixed], as Lightning does.
+@racket['bf16-mixed], as Lightning does. A mixed precision runs the four steps
+under @racket[call-with-autocast] and no other hook. @racket[#:gradient-clip-val]
+clips each optimizer's parameters after @racket[on-before-optimizer-step], by
+@racket[clip-grad-norm!] or, for @racket['value], @racket[clip-grad-value!];
+under a scaler, clipping with a fused optimizer raises at
+@racket[configure-optimizers], as Lightning raises at the clip.
+
+@examples[#:eval train-eval
+(define-trainer Mixed (net)
+  (define-init () (set! net (Linear 2 1)))
+  (define-optimizers (sgd (parameters net) #:lr 0.1))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(define mixed (fit (Mixed) (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 4)
+                   #:max-epochs 1 #:logger #f #:precision 'auto-mixed
+                   #:gradient-clip-val 0.5))
+(list (run-precision mixed) (run-grad-scaler mixed))
+]
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
 @racket[#:fast-dev-run]; a @racket[define-training-step]; a
@@ -432,10 +444,31 @@ from the field.
               @defproc[(manual-zero-grads! [r manual-run/c] [opt optimizer?])
                        void?])]{
 Manual optimization, inside a @racket[define-training-step] of a trainer
-defined with @racket[#:automatic-optimization? #f].
-@racket[manual-zero-grads!] runs the @racket[on-before-zero-grad] hooks.
-@racket[opt] must be one of the optimizers @racket[define-optimizers]
-returned, as Lightning's @tt{LightningOptimizer} wraps them.}
+defined with @racket[#:automatic-optimization? #f]; the loop then zeroes,
+backpropagates, clips and steps nothing, and steps no schedule.
+@racket[manual-zero-grads!] runs the @racket[on-before-zero-grad] hooks, then
+@racket[zero-grads!]. @racket[manual-backward!] scales the loss under a
+@racket['16-mixed] scaler and runs @racket[backward!] between
+@racket[on-before-backward] and @racket[on-after-backward].
+@racket[manual-step!] unscales, runs @racket[on-before-optimizer-step], steps
+and advances @racket[run-global-step], once per call. @racket[opt] must be one
+of the optimizers @racket[define-optimizers] returned, as Lightning's
+@tt{LightningOptimizer} wraps them.
+@examples[#:eval train-eval
+(define-trainer Halves (net)
+  #:automatic-optimization? #f
+  (define-init () (set! net (Linear 2 1)))
+  (define-optimizers (values (sgd (parameters net) #:lr 0.1) (sgd (parameters net) #:lr 0.01)))
+  (define-training-step (x y)
+    (for ([opt (in-list (run-optimizers run))])
+      (manual-zero-grads! run opt)
+      (manual-backward! run (mse-loss (net x) y))
+      (manual-step! run opt))
+    #f))
+(run-global-step (fit (Halves) (dataloader (tensor-dataset (randn 8 2) (randn 8 1))
+                                           #:batch-size 4)
+                      #:max-epochs 1 #:logger #f))
+]}
 
 @defproc[(hparam-scheduler [name symbol?]
                            [curve (-> exact-nonnegative-integer? real?)]
@@ -478,7 +511,20 @@ Recognize the schedule callbacks.}
          callback?]{
 Lightning's @tt{GradientAccumulationScheduler}: from each epoch key of
 @racket[scheduling] on, accumulate that many batches; a missing epoch 0 means
-1. It needs automatic optimization and @racket[#:accumulate-grad-batches] 1.}
+1. It needs automatic optimization and @racket[#:accumulate-grad-batches] 1,
+and raises at @racket[on-train-start] otherwise.
+@racket[run-estimated-stepping-batches] still counts with the fit's
+@racket[#:accumulate-grad-batches], as Lightning's does.
+@examples[#:eval train-eval
+(define-trainer Plain (net)
+  (define-init () (set! net (Linear 2 1)))
+  (define-optimizers (sgd (parameters net) #:lr 0.1))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(run-global-step (fit (Plain) (dataloader (tensor-dataset (randn 16 2) (randn 16 1))
+                                          #:batch-size 2)
+                      #:max-epochs 2 #:logger #f
+                      #:callbacks (list (gradient-accumulation-scheduler (hasheqv 1 4)))))
+]}
 
 @section{Contracts}
 
