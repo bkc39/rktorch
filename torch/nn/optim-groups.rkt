@@ -67,7 +67,7 @@
 (define (store-set-each! st key vs)
   (update-groups! st (lambda (gs) (map (lambda (g v) (with-setting g key v)) gs vs))))
 
-(define (store-initial-lrs! st [initial #f])
+(define (store-initial-lrs! st initial)
   (define groups (store-groups st))
   (cas-update! (store-initial-lrs st)
                (lambda (initials)
