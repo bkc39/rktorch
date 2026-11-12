@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/contract/combinator exn:fail:contract:blame?)
+           rackunit
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
            (only-in "private/blame.rkt" blames-caller?)
@@ -42,8 +43,30 @@
   (bounded-test "G2-L6: a non-real hparam after define-init names the field"
     (check-exn (lambda (e)
                  (and (exn:fail:contract? e)
-                      (regexp-match? #rx"hparam lr holds .*, not a real" (exn-message e))))
+                      (regexp-match? #rx"an hparam must hold a real.*hparam: 'lr"
+                                     (exn-message e))))
                (lambda () (Wordy))))
+
+  (define-trainer Retyped (net lr)
+    (define-init () (set! net (Linear 2 1)) (set! lr 0.1))
+    (define-hparams lr)
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y)
+      (set! lr "fast")
+      (mse-loss (net x) y)))
+
+  (define (names-the-field? who)
+    (lambda (e)
+      (and (exn:fail:contract? e)
+           (not (exn:fail:contract:blame? e))
+           (regexp-match? (pregexp (format "^~a: an hparam must hold a real.*hparam: 'lr" who))
+                          (exn-message e)))))
+
+  (bounded-test "G2-U1: a field a step set to a non-real is reported naming it, not as blame"
+    (define tr (Retyped))
+    (void (fit tr (toy-loader 2) #:max-epochs 1 #:logger #f))
+    (check-exn (names-the-field? 'hparam) (lambda () (hparam tr 'lr)))
+    (check-exn (names-the-field? 'trainer-hparams) (lambda () (trainer-hparams tr))))
 
   (bounded-test "G2-L6: set-hparam! of an unknown name blames the caller"
     (check-exn blames-this-test? (lambda () (set-hparam! (Tuned) 'depth 3)))))

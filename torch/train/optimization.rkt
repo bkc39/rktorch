@@ -6,6 +6,7 @@
          (only-in "../nn/scheduler.rkt" scheduler?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" loss/c)
+         (only-in "private/checks.rkt" checked-hparam)
          (only-in "private/state.rkt" run-optimizers)
          (only-in "private/types.rkt"
                   make-scheduler-config not-implemented scheduler-config-frequency
@@ -38,7 +39,7 @@
 
 (define/contract-out (hparam tr name)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)]) [_ real?])
-  (hash-ref (hparam-table tr) name))
+  (checked-hparam 'hparam name (hash-ref (hparam-table tr) name)))
 
 (define/contract-out (set-hparam! tr name v)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)] [v real?]) [_ void?])
@@ -49,7 +50,7 @@
   (-> trainer? (hash/c symbol? real? #:immutable #t))
   (define all (hparam-table tr))
   (for/hasheq ([name (in-list (trainer-hparam-names tr))])
-    (values name (hash-ref all name))))
+    (values name (checked-hparam 'trainer-hparams name (hash-ref all name)))))
 
 (define/contract-out (manual-backward! r loss)
   (-> manual-run/c loss/c void?)

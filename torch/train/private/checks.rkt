@@ -14,7 +14,8 @@
                   callback? make-scheduler-config scheduler-config-scheduler
                   scheduler-config?))
 
-(provide checked-hparams!
+(provide checked-hparam
+         checked-hparams!
          readable-arguments)
 
 (define (optimizer-only? v)
@@ -71,10 +72,13 @@
   (->i ([vs (listof callbacks/c)]) [result any/c])
   (flatten-callbacks vs))
 
+(define (checked-hparam who name v)
+  (unless (real? v)
+    (raise-arguments-error who "an hparam must hold a real" "hparam" name "value" v))
+  v)
+
 (define (checked-hparams! who names vals)
-  (for ([name (in-list names)] [v (in-list vals)] #:unless (real? v))
-    (raise-arguments-error who (format "hparam ~a holds ~e, not a real" name v)
-                           "hparam" name)))
+  (for-each (lambda (name v) (checked-hparam who name v)) names vals))
 
 (define (readable? v)
   (or (real? v) (string? v) (symbol? v) (boolean? v)
