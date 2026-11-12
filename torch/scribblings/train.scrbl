@@ -17,13 +17,11 @@
 
 A trainer is a layer whose body forms are a method's steps and hooks, and
 @racket[fit] runs it in Lightning 2.6.5's loop order. Mixed precision,
-gradient clipping, manual optimization, the hyperparameter procedures,
-@racket[run-schedulers], @racket[run-estimated-stepping-batches] and
-@racket[#:ckpt-path] are not implemented yet and raise
-@racket[exn:fail:unsupported]; the schedule callbacks,
-@racket[gradient-accumulation-scheduler], the @racket[scheduler-config]
-accessors, @racket[run-precision], @racket[run-grad-scaler] and
-@racket[run-accumulate-grad-batches] are not implemented yet either.
+gradient clipping, manual optimization and @racket[#:ckpt-path] are not
+implemented yet and raise @racket[exn:fail:unsupported];
+@racket[gradient-accumulation-scheduler], @racket[run-precision],
+@racket[run-grad-scaler] and @racket[run-accumulate-grad-batches] are not
+implemented yet either.
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
@@ -112,7 +110,9 @@ type.}
 @defform[(define-hparams field-id ...+)]{
 Names the fields that hold schedulable real hyperparameters.
 @racket[set-hparam!] sets them, the logger receives them at fit start, and
-checkpoints carry them.}
+checkpoints carry them. Each must hold a real once @racket[define-init]
+returns; otherwise constructing the trainer raises @racket[exn:fail:contract]
+naming the field.}
 
 @deftogether[(@defform[(define-training-step step-formals body ...+)]
               @defform[(define-validation-step step-formals body ...+)]
@@ -413,7 +413,18 @@ The fields of a @racket[scheduler-config].}
               @defproc[(trainer-hparams [tr trainer?])
                        (hash/c symbol? real? #:immutable #t)])]{
 Read and write the fields named by @racket[define-hparams]; another
-@racket[name] is a contract violation.}
+@racket[name] is a contract violation. The next hook reads the written value
+from the field.
+@examples[#:eval train-eval
+(define-trainer Tuned (net lr)
+  (define-init () (set! net (Linear 1 1)) (set! lr 0.1))
+  (define-hparams lr)
+  (define-optimizers (sgd (parameters net) #:lr lr))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(define tuned (Tuned))
+(set-hparam! tuned 'lr 0.5)
+(list (hparam tuned 'lr) (trainer-hparams tuned))
+]}
 
 @deftogether[(@defproc[(manual-backward! [r manual-run/c] [loss loss/c])
                        void?]
@@ -445,10 +456,18 @@ The same for @racket[key] of the selected parameter groups (every group for
 @racket[#f]) of the @racket[optimizer]-th optimizer, written as an absolute
 value.
 
-@racketblock[
-(define wd (lambda (t) (+ 0.04 (* 0.18 (- 1 (cos (* pi (/ t 100))))))))
-(fit (Dino) loader #:max-steps 100
-     #:callbacks (list (param-group-scheduler 'weight-decay wd #:groups '(0))))
+@examples[#:eval train-eval
+(require (only-in racket/math pi))
+(define-trainer Dino (net)
+  (define-init () (set! net (Linear 4 2)))
+  (define-optimizers (adamw (weight-decay-param-groups net #:weight-decay 0.04) #:lr 1e-3))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(define wd (lambda (t) (+ 0.04 (* 0.18 (- 1 (cos (* pi (/ t 8))))))))
+(define r (fit (Dino) (dataloader (tensor-dataset (randn 16 4) (randn 16 2)) #:batch-size 4)
+               #:max-steps 8 #:logger #f
+               #:callbacks (list (param-group-scheduler 'weight-decay wd #:groups '(0)))))
+(define opt (car (run-optimizers r)))
+(list (param-group-ref opt 0 'weight-decay) (param-group-ref opt 1 'weight-decay))
 ]}
 
 @deftogether[(@defproc[(hparam-scheduler? [v any/c]) boolean?]
