@@ -227,20 +227,32 @@
       (check-equal? (map flat (parameters idle)) before)
       (check-not-equal? moved (map flat (parameters (mlp))))))
 
+  (define race-writes 50000)
+
+  (define (lost-writes opt i key)
+    (for/sum ([k (in-range 1 (add1 race-writes))])
+      (define v (* 1e-6 k))
+      (param-group-set! opt i key v)
+      (if (eqv? (param-group-ref opt i key) v) 0 1)))
+
   (bounded-test "a write from another thread is never lost"
     (define opt (two-group-sgd))
-    (define (lost-writes i key)
-      (for/sum ([k (in-range 1 50001)])
-        (define v (* 1e-6 k))
-        (param-group-set! opt i key v)
-        (if (eqv? (param-group-ref opt i key) v) 0 1)))
     (define other (box #f))
-    (define t (thread (lambda () (set-box! other (lost-writes 1 'weight-decay)))))
-    (define here (lost-writes 0 'lr))
+    (define t (thread (lambda () (set-box! other (lost-writes opt 1 'weight-decay)))))
+    (define here (lost-writes opt 0 'lr))
     (thread-wait t)
     (check-equal? (list here (unbox other)) '(0 0))
     (check-equal? (list (param-group-ref opt 0 'lr) (param-group-ref opt 1 'weight-decay))
-                  (list (* 1e-6 50000) (* 1e-6 50000))))
+                  (list (* 1e-6 race-writes) (* 1e-6 race-writes))))
+
+  (bounded-test "a write while a schedule steps on another thread is never lost"
+    (define opt (two-group-sgd))
+    (define s (step-lr opt #:step-size 3 #:gamma 0.5))
+    (define t (thread (lambda () (for ([_ (in-range race-writes)]) (step! s)))))
+    (define lost (lost-writes opt 1 'weight-decay))
+    (thread-wait t)
+    (check-equal? lost 0)
+    (check-equal? (param-group-ref opt 1 'weight-decay) (* 1e-6 race-writes)))
 
   (define shapes
     `(("step" ,(lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
