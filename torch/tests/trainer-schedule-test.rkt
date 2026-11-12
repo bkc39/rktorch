@@ -76,6 +76,14 @@
     (check-equal? (param-group-ref opt 0 'weight-decay) (curve (sub1 (run-global-step r))))
     (check-equal? (param-group-ref opt 1 'weight-decay) 0.0))
 
+  (bounded-test "an 'epoch param-group schedule writes every group at each epoch start"
+    (define opt-box (box #f))
+    (fit (Grouped opt-box) (toy-loader 6) #:max-epochs 3 #:logger #f
+         #:callbacks (list (param-group-scheduler 'weight-decay curve #:interval 'epoch)))
+    (define opt (unbox opt-box))
+    (check-equal? (list (param-group-ref opt 0 'weight-decay) (param-group-ref opt 1 'weight-decay))
+                  (list (curve 2) (curve 2))))
+
   (define start-errors
     `(("an unknown hparam" hparam-scheduler ,(hparam-scheduler 'depth curve))
       ("an optimizer index past the last" param-group-scheduler
