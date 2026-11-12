@@ -2,6 +2,7 @@
 
 (require (only-in racket/flonum flexpt)
          (only-in racket/function negate)
+         (only-in racket/match match)
          (only-in threading ~>)
          (only-in "../foreign.rkt" copy! device zeros zeros-like)
          (prefix-in g: (only-in "../generated.rkt"
@@ -16,6 +17,7 @@
 (provide adam-foreach!
          adam-fused!
          bias-correction
+         current-amp-scaling
          rmsprop-foreach!
          sgd-foreach!
          sgd-fused!
@@ -47,6 +49,13 @@
 (define (bias-correction beta t)
   (- 1.0 (flexpt beta (exact->inexact t))))
 
+(define current-amp-scaling (make-parameter #f))
+
+(define (amp-arguments)
+  (match (current-amp-scaling)
+    [#f (values #f #f)]
+    [(cons grad-scale found-inf) (values grad-scale found-inf)]))
+
 (define (step-tensor p)
   (zeros #:device (device p) #:dtype 'float32))
 
@@ -57,15 +66,19 @@
                     #:weight-decay weight-decay #:nesterov? nesterov?
                     #:first-step? first-step? #:dampening [dampening 0.0]
                     #:maximize? [maximize? #f])
+  (define-values (grad-scale found-inf) (amp-arguments))
   (g:fused-sgd! ps gs bufs weight-decay momentum lr dampening nesterov?
-                maximize? first-step? #f #f))
+                maximize? first-step? grad-scale found-inf))
 
 (define (fused-adam! ps gs ms vs steps #:decoupled? decoupled? #:lr lr
                      #:beta1 beta1 #:beta2 beta2 #:weight-decay weight-decay
                      #:eps eps #:amsgrad? [amsgrad? #f] #:maximize? [maximize? #f])
+  (define-values (grad-scale found-inf) (amp-arguments))
   ((if decoupled? g:fused-adamw! g:fused-adam!)
    ps gs ms vs '() steps lr beta1 beta2 weight-decay eps amsgrad? maximize?
-   #f #f))
+   grad-scale found-inf)
+  (when found-inf
+    (g:foreach-add-list! steps (map (lambda (_) found-inf) steps) -1.0)))
 
 (define (pairs-where keep? ps xs)
   (for/lists (qs ys) ([p (in-list ps)] [x (in-list xs)] #:when (keep? p))

@@ -28,8 +28,8 @@
                   floating-params/c groups-distinct? groups-keys-within? groups-setting-holds?
                   param-group-settings param-group-tensors params/c)
          (only-in "optim-foreach.rkt"
-                  adam-foreach! adam-fused! bias-correction rmsprop-foreach!
-                  sgd-foreach! sgd-fused! slot! slot-ref step-count!))
+                  adam-foreach! adam-fused! bias-correction current-amp-scaling
+                  rmsprop-foreach! sgd-foreach! sgd-fused! slot! slot-ref step-count!))
 
 (provide gen:optimizer
          optimizer?
@@ -48,7 +48,10 @@
   (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
 (module+ private
-  (provide optimizer-state))
+  (provide fold-gradient-buckets
+           optimizer-fused?
+           optimizer-state
+           scaled-step!))
 
 (define-generics optimizer
   (optimizer-step! optimizer)
@@ -101,6 +104,29 @@
         (match-define (cons q g) qg)
         (values q g)))
     (update! bqs bgs)))
+
+(define (fold-gradient-buckets opt init proc)
+  (define root (optimizer-root opt))
+  (define keys (tracked-keys root))
+  (define (key-of qg)
+    (match-define (cons q _) qg)
+    (hash-ref! keys q (lambda () (placement q))))
+  (with-no-grad
+    (follow-moves! root)
+    (with-gradients ([qs gs] (optimizer-parameters opt))
+      (for/fold ([acc init]) ([bucket (in-list (group-by key-of (map cons qs gs)))])
+        (match-define (cons dev _) (key-of (car bucket)))
+        (proc acc dev (map cdr bucket))))))
+
+(define (optimizer-fused? opt)
+  (match (optimizer-root opt)
+    [(? sgd? o) (eq? (sgd-mode o) 'fused)]
+    [(? adam? o) (eq? (adam-mode o) 'fused)]
+    [_ #f]))
+
+(define (scaled-step! opt [grad-scale #f] [found-inf #f])
+  (parameterize ([current-amp-scaling (and found-inf (cons grad-scale found-inf))])
+    (step! opt)))
 
 (define (update-mode foreach? fused?)
   (cond
