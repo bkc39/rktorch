@@ -172,19 +172,18 @@
        (check-equal? (field fetch 'tensors) '(0))
        (check-equal? (field fetch 'op_calls) '(1))
        (define n (length ps))
-       (define outputs (+ (* 3 n) 4))
+       (define bucket-norms n)
+       (define total-norm-outputs '(stack linalg-vector-norm + pow mul clamp))
+       (define outputs (+ bucket-norms (length total-norm-outputs)))
        (define fetches 1)
-       (define in-place-multiplies n)
-       ;; a shape read is one crossing for a scalar, two otherwise: the n squares
-       (define shape-reads (+ outputs n))
-       (define device-reads (+ n 1))
-       (define to-device-checks (+ (- n 1) n))
-       (define grad-mode-calls 3)
+       (define native-calls (+ 2 (length total-norm-outputs)))
+       (define shape-reads (+ outputs 1))
+       (define first-call-placement-reads (* 2 n))
        (check-equal? (field clip 'frees) '(1))
        (check-equal? (field clip 'tensors) (list outputs))
        (check-equal? (field clip 'op_calls)
-                     (list (+ fetches outputs in-place-multiplies shape-reads device-reads
-                              to-device-checks grad-mode-calls))))
+                     (list (+ fetches native-calls shape-reads
+                              first-call-placement-reads))))
 
      (test-case "a free off the measuring thread is no op call, wherever its crossing lands"
        (define requests (make-channel))

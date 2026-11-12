@@ -231,3 +231,15 @@ math fmod.Scalar
 # in either operand propagating.
 math maximum
 math minimum
+# --- tranche 11 (#187, #385): batched clipping and the grad scaler ----------
+# clip_grad_norm_'s foreach path: per-tensor norms in one call (a Tensor[]
+# return aligned with its argument), the norm of their stack, and one scale
+# multiply; clip_grad_value_'s two clamps. The amp pair is GradScaler's
+# unscale and update (#385 G3), with Tensor(b!) arguments beside the receiver.
+optim _foreach_norm.Scalar
+optim _foreach_mul_.Tensor
+optim _foreach_clamp_min_.Scalar
+optim _foreach_clamp_max_.Scalar
+math linalg_vector_norm
+optim _amp_foreach_non_finite_check_and_unscale_
+optim _amp_update_scale_

@@ -3,9 +3,7 @@
 #|review: ignore|#
 
 (define t2-legs
-  '("clip-grad-parity-test.rkt"
-    "clip-grad-test.rkt"
-    "grad-scaler-parity-test.rkt"
+  '("grad-scaler-parity-test.rkt"
     "grad-scaler-test.rkt"
     "scheduler-chain-test.rkt"
     "scheduler-parity-test.rkt"
