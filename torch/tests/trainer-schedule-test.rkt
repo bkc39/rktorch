@@ -9,8 +9,9 @@
            (only-in "../main.rkt" cat item manual-seed! randn reshape)
            (only-in "../nn.rkt"
                     Linear adamw cosine-annealing-lr exponential-lr linear-lr mse-loss
-                    param-group param-group-ref parameters sequential-lr sgd step-lr)
+                    param-group param-group-ref parameters rmsprop sequential-lr sgd step-lr)
            "../train.rkt"
+           (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/lightning-names.rkt" fixture)
            (only-in "private/python-env.rkt" check-training-twin python-torch-available? tol)
            (only-in "private/trainer-kit.rkt" toy-loader)
@@ -39,16 +40,25 @@
          #:callbacks (list cb))
     (reverse (unbox sink)))
 
+  (define (check-no-eval-writes events label)
+    (for/fold ([last-train 0.0]) ([e (in-list events)])
+      (match e
+        [(list 'train _ _ temp) temp]
+        [(list 'val _ step temp)
+         (check-equal? temp last-train (format "~a: a validation batch at step ~a" label step))
+         last-train])))
+
   (bounded-test "G2-L7: a 'step hparam schedule writes curve(global step) at every batch"
     (for* ([accumulate (in-range 1 4)] [train (in-range 1 6)])
+      (define label (format "A ~a, b ~a" accumulate train))
       (define events (tempered-events (hparam-scheduler 'temp curve) #:train train
                                       #:accumulate accumulate))
       (for ([e (in-list events)])
         (match e
           [(list 'train _ step temp)
-           (check-equal? temp (curve step) (format "A ~a, b ~a, step ~a" accumulate train step))]
-          [(list 'val 0 0 temp) (check-equal? temp 0.0 "the sanity check sees no write")]
-          [_ (void)]))))
+           (check-equal? temp (curve step) (format "~a, step ~a" label step))]
+          [_ (void)]))
+      (check-no-eval-writes events label)))
 
   (bounded-test "G2-L7: an 'epoch hparam schedule writes curve(epoch) at every epoch start"
     (define events (tempered-events (hparam-scheduler 'temp curve #:interval 'epoch)
@@ -56,7 +66,8 @@
     (for ([e (in-list events)])
       (match e
         [(list 'train epoch _ temp) (check-equal? temp (curve epoch))]
-        [_ (void)])))
+        [_ (void)]))
+    (check-no-eval-writes events "'epoch"))
 
   (define-trainer Grouped (net opt-box)
     (define-init (sink) (set! net (Linear 2 2)) (set! opt-box sink))
@@ -89,6 +100,40 @@
     (fit (Grouped opt-box) (toy-loader 4) #:max-epochs 1 #:logger #f
          #:callbacks (list (param-group-scheduler 'beta1 (lambda (t) (- 0.9 (* 0.01 t))))))
     (check-equal? (param-group-ref (unbox opt-box) 1 'beta1) (- 0.9 (* 0.01 1))))
+
+  (define-trainer Momentum (net opt-box)
+    (define-init (sink) (set! net (Linear 2 2)) (set! opt-box sink))
+    (define-optimizers
+      (match-define (list weight bias) (parameters net))
+      (define opt (sgd (list (param-group (list weight)) (param-group (list bias) #:momentum 0.5))
+                       #:lr 0.1 #:momentum 0.9))
+      (set-box! opt-box opt)
+      opt)
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (bounded-test "a momentum schedule writes every SGD group's momentum"
+    (define opt-box (box #f))
+    (define (momentum t) (- 0.9 (* 0.01 t)))
+    (define r (fit (Momentum opt-box) (toy-loader 6) #:max-epochs 1 #:logger #f
+                   #:callbacks (list (param-group-scheduler 'momentum momentum))))
+    (define opt (unbox opt-box))
+    (define want (momentum (sub1 (run-global-step r))))
+    (check-equal? (list (param-group-ref opt 0 'momentum) (param-group-ref opt 1 'momentum))
+                  (list want want)))
+
+  (define-trainer Smoothed (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (rmsprop (parameters net) #:lr 0.01))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (bounded-test "a curve value the optimizer rejects raises naming param-group-scheduler"
+    (check-exn (lambda (e)
+                 (and (exn:fail:contract? e)
+                      (regexp-match? #rx"^param-group-scheduler: " (exn-message e))
+                      (not (regexp-match? #rx"blaming: [^\n]*schedules[.]rkt" (exn-message e)))))
+               (lambda ()
+                 (fit (Smoothed) (toy-loader 4) #:max-epochs 1 #:logger #f
+                      #:callbacks (list (param-group-scheduler 'eps (lambda (_t) -1.0)))))))
 
   (define start-errors
     `(("an unknown hparam" hparam-scheduler ,(hparam-scheduler 'depth curve))
@@ -129,6 +174,21 @@
     (check-eq? (scheduler-config-scheduler b) per-epoch)
     (check-equal? (map scheduler-config-interval (list a b)) '(step epoch))
     (check-equal? (map scheduler-config-frequency (list a b)) '(2 1)))
+
+  (define-trainer Evaluated (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers
+      (define opt (sgd (parameters net) #:lr 0.1))
+      (values opt (exponential-lr opt #:gamma 0.9)))
+    (define-test-step (x y) (mse-loss (net x) y))
+    (define-predict-step (_x _y) (run-schedulers run)))
+
+  (bounded-test "a test or predict run has no schedulers and no stepping estimate"
+    (define r (test (Evaluated) (toy-loader 2) #:logger #f))
+    (check-equal? (run-schedulers r) '())
+    (check-equal? (predict (Evaluated) (toy-loader 2)) '(()))
+    (check-exn (blames-caller? "trainer-schedule-test")
+               (lambda () (run-estimated-stepping-batches r))))
 
   (bounded-test "G2-L11: run-estimated-stepping-batches is Lightning's for the fixture table"
     (for ([row (in-list (hash-ref fixture 'stepping))])

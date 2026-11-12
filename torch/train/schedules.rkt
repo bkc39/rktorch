@@ -1,9 +1,10 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  -> ->* ->i >=/c non-empty-listof or/c)
+(require (only-in racket/contract/base -> ->* ->i >=/c contract-name non-empty-listof or/c)
+         (only-in racket/contract/combinator contract-first-order-passes?)
          (only-in racket/list range)
-         (only-in "../nn/optim.rkt" has-hyperparameter? param-group-count param-group-set!)
+         (only-in "../nn/optim.rkt"
+                  has-hyperparameter? hyperparameter-value/c param-group-count param-group-set!)
          (only-in "optimization.rkt" set-hparam!)
          (only-in "private/types.rkt" callback? define-named-contract trainer-hparam-names)
          (only-in "run.rkt" interval/c run-epoch run-global-step run-optimizers run-trainer)
@@ -19,9 +20,9 @@
 (define (curve/c key)
   (if (memq key '(beta1 beta2 eps)) real-curve/c nonnegative-curve/c))
 
-(define (scheduled-at r interval at)
-  (and (eq? interval at)
-       (if (eq? at 'step) (run-global-step r) (run-epoch r))))
+(define (write-scheduled! r interval at write!)
+  (when (eq? interval at)
+    (write! (if (eq? at 'step) (run-global-step r) (run-epoch r)))))
 
 (define-callback hparam-scheduler (name curve interval)
   #:contract (->* (symbol? (-> exact-nonnegative-integer? real?)) (#:interval interval/c)
@@ -38,42 +39,47 @@
                              "the trainer has no define-hparams field of this name"
                              "name" name "hparams" (trainer-hparam-names tr))))
   (define-hook (on-train-epoch-start)
-    (write-hparam! run name curve (scheduled-at run interval 'epoch)))
+    (write-scheduled! run interval 'epoch (hparam-writer run name curve)))
   (define-hook (on-train-batch-start . _)
-    (write-hparam! run name curve (scheduled-at run interval 'step))))
+    (write-scheduled! run interval 'step (hparam-writer run name curve))))
 
-(define (write-hparam! r name curve at)
-  (when at
-    (set-hparam! (run-trainer r) name (curve at))))
+(define ((hparam-writer r name curve) t)
+  (set-hparam! (run-trainer r) name (curve t)))
 
-(define (selected-groups opt groups)
-  (or groups (range (param-group-count opt))))
+(define (optimizer-at r index)
+  (define optimizers (run-optimizers r))
+  (and (< index (length optimizers)) (list-ref optimizers index)))
+
+(define (missing-group opt groups)
+  (and groups (findf (lambda (g) (>= g (param-group-count opt))) groups)))
 
 (define (check-schedulable! r key index groups)
-  (define optimizers (run-optimizers r))
-  (define opt (and (< index (length optimizers)) (list-ref optimizers index)))
-  (define missing
-    (and opt (findf (lambda (g) (>= g (param-group-count opt))) (or groups '()))))
-  (define problem
-    (cond
-      [(not opt)
-       (list "define-optimizers returned no optimizer at this index"
-             "optimizer" index "optimizers" (length optimizers))]
-      [missing
-       (list "the optimizer has no parameter group at this index"
-             "group" missing "groups" (param-group-count opt))]
-      [(not (has-hyperparameter? opt key))
-       (list "the optimizer has no such hyperparameter" "key" key)]
-      [else #f]))
-  (when problem
-    (apply raise-arguments-error 'param-group-scheduler problem)))
+  (define opt (optimizer-at r index))
+  (cond
+    [(not opt)
+     (raise-arguments-error 'param-group-scheduler
+                            "define-optimizers returned no optimizer at this index"
+                            "optimizer" index "optimizers" (length (run-optimizers r)))]
+    [(missing-group opt groups)
+     => (lambda (g)
+          (raise-arguments-error 'param-group-scheduler
+                                 "the optimizer has no parameter group at this index"
+                                 "group" g "groups" (param-group-count opt)))]
+    [(not (has-hyperparameter? opt key))
+     (raise-arguments-error 'param-group-scheduler "the optimizer has no such hyperparameter"
+                            "key" key)]
+    [else (void)]))
 
-(define (write-groups! r key curve index groups at)
-  (when at
-    (define opt (list-ref (run-optimizers r) index))
-    (define v (curve at))
-    (for ([g (in-list (selected-groups opt groups))])
-      (param-group-set! opt g key v))))
+(define ((group-writer r key curve index groups) t)
+  (define opt (optimizer-at r index))
+  (define value/c (hyperparameter-value/c opt key))
+  (define v (curve t))
+  (unless (contract-first-order-passes? value/c v)
+    (raise-arguments-error 'param-group-scheduler
+                           "the curve's value is out of range for this optimizer's hyperparameter"
+                           "key" key "at" t "value" v "expected" (contract-name value/c)))
+  (for ([g (in-list (or groups (range (param-group-count opt))))])
+    (param-group-set! opt g key v)))
 
 (define-callback param-group-scheduler (key curve optimizer groups interval)
   #:contract (->i ([key schedulable-key/c] [curve (key) (curve/c key)])
@@ -91,6 +97,6 @@
   (define-hook (on-train-start)
     (check-schedulable! run key optimizer groups))
   (define-hook (on-train-epoch-start)
-    (write-groups! run key curve optimizer groups (scheduled-at run interval 'epoch)))
+    (write-scheduled! run interval 'epoch (group-writer run key curve optimizer groups)))
   (define-hook (on-train-batch-start . _)
-    (write-groups! run key curve optimizer groups (scheduled-at run interval 'step))))
+    (write-scheduled! run interval 'step (group-writer run key curve optimizer groups))))

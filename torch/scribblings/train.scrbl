@@ -454,7 +454,9 @@ epoch start. It keeps no state: the value depends only on the step or epoch.}
          callback?]{
 The same for @racket[key] of the selected parameter groups (every group for
 @racket[#f]) of the @racket[optimizer]-th optimizer, written as an absolute
-value.
+value. The curve's values are reals for @racket['beta1], @racket['beta2] and
+@racket['eps], and @racket[(>=/c 0)] for the other keys; a value the optimizer
+rejects, such as a negative RMSprop @racket['eps], raises naming the callback.
 
 @examples[#:eval train-eval
 (require (only-in racket/math pi))
