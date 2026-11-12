@@ -33,7 +33,7 @@
       [buckets
        (define home (bucket-device (first buckets)))
        (define total (total-norm buckets home ord kernels))
-       (when (and error-if-nonfinite? (not (rational? (item total))))
+       (when (and error-if-nonfinite? (~> total item rational? not))
          (error 'clip-grad-norm!
                 (string-append "the total norm of order ~a of the gradients is non-finite, "
                                "so it cannot be clipped")
