@@ -61,9 +61,6 @@
                 (grouped rmsprop '((#:lr . 0.01)) '(((#:alpha . 0.9)) ((#:alpha . 0.99))))
                 '(loop foreach))))
 
-  (define (check-params got want label)
-    (check-equal? got want label))
-
   (cond
     [(not (python-torch-available?))
      (displayln "[optim-param-groups-parity-test] skipped: python3 `torch` not available")]
@@ -72,11 +69,12 @@
      (for ([c (in-list configs)])
        (match-define (list name make modes) c)
        (for ([mode (in-list modes)])
-         (check-params (run (make mode))
+         (check-equal? (run (make mode))
                        (~> j (hash-ref 'groups) (hash-ref name) (hash-ref mode))
                        (format "G1-L4: ~a, ~a" name mode))))
-     (check-params (run (lambda (decay no-decay)
-                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1 #:momentum 0.9))
+     (check-equal? (run (lambda (decay no-decay)
+                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1
+                               #:momentum 0.9))
                         #:after (lambda (opt n)
                                   (when (= n 2) (param-group-set! opt 0 'weight-decay 0.01))))
                    (hash-ref j 'set_weight_decay)
