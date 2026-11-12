@@ -177,7 +177,7 @@
          #:lr 0.1))
 
   (define (rmsprop-groups)
-    (rmsprop (for/list ([_ (in-range 2)]) (param-group (parameters (Linear 2 2))))))
+    (rmsprop (for/list ([_ (in-range 2)]) (~> (Linear 2 2) parameters param-group))))
 
   (define bad-calls
     `(("a parameter in two groups" #rx"a parameter appears in more than one parameter group"
@@ -207,7 +207,7 @@
       (check-exn (contract-violation? this-test rx) call)))
 
   (bounded-test "a snapshot has every key filled and ignores later writes"
-    (define opt (adam (list (param-group (parameters (Linear 2 2)) #:lr 1/100))))
+    (define opt (adam (list (~> (Linear 2 2) parameters (param-group #:lr 1/100)))))
     (match-define (list snapshot) (optimizer-param-groups opt))
     (define filled (hasheq 'lr 0.01 'beta1 0.9 'beta2 0.999 'eps 1e-8 'weight-decay 0.0))
     (check-equal? (param-group-hyperparameters snapshot) filled)

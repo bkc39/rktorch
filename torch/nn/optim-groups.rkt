@@ -2,6 +2,7 @@
 
 (require (only-in racket/list append-map list-update make-list)
          (only-in racket/match match)
+         (only-in "../foreign/raw/cas.rkt" cas-update!)
          (only-in (submod "param-group.rkt" private)
                   grouped? make-param-group param-group-settings param-group-tensors))
 
@@ -41,11 +42,6 @@
   (store (box groups) (box (make-list (length groups) #f)) (append-map param-group-tensors groups)
          owner))
 
-(define (box-update! b f)
-  (define old (unbox b))
-  (define new (f old))
-  (if (box-cas! b old new) new (box-update! b f)))
-
 (define (store-groups st)
   (unbox (store-groups-box st)))
 
@@ -59,7 +55,7 @@
   (make-param-group (param-group-tensors g) (hash-set (param-group-settings g) key (setting v))))
 
 (define (update-groups! st f)
-  (box-update! (store-groups-box st) f)
+  (cas-update! (store-groups-box st) f)
   (void))
 
 (define (store-set! st i key v)
@@ -73,7 +69,7 @@
 
 (define (store-initial-lrs! st [initial #f])
   (define groups (store-groups st))
-  (box-update! (store-initial-lrs st)
+  (cas-update! (store-initial-lrs st)
                (lambda (initials)
                  (for/list ([g (in-list groups)] [recorded (in-list initials)])
                    (or initial recorded (hash-ref (param-group-settings g) 'lr))))))
