@@ -35,8 +35,9 @@
          optimizer?
          optimizer-step!
          optimizer-parameters
-         optimizer-groups
+         optimizer-store
          optimizer-root
+         group-index?
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
                        [adamw? (-> any/c boolean?)]
@@ -51,10 +52,10 @@
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
-  (optimizer-groups optimizer)
+  (optimizer-store optimizer)
   (optimizer-root optimizer)
   #:fallbacks [(define (optimizer-parameters opt) (store-params (tracked-store opt)))
-               (define (optimizer-groups opt) (tracked-store opt))
+               (define (optimizer-store opt) (tracked-store opt))
                (define (optimizer-root opt) opt)])
 
 (struct tracked (state keys [generation #:mutable] store))
@@ -153,7 +154,7 @@
   (and (memq key (hyperparameter-keys opt)) #t))
 
 (define (group-index? opt i)
-  (or (zero? i) (< i (param-group-count opt))))
+  (< i (param-group-count opt)))
 
 (define nonnegative/c (>=/c 0))
 
@@ -292,11 +293,11 @@
   (define t (step-count! state p))
   (define d
     (cond
-      [decoupled?
-       (unless (zero? weight-decay)
-         (mul! p (- 1.0 (* lr weight-decay))))
-       g]
-      [else (decayed g p weight-decay)]))
+      [(not decoupled?) (decayed g p weight-decay)]
+      [(zero? weight-decay) g]
+      [else
+       (mul! p (- 1.0 (* lr weight-decay)))
+       g]))
   (define m (slot! state 'exp-avg p))
   (define v (slot! state 'exp-avg-sq p))
   (g:lerp-scalar! m d (- 1.0 beta1))
@@ -389,11 +390,11 @@
 
 (define/checked-out (param-group-count opt)
   (-> optimizer? exact-positive-integer?)
-  (store-count (optimizer-groups opt)))
+  (store-count (optimizer-store opt)))
 
 (define/contract-out (optimizer-param-groups opt) ;; noqa
   (-> optimizer? (listof param-group?))
-  (store-groups (optimizer-groups opt)))
+  (store-groups (optimizer-store opt)))
 
 (define/contract-out (param-group-ref opt i key) ;; noqa
   (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c])
@@ -402,7 +403,7 @@
        #:pre/name (opt key) "this optimizer has no such hyperparameter"
        (has-hyperparameter? opt key)
        [_ (or/c real? boolean?)])
-  (store-ref (optimizer-groups opt) i key))
+  (store-ref (optimizer-store opt) i key))
 
 (define/contract-out (param-group-set! opt i key v) ;; noqa
   (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c]
@@ -412,14 +413,14 @@
        #:pre/name (opt key) "this optimizer has no such hyperparameter"
        (has-hyperparameter? opt key)
        [_ void?])
-  (store-set! (optimizer-groups opt) i key v))
+  (store-set! (optimizer-store opt) i key v))
 
 (define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
   (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (or (unsupplied-arg? group) (group-index? opt group))
        [_ real?])
-  (store-ref (optimizer-groups opt) group 'lr))
+  (store-ref (optimizer-store opt) group 'lr))
 
 (define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
   (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
@@ -429,5 +430,5 @@
          [i (group-index? opt i)])
        [_ void?])
   (if group
-      (store-set! (optimizer-groups opt) group 'lr lr)
-      (store-set-all! (optimizer-groups opt) 'lr lr)))
+      (store-set! (optimizer-store opt) group 'lr lr)
+      (store-set-all! (optimizer-store opt) 'lr lr)))

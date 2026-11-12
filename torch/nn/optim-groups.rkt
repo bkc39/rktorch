@@ -1,11 +1,11 @@
 #lang racket/base
 
-(require (only-in racket/list append-map)
+(require (only-in racket/list append-map list-update make-list)
+         (only-in racket/match match)
          (only-in (submod "param-group.rkt" private)
                   grouped? make-param-group param-group-settings param-group-tensors))
 
 (provide group-store
-         set-store-initial-lrs!
          store-count
          store-groups
          store-initial-lrs!
@@ -16,7 +16,7 @@
          store-set-all!
          store-set-each!)
 
-(struct store ([groups #:mutable] [initial-lrs #:mutable] params owner))
+(struct store (groups-box initial-lrs params owner))
 
 (define (setting v)
   (if (boolean? v) v (real->double-flonum v)))
@@ -38,10 +38,16 @@
     (for*/hasheq ([(g i) (in-indexed groups)]
                   [p (in-list (param-group-tensors g))])
       (values p i)))
-  (store groups (map (lambda (_) #f) groups) (append-map param-group-tensors groups) owner))
+  (store (box groups) (box (make-list (length groups) #f)) (append-map param-group-tensors groups)
+         owner))
 
-(define (in-indexed xs)
-  (in-parallel (in-list xs) (in-naturals)))
+(define (box-update! b f)
+  (define old (unbox b))
+  (define new (f old))
+  (if (box-cas! b old new) new (box-update! b f)))
+
+(define (store-groups st)
+  (unbox (store-groups-box st)))
 
 (define (store-count st)
   (length (store-groups st)))
@@ -52,39 +58,37 @@
 (define (with-setting g key v)
   (make-param-group (param-group-tensors g) (hash-set (param-group-settings g) key (setting v))))
 
+(define (update-groups! st f)
+  (box-update! (store-groups-box st) f)
+  (void))
+
 (define (store-set! st i key v)
-  (set-store-groups! st (for/list ([(g j) (in-indexed (store-groups st))])
-                          (if (= i j) (with-setting g key v) g))))
+  (update-groups! st (lambda (gs) (list-update gs i (lambda (g) (with-setting g key v))))))
 
 (define (store-set-all! st key v)
-  (set-store-groups! st (for/list ([g (in-list (store-groups st))])
-                          (with-setting g key v))))
+  (update-groups! st (lambda (gs) (map (lambda (g) (with-setting g key v)) gs))))
 
 (define (store-set-each! st key vs)
-  (set-store-groups! st (for/list ([g (in-list (store-groups st))] [v (in-list vs)])
-                          (with-setting g key v))))
+  (update-groups! st (lambda (gs) (map (lambda (g v) (with-setting g key v)) gs vs))))
 
-(define (store-initial-lrs! st)
-  (define lrs
-    (for/list ([g (in-list (store-groups st))] [initial (in-list (store-initial-lrs st))])
-      (or initial (hash-ref (param-group-settings g) 'lr))))
-  (set-store-initial-lrs! st lrs)
-  lrs)
+(define (store-initial-lrs! st [initial #f])
+  (define groups (store-groups st))
+  (box-update! (store-initial-lrs st)
+               (lambda (initials)
+                 (for/list ([g (in-list groups)] [recorded (in-list initials)])
+                   (or initial recorded (hash-ref (param-group-settings g) 'lr))))))
 
 (define (store-partition st qs gs)
-  (define groups (store-groups st))
-  (cond
-    [(null? (cdr groups)) (list (list (param-group-settings (car groups)) qs gs))]
-    [else
+  (match (store-groups st)
+    [(list g) (list (list (param-group-settings g) qs gs))]
+    [groups
      (define owner (store-owner st))
-     (for*/list ([(g i) (in-indexed groups)]
-                 [part (in-value (owned-by owner i qs gs))]
-                 #:unless (null? (car part)))
-       (cons (param-group-settings g) part))]))
+     (for/list ([(g i) (in-indexed groups)]
+                #:do [(define-values (oqs ogs) (owned-by owner i qs gs))]
+                #:unless (null? oqs))
+       (list (param-group-settings g) oqs ogs))]))
 
 (define (owned-by owner i qs gs)
-  (define-values (oqs ogs)
-    (for/lists (oqs ogs) ([q (in-list qs)] [g (in-list gs)]
-                          #:when (eqv? (hash-ref owner q) i))
-      (values q g)))
-  (list oqs ogs))
+  (for/lists (oqs ogs) ([q (in-list qs)] [g (in-list gs)]
+                        #:when (eqv? (hash-ref owner q) i))
+    (values q g)))

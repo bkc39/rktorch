@@ -1012,14 +1012,14 @@ last @racket[step!], and does not call a @racket[lambda-lr] factor again;
 @subsection[#:tag "param-groups"]{Parameter groups}
 
 @defproc[(param-group [params (listof tensor?)]
-                      [#:lr lr (>=/c 0) #f]
-                      [#:weight-decay weight-decay (>=/c 0) #f]
-                      [#:momentum momentum (>=/c 0) #f]
-                      [#:nesterov? nesterov? boolean? #f]
-                      [#:beta1 beta1 real? #f]
-                      [#:beta2 beta2 real? #f]
-                      [#:eps eps real? #f]
-                      [#:alpha alpha (>=/c 0) #f])
+                      [#:lr lr (>=/c 0) @#,elem{inherited}]
+                      [#:weight-decay weight-decay (>=/c 0) @#,elem{inherited}]
+                      [#:momentum momentum (>=/c 0) @#,elem{inherited}]
+                      [#:nesterov? nesterov? boolean? @#,elem{inherited}]
+                      [#:beta1 beta1 real? @#,elem{inherited}]
+                      [#:beta2 beta2 real? @#,elem{inherited}]
+                      [#:eps eps real? @#,elem{inherited}]
+                      [#:alpha alpha (>=/c 0) @#,elem{inherited}])
          param-group?]{
 An entry of @tt{param_groups}: @racket[params] with the hyperparameters that
 differ from the optimizer's keywords; an omitted keyword inherits. Every

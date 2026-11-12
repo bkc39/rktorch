@@ -1,8 +1,8 @@
 """torch.optim's parameter groups on the seeded 4-8-2 MLP of 04_mlp.py: the
 flattened parameters after five steps, the weights in the first group and the
 biases in the second, with foreach=False, foreach=True and fused=True, and
-SGD over one group whose weight_decay is written after step 2. CPU only. The
-Racket twin is optim-param-groups-parity-test.rkt."""
+SGD with momentum over one group whose weight_decay is written after step 2.
+CPU only. The Racket twin is optim-param-groups-parity-test.rkt."""
 import json
 import torch
 from torch import nn
@@ -63,6 +63,7 @@ print(json.dumps({
                       for mode in modes if mode != "fused" or fusable}
                for name, (cls, kwargs, group_kwargs, fusable) in configs.items()},
     "set_weight_decay": run(lambda decay, no_decay:
-                            torch.optim.SGD([{"params": decay + no_decay}], lr=0.1),
+                            torch.optim.SGD([{"params": decay + no_decay}], lr=0.1,
+                                            momentum=0.9),
                             set_weight_decay),
 }))

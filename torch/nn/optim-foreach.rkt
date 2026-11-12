@@ -128,11 +128,11 @@
   (define steps (map (lambda (p) (step-count! state p)) ps))
   (define ds
     (cond
-      [decoupled?
-       (unless (zero? weight-decay)
-         (g:foreach-mul-scalar! ps (- 1.0 (* lr weight-decay))))
-       gs]
-      [else (decayed state 'scratch ps gs weight-decay)]))
+      [(not decoupled?) (decayed state 'scratch ps gs weight-decay)]
+      [(zero? weight-decay) gs]
+      [else
+       (g:foreach-mul-scalar! ps (- 1.0 (* lr weight-decay)))
+       gs]))
   (define ms (slots! state 'exp-avg ps))
   (define vs (slots! state 'exp-avg-sq ps))
   (g:foreach-lerp-scalar! ms ds (- 1.0 beta1))

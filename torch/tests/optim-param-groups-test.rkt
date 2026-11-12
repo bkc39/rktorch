@@ -11,16 +11,17 @@
            (only-in "../nn.rkt"
                     Linear Parameter Sequential adam adamw cosine-annealing-lr exponential-lr
                     lambda-lr learning-rate linear-lr multi-step-lr named-parameters
-                    one-cycle-lr param-group param-group-count param-group-hyperparameters
-                    param-group-params param-group-ref param-group-set! parameters rmsprop
-                    scheduler-rate set-learning-rate! sgd step! step-lr
-                    weight-decay-param-groups zero-grads!)
+                    one-cycle-lr optimizer-param-groups param-group param-group-count
+                    param-group-hyperparameters param-group-params param-group-ref
+                    param-group-set! parameters rmsprop scheduler-rate set-learning-rate! sgd
+                    step! step-lr weight-decay-param-groups zero-grads!)
+           (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/vit.rkt" VisionTransformer)
-           (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/op-calls.rkt" crossings-of)
            (only-in "private/within.rkt" bounded-test))
 
-  (define blames-this-test? (blames-caller? "optim-param-groups-test"))
+  (define this-test (blamed "optim-param-groups-test"))
 
   (struct config (name optimizer options modes))
 
@@ -98,6 +99,15 @@
                   (train! rebuilt (list (sgd (parameters rebuilt) #:lr 0.1 #:weight-decay 0.01))
                           3)))
 
+  (bounded-test "G1-L3: a written hyperparameter keeps the momentum buffers"
+    (define net (mlp))
+    (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
+    (train! net (list opt) 2)
+    (define buffers (optimizer-state opt))
+    (param-group-set! opt 0 'weight-decay 0.01)
+    (check-equal? (length buffers) (length (parameters net)))
+    (check-true (andmap eq? (optimizer-state opt) buffers)))
+
   (define (steady-crossings groups depth #:optimizer [optimizer adam] #:options [options '()])
     (manual-seed! 0)
     (define nets
@@ -117,10 +127,13 @@
     (check-equal? (- c3 c2) (- c2 c1))
     (check-equal? (for/list ([g (in-range 1 4)]) (steady-crossings g 2)) cs))
 
-  (bounded-test "G1-L6: an adamw group without decay makes one crossing fewer, same bits"
-    (define (adamw-crossings wd)
-      (steady-crossings 1 1 #:optimizer adamw #:options `((#:weight-decay . ,wd))))
-    (check-equal? (- (adamw-crossings 0.01) (adamw-crossings 0.0)) 1)
+  (bounded-test "G1-L6: an adamw group without decay saves its decay crossings, same bits"
+    (define (adamw-crossings mode wd)
+      (steady-crossings 1 1 #:optimizer adamw
+                        #:options (cons `(#:weight-decay . ,wd) (mode-option mode))))
+    (check-equal? (for/list ([mode (in-list '(loop foreach fused))])
+                    (- (adamw-crossings mode 0.01) (adamw-crossings mode 0.0)))
+                  (list (length (parameters (Linear 3 3))) 1 0))
     (define decoupled (mlp))
     (define plain (mlp))
     (check-equal? (train! decoupled (list (adamw (parameters decoupled) #:weight-decay 0.0)))
@@ -141,9 +154,11 @@
     (define vit (VisionTransformer #:image-size 8 #:patch 4 #:width 8 #:depth 1 #:heads 2
                                    #:classes 3))
     (define named (named-parameters vit))
-    (define frozen (cdr (last named)))
-    (requires-grad! frozen #f)
-    (define trainable (filter-not (lambda (n) (eq? (cdr n) frozen)) named))
+    (define frozen (map cdr (filter (lambda (n) (member (car n) '("head.weight" "head.bias")))
+                                    named)))
+    (check-equal? (map (lambda (t) (length (shape t))) frozen) '(2 1))
+    (for ([t (in-list frozen)]) (requires-grad! t #f))
+    (define trainable (filter-not (lambda (n) (memq (cdr n) frozen)) named))
     (define (exempt? n)
       (or (~> (cdr n) shape length (<= 1))
           (~> (car n) (string-split ".") last (member '("cls-token" "pos-embed")))))
@@ -161,28 +176,71 @@
                (~> (Linear 2 2) parameters (param-group #:lr 0.02)))
          #:lr 0.1))
 
+  (define (rmsprop-groups)
+    (rmsprop (for/list ([_ (in-range 2)]) (param-group (parameters (Linear 2 2))))))
+
   (define bad-calls
-    `(("a parameter in two groups"
+    `(("a parameter in two groups" #rx"a parameter appears in more than one parameter group"
        ,(lambda ()
           (define ps (parameters (Linear 2 2)))
           (sgd (list (param-group ps) (param-group (list (car ps)))) #:lr 0.1)))
-      ("momentum on an adam group"
+      ("momentum on an adam group" #rx"sets a hyperparameter this optimizer does not have"
        ,(lambda () (adam (list (~> (Linear 2 2) parameters (param-group #:momentum 0.9))))))
-      ("a group index past the last in param-group-ref"
+      ("a group index past the last in param-group-ref" #rx"no parameter group with this index"
        ,(lambda () (param-group-ref (two-group-sgd) 2 'lr)))
-      ("a group index past the last in param-group-set!"
+      ("a group index past the last in param-group-set!" #rx"no parameter group with this index"
        ,(lambda () (param-group-set! (two-group-sgd) 2 'lr 0.1)))
-      ("a group index past the last in learning-rate"
+      ("a group index past the last in learning-rate" #rx"no parameter group with this index"
        ,(lambda () (learning-rate (two-group-sgd) #:group 2)))
-      ("a negative rate written"
+      ("a negative rate written" #rx"expected: [(]>=/c 0[)]"
        ,(lambda () (param-group-set! (two-group-sgd) 0 'lr -1.0)))
-      ("'beta1 on sgd"
-       ,(lambda () (param-group-ref (two-group-sgd) 0 'beta1)))))
+      ("'beta1 on sgd" #rx"this optimizer has no such hyperparameter"
+       ,(lambda () (param-group-ref (two-group-sgd) 0 'beta1)))
+      ("'beta1 written to sgd" #rx"this optimizer has no such hyperparameter"
+       ,(lambda () (param-group-set! (two-group-sgd) 0 'beta1 0.9)))
+      ("a negative eps written to rmsprop" #rx"expected: [(]>=/c 0[)]"
+       ,(lambda () (param-group-set! (rmsprop-groups) 1 'eps -1e-8)))))
 
   (for ([case (in-list bad-calls)])
-    (match-define (list label call) case)
+    (match-define (list label rx call) case)
     (bounded-test (format "G1-L9: ~a blames the caller" label)
-      (check-exn blames-this-test? call)))
+      (check-exn (contract-violation? this-test rx) call)))
+
+  (bounded-test "a snapshot has every key filled and ignores later writes"
+    (define opt (adam (list (param-group (parameters (Linear 2 2)) #:lr 1/100))))
+    (match-define (list snapshot) (optimizer-param-groups opt))
+    (define filled (hasheq 'lr 0.01 'beta1 0.9 'beta2 0.999 'eps 1e-8 'weight-decay 0.0))
+    (check-equal? (param-group-hyperparameters snapshot) filled)
+    (param-group-set! opt 0 'lr 0.5)
+    (check-equal? (param-group-hyperparameters snapshot) filled)
+    (check-equal? (param-group-ref opt 0 'lr) 0.5))
+
+  (for ([mode (in-list '(loop foreach fused))])
+    (bounded-test (format "a group without gradients is left alone, ~a" mode)
+      (define used (mlp))
+      (define idle (Linear 2 2))
+      (define before (map flat (parameters idle)))
+      (define moved
+        (train! used (list (build adam (cons '(#:lr . 0.01) (mode-option mode))
+                                  (list (param-group (parameters used))
+                                        (param-group (parameters idle) #:lr 0.1))))))
+      (check-equal? (map flat (parameters idle)) before)
+      (check-not-equal? moved (map flat (parameters (mlp))))))
+
+  (bounded-test "a write from another thread is never lost"
+    (define opt (two-group-sgd))
+    (define (lost-writes i key)
+      (for/sum ([k (in-range 1 50001)])
+        (define v (* 1e-6 k))
+        (param-group-set! opt i key v)
+        (if (eqv? (param-group-ref opt i key) v) 0 1)))
+    (define other (box #f))
+    (define t (thread (lambda () (set-box! other (lost-writes 1 'weight-decay)))))
+    (define here (lost-writes 0 'lr))
+    (thread-wait t)
+    (check-equal? (list here (unbox other)) '(0 0))
+    (check-equal? (list (param-group-ref opt 0 'lr) (param-group-ref opt 1 'weight-decay))
+                  (list (* 1e-6 50000) (* 1e-6 50000))))
 
   (define shapes
     `(("step" ,(lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))

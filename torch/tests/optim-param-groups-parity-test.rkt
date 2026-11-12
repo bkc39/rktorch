@@ -9,7 +9,7 @@
            (only-in "../nn.rkt"
                     Linear adamw define-layer mse-loss param-group param-group-set! parameters
                     rmsprop sgd step! zero-grads!)
-           (only-in "private/python-env.rkt" python-check python-torch-available? tol))
+           (only-in "private/python-env.rkt" python-check python-torch-available?))
 
   (define-layer mlp-twin (fc1 fc2)
     #:init ()
@@ -62,9 +62,7 @@
                 '(loop foreach))))
 
   (define (check-params got want label)
-    (check-equal? (length got) (length want) (format "~a: parameter count" label))
-    (for ([r (in-list got)] [p (in-list want)] [i (in-naturals)])
-      (check-= r p tol (format "~a: parameter ~a" label i))))
+    (check-equal? got want label))
 
   (cond
     [(not (python-torch-available?))
@@ -78,7 +76,7 @@
                        (~> j (hash-ref 'groups) (hash-ref name) (hash-ref mode))
                        (format "G1-L4: ~a, ~a" name mode))))
      (check-params (run (lambda (decay no-decay)
-                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1))
+                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1 #:momentum 0.9))
                         #:after (lambda (opt n)
                                   (when (= n 2) (param-group-set! opt 0 'weight-decay 0.01))))
                    (hash-ref j 'set_weight_decay)
