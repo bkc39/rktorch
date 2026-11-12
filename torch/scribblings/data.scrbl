@@ -353,3 +353,43 @@ recurrent layers draws from the global stream whatever it holds.
   (randperm 5))
 (randperm 5 #:generator (make-generator 0))
 ]}
+
+@defproc[(rng-state [#:device device device/c 'cpu]) tensor?]{
+A copy of @racket[device]'s default generator state, @tt{torch.get_rng_state()}:
+the stream @racket[manual-seed!] seeds, whatever @racket[current-generator]
+holds. A uint8 CPU tensor of 5056 bytes for the CPU, 16 for CUDA and 44 for
+MPS; raises @racket[exn:fail] when @racket[device] is not present.
+@torch-examples[
+(manual-seed! 0)
+(define s (rng-state))
+(define drawn (rand 3))
+(set-rng-state! s)
+(equal? (tensor->list drawn) (tensor->list (rand 3)))
+(shape s)
+]}
+
+@defproc[(set-rng-state! [state tensor?] [#:device device device/c 'cpu])
+         void?]{
+Restores @racket[device]'s default generator, whatever
+@racket[current-generator] holds, to a copy of @racket[state], as
+@tt{torch.set_rng_state}. A @racket[state] that is not a state of the device's
+type is a contract violation.}
+
+@defproc[(generator-state [g generator?]) tensor?]{
+A copy of @racket[g]'s state, @tt{g.get_state()}, in the form
+@racket[rng-state] returns for @racket[g]'s device type. Reading it draws
+nothing.}
+
+@defproc[(set-generator-state! [g generator?] [state tensor?]) void?]{
+@racket[g] continues from @racket[state], @tt{g.set_state(state)}, which
+must be a state of @racket[g]'s device type, as for @racket[set-rng-state!].
+A state read from one generator makes another replay it, and the default
+stream's state may be set on a generator, and back.
+@torch-examples[
+(define g (make-generator 7))
+(define s (generator-state g))
+(define drawn (randperm 5 #:generator g))
+(define h (make-generator 0))
+(set-generator-state! h s)
+(equal? (tensor->list drawn) (tensor->list (randperm 5 #:generator h)))
+]}

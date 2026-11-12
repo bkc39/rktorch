@@ -110,6 +110,14 @@ void torchrkt_c_api_compile_check(void) {
   void (*generator_free)(tr_generator*) = tr_generator_free;
   tr_tensor* (*randperm)(int64_t, tr_generator*) = tr_randperm;
   int (*draw_seed)(tr_generator*, int64_t*) = tr_generator_draw_seed;
+  tr_tensor* (*generator_state)(const tr_generator*) = tr_generator_state;
+  int (*generator_set_state)(tr_generator*, const tr_tensor*) =
+      tr_generator_set_state;
+  tr_tensor* (*default_generator_state)(tr_device_type, int64_t) =
+      tr_default_generator_state;
+  int (*default_generator_set_state)(tr_device_type, int64_t,
+                                     const tr_tensor*) =
+      tr_default_generator_set_state;
   int (*requires_grad_set)(tr_tensor*, int) = tr_tensor_requires_grad_;
   int (*has_grad)(const tr_tensor*, int*) = tr_tensor_has_grad;
   int (*backward)(tr_tensor*) = tr_tensor_backward;
@@ -367,6 +375,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)generator_free;
   (void)randperm;
   (void)draw_seed;
+  (void)generator_state;
+  (void)generator_set_state;
+  (void)default_generator_state;
+  (void)default_generator_set_state;
   (void)requires_grad_set;
   (void)has_grad;
   (void)backward;

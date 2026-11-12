@@ -136,6 +136,7 @@ if(BUILD_TESTING)
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
+    tests/torchrkt/rng_state_test.cpp
     tests/torchrkt/spectral_test.cpp
     tests/torchrkt/storage_test.cpp
     tests/torchrkt/threads_test.cpp
