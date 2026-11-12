@@ -134,6 +134,7 @@
                             'racket/contract/base
                             'racket/generic))])
       (namespace-attach-module from m ns))
+    (namespace-attach-module-declaration from optim-file ns)
     (parameterize ([current-namespace ns])
       (values (dynamic-require optim-file name)
               (dynamic-require optim-file 'optimizer-step!))))
@@ -151,6 +152,15 @@
       (void (tr-set-grad-enabled/raw #t))
       (~> (stepped-linear) parameters make-opt step)
       (if faulted? (loop (add1 k)) (sub1 k))))
+
+  (bounded-test "a fresh optimizer instance loads and compiles nothing"
+    (define loads 0)
+    (define load (current-load))
+    (parameterize ([current-load (lambda (path expected)
+                                   (set! loads (add1 loads))
+                                   (load path expected))])
+      (fresh-optimizer 'adam))
+    (check-equal? loads 0))
 
   (for ([name (in-list '(adam rmsprop))])
     (bounded-test
