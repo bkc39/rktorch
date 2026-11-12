@@ -7,7 +7,7 @@
            rackunit
            (only-in "../foreign/raw/accounts.rkt" account-of)
            (only-in (submod "../foreign/raw/accounts.rkt" private) account-counters)
-           (only-in "../foreign/raw/cas.rkt" cas-add!)
+           (only-in "../foreign/raw/cas.rkt" cas-add! cas-claim!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/memory.rkt" record-allocation! unaccount!)
            (only-in "../foreign/raw/pressure.rkt" collect-under-pressure! native-memory-limit)
@@ -126,7 +126,7 @@
         (when (and (eq? name 'tally-judged)
                    (not (in-atomic-mode?))
                    (eq? (weak-box-value (tally-owner subject)) th)
-                   (box-cas! fired #f #t))
+                   (cas-claim! fired #f #t))
           (semaphore-post go)
           (semaphore-wait added)
           (kill-thread th)
