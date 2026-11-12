@@ -321,24 +321,26 @@
       (race-point unaccount-entry-read key)
       (with-uninterruptible
         (when (cas-claim! charge a #f)
-          (define account (allocation-account a))
-          (define nbytes (allocation-nbytes a))
-          (define p (and (zero? (allocation-adopted a)) (tally-of account)))
-          (count-live! account p (if p (- nbytes) 0) -1)
-          (race-point entry-unaccounted key)
-          (set-phantom-bytes! (allocation-phantom a) 0)
-          ;; an adoption's bytes leave the ledger and return to the shadow in
-          ;; one section: a refresh between them would charge them twice. A
-          ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
-          (cond
-            [p (tally-op! p nbytes)]
-            [else
-             (with-ledger
-               (count-live! account #f (- nbytes) 0)
-               (race-point live-returned key)
-               (race-point adoption-returning key)
-               (when (positive? (allocation-adopted a))
-                 (unadopt! a)))]))))))
+          (release-entry! key a))))))
+
+(define (release-entry! key a)
+  (match-define (allocation phantom nbytes _ account adopted _) a)
+  (define p (and (zero? adopted) (tally-of account)))
+  (count-live! account p (if p (- nbytes) 0) -1)
+  (race-point entry-unaccounted key)
+  (set-phantom-bytes! phantom 0)
+  ;; an adoption's bytes leave the ledger and return to the shadow in
+  ;; one section: a refresh between them would charge them twice. A
+  ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
+  (cond
+    [p (tally-op! p nbytes)]
+    [else
+     (with-ledger
+       (count-live! account #f (- nbytes) 0)
+       (race-point live-returned key)
+       (race-point adoption-returning key)
+       (when (positive? (allocation-adopted a))
+         (unadopt! a)))]))
 
 (define (charge-of key)
   (define lt (hash-ref lifetimes key #f))

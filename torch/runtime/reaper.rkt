@@ -132,8 +132,6 @@
   (cas-add! taken 1)
   (cas-add! released 1))
 
-;; Each kind's hook runs once per batch it appears in, inside the batch's
-;; region, so a drain that sees the batch done sees what the hook did.
 (define (release-batch! s n)
   (define afters
     (for/fold ([afters '()]) ([kind (in-vector (slots-kinds s) 0 n)])

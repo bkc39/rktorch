@@ -391,29 +391,40 @@ the last defence when a trough collection is not yet due:
   64 ops, once its pending live bytes reach the device's limit
   (`min(1 MiB, mark/512)`, or 1 MiB on a device with no mark, such as the
   CPU by default; 0 until the device's first gate, so before it every op
-  flushes), and for any one tensor of the limit or more. Each
+  flushes), once its pending since-check or since-sample bytes reach it
+  (so alloc/free churn, which leaves live near 0, cannot hold back more
+  than a limit of the gate's count), and for any one tensor of the limit
+  or more. A limit that falls (a mark that drops, or a reset's 0) flushes
+  every tally, so no tally holds counts built up under a larger one. Each
   flush moves every pending count with a `cas-take!` and a `cas-add!` in
-  one uninterruptible region and takes no lock. Adoptions and adopted
-  releases still write the shared counters, under the ledger. Every
+  one uninterruptible region, so a kill never strands an amount between
+  them, and takes no lock. Adoptions and adopted releases still write
+  the shared counters, under the ledger. Every
   reader that decides or reports (`live-bytes`, `checks-seen`, the
   `native-memory-*` readers, `finalizer-diagnostics` and the sampler,
   before it takes the ledger) runs `flush-tallies!` first, which also prunes
   the tallies of dead threads once it has taken their counts: a killed
   thread has no exit hook, so its counts arrive at the next such flush.
   A tally holds its thread weakly, and `thread-dead?`, which suspends a
-  parallel thread to enter atomic mode, is asked only from the place's own
+  parallel thread to enter atomic mode (inside an uninterruptible region,
+  such as the ledger's, an internal error), is asked only from the place's own
   OS thread outside atomic mode; elsewhere a flush prunes only the tallies
-  whose threads were collected.
+  whose threads were collected. The registry keeps its count beside the
+  list, so the bound below reads R without walking it.
   The per-op gate reads the shared counts plus its own thread's pending
   ones, so the op that crosses the interval still opens it. Only a
   collection closes the gate, so an open gate flushes every tally only
-  when it samples or when the unflushed reading plus that bound could be
+  when it samples or when the unflushed reading plus twice the bound below
+  (`tally-staleness`) could be
   over the mark; flushing on every op of an open gate measured 2.3x
   slower than the shared counters at eight threads. Shared live is signed,
-  since a release can be flushed before its charge, and readers clamp it
-  at 0. Between flushes the shared live count is off from the fold by at
-  most the number of tallies with pending counts times the limit, plus
-  one tensor per thread inside a charge or release.
+  since a release can be flushed before its charge, and readers clamp it,
+  and each account's entry count, at 0. Between flushes the shared live
+  count is off from the fold by at most the number of registered tallies
+  times the device's current limit,
+  plus one tensor per thread inside a charge or release; the current limit
+  suffices because a falling one flushes first. The gate's interval and
+  sample counts lag by at most the same tallies times the limit.
 - `accounted`, which runs outside the registration region, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means

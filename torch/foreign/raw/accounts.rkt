@@ -149,8 +149,6 @@
 (define (note-unaccounted! a nbytes)
   (note-live! a (- nbytes)))
 
-;; `p` is the caller's tally, or #f for the paths that write the shared
-;; counters under the ledger.
 (define (count-live! a p nbytes entries)
   (cond
     [p (tally-live! p nbytes entries)]
@@ -164,7 +162,7 @@
 (define (ledger-entries)
   (flush-tallies!)
   (for/sum ([a (in-list (all-accounts))])
-    (unbox (counters-entries (account-counters a)))))
+    (max 0 (unbox (counters-entries (account-counters a))))))
 
 (define (checks-seen)
   (flush-tallies!)
@@ -274,11 +272,12 @@
                               (account-floor a)))))
 
 (define (reset-accounts!)
+  (for ([a (in-list (all-accounts))])
+    (forget-mark! (account-counters a)))
   (flush-tallies!)
   (with-ledger
     (for ([a (in-list (all-accounts))])
       (define c (account-counters a))
-      (forget-mark! c)
       (set-box! (counters-since-check c) 0)
       (set-box! (counters-since-sample c) 0)
       (set-account-sample! a 0)

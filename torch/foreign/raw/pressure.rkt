@@ -166,12 +166,13 @@
   (define atomic? (in-atomic-mode?))
   (define mark (and (not atomic?) (device-high-water dev)))
   (define base (and mark (quotient mark interval-divisor)))
-  (unless atomic?
-    (note-mark! (account-of dev) mark))
+  (define a (and (not atomic?) (account-of dev)))
+  (when a
+    (note-mark! a mark))
   (define-values (gate-open? sample-due?)
-    (if mark (gate-state dev mark base) (values #f #f)))
+    (if mark (gate-state a mark base) (values #f #f)))
   (race-point gate-read dev)
-  (define measured? (and gate-open? (or sample-due? (could-cross? dev mark))))
+  (define measured? (and gate-open? (or sample-due? (could-cross? a mark))))
   (when measured?
     (flush-tallies!))
   (when (and gate-open? sample-due?)
@@ -180,23 +181,15 @@
     [(and measured? (> (pressure-reading dev) mark))
      (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
     [(and gate-open? sample-due?)
-     (with-ledger (end-trial! (account-of dev) base))]
+     (with-ledger (end-trial! a base))]
     [else (void)])
   (wake-after-collection!))
 
-;; Nothing resets the gate's count but a collection, so a gate stays open
-;; until one; a flush of every tally on each op would then cost more than the
-;; shared counters did. Short of a sample, an open gate flushes only when the
-;; unflushed reading, plus the most the tallies can hold back, is over the
-;; mark: below that the flushed reading would be too.
-(define (could-cross? dev mark)
-  (define a (account-of dev))
+(define (could-cross? a mark)
   (> (+ (unflushed-reading a) (staleness-bound a)) mark))
 
-;; whether the backstop looks at all, and whether that look samples: the
-;; caller's own unflushed bytes count, so its crossing opens the gate
-(define (gate-state dev mark base)
-  (define a (account-of dev))
+;; whether the backstop looks at all, and whether that look samples
+(define (gate-state a mark base)
   (define-values (checked sampled) (own-checks a))
   (values (>= (+ (since-check-bytes a) checked) (or (account-interval a) base))
           (>= (+ (since-sample-bytes a) sampled) (quotient mark sample-divisor))))

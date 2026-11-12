@@ -1,7 +1,9 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/atomic in-atomic-mode?)
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe/atomic in-atomic-mode?)
          (only-in racket/list filter-not)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
          (only-in "regions.rkt" with-uninterruptible))
@@ -20,10 +22,17 @@
          flush-tallies!)
 
 (module+ private
-  (provide own-pending tallies tally-limit tally-owner))
+  (provide own-pending registered-tallies tally-count tally-limit tally-owner))
 
-;; One device's shared ledger counters. Shared live is signed: a release
-;; flushed before its charge takes it below zero, so readers clamp.
+(define-syntax-parse-rule (tally-add! b:expr n:expr)
+  (cas-add! b n #:site 'tally))
+
+(define-syntax-parse-rule (tally-take! b:expr)
+  (cas-take! b #:site 'tally))
+
+(define-syntax-parse-rule (tally-update! b:expr f:expr)
+  (cas-update! b f #:site 'tally))
+
 (struct counters (index live entries since-check since-sample [limit #:mutable]))
 
 (define counted (box 0))
@@ -31,35 +40,46 @@
 (define (fresh-counters)
   (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) 0))
 
-;; One thread's deltas against one device's counters, written by that thread
-;; and taken by any flush.
 (struct pending (tally counters live entries since-check since-sample))
 
 (struct tally (owner slots [ops #:mutable]))
+
+(struct registry (count all))
 
 (define flush-ops 64)
 (define limit-cap (* 1024 1024))
 (define limit-divisor 512)
 
-;; A device with no mark has no gate to open late, so only the cap applies.
 (define (tally-limit mark)
   (if mark (min limit-cap (quotient mark limit-divisor)) limit-cap))
 
+(define (set-limit! c limit)
+  (define was (counters-limit c))
+  (unless (eqv? limit was)
+    (set-counters-limit! c limit)
+    (when (< limit was)
+      (flush-tallies!))))
+
 (define (note-counters-mark! c mark)
-  (define limit (tally-limit mark))
-  (unless (eqv? limit (counters-limit c))
-    (set-counters-limit! c limit)))
+  (set-limit! c (tally-limit mark)))
 
 (define (forget-mark! c)
-  (set-counters-limit! c 0))
+  (set-limit! c 0))
 
 (define current-tally (make-thread-cell #f #f))
-(define tallies (box '()))
+(define tallies (box (registry 0 '())))
+
+(define (registered-tallies)
+  (registry-all (unbox tallies)))
+
+(define (tally-count)
+  (registry-count (unbox tallies)))
 
 (define (own-tally)
   (or (thread-cell-ref current-tally)
       (let ([t (tally (make-weak-box (current-thread)) (box (vector)) 0)])
-        (cas-update! tallies (lambda (all) (cons t all)) #:site 'tally)
+        (tally-update! tallies
+                       (lambda (r) (registry (add1 (registry-count r)) (cons t (registry-all r)))))
         (thread-cell-set! current-tally t)
         t)))
 
@@ -78,40 +98,38 @@
   (define t (own-tally))
   (or (slot-of t c)
       (let ([p (pending t c (box 0) (box 0) (box 0) (box 0))])
-        (cas-update! (tally-slots t)
-                     (lambda (slots) (with-slot slots (counters-index c) p))
-                     #:site 'tally)
+        (tally-update! (tally-slots t)
+                       (lambda (slots) (with-slot slots (counters-index c) p)))
         p)))
 
-(define (own-pending-checks c)
+(define (own-slot c)
   (define t (thread-cell-ref current-tally))
-  (define p (and t (slot-of t c)))
+  (and t (slot-of t c)))
+
+(define (own-pending-checks c)
+  (define p (own-slot c))
   (if p
       (values (unbox (pending-since-check p)) (unbox (pending-since-sample p)))
       (values 0 0)))
 
 (define (own-pending c)
-  (define t (thread-cell-ref current-tally))
-  (define p (and t (slot-of t c)))
+  (define p (own-slot c))
   (if p
       (map unbox (list (pending-live p) (pending-entries p)
                        (pending-since-check p) (pending-since-sample p)))
       '(0 0 0 0)))
 
-;; I4's bound: each tally holds back under the limit between its ops, and
-;; at most one more tensor, under the limit too, inside one.
 (define (tally-staleness c)
-  (* 2 (length (unbox tallies)) (counters-limit c)))
+  (* 2 (tally-count) (counters-limit c)))
 
 (define (tally-live! p nbytes entries)
-  (cas-add! (pending-live p) nbytes #:site 'tally)
-  (cas-add! (pending-entries p) entries #:site 'tally))
+  (tally-add! (pending-live p) nbytes)
+  (tally-add! (pending-entries p) entries))
 
 (define (tally-checked! p nbytes)
-  (cas-add! (pending-since-check p) nbytes #:site 'tally)
-  (cas-add! (pending-since-sample p) nbytes #:site 'tally))
+  (tally-add! (pending-since-check p) nbytes)
+  (tally-add! (pending-since-sample p) nbytes))
 
-;; The caller's flush points T1 and T2: a limit of 0 flushes every op.
 (define (tally-op! p nbytes)
   (define t (pending-tally p))
   (define limit (counters-limit (pending-counters p)))
@@ -119,16 +137,16 @@
   (cond
     [(or (>= ops flush-ops)
          (>= nbytes limit)
-         (>= (abs (unbox (pending-live p))) limit))
+         (>= (abs (unbox (pending-live p))) limit)
+         (>= (unbox (pending-since-check p)) limit)
+         (>= (unbox (pending-since-sample p)) limit))
      (flush! t)]
     [else (set-tally-ops! t ops)]))
 
 (define (move! from to)
   (unless (eqv? 0 (unbox from))
-    (cas-add! to (cas-take! from #:site 'tally))))
+    (cas-add! to (tally-take! from))))
 
-;; A take and its add share one region, so a kill never strands the amount
-;; between them.
 (define (flush! t)
   (with-uninterruptible
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
@@ -144,11 +162,6 @@
   (define t (thread-cell-ref current-tally))
   (when t (flush! t)))
 
-;; A dead or collected owner adds nothing more, so a tally found so before
-;; its flush is empty after it and may go. `thread-dead?` enters atomic mode,
-;; which suspends a parallel thread, and inside an uninterruptible region
-;; such as the ledger's that is an internal error, so only the place's own
-;; OS thread asks it, outside atomic mode.
 (define (prunable? owner ask?)
   (define th (weak-box-value owner))
   (or (not th) (and ask? (thread-dead? th))))
@@ -156,12 +169,13 @@
 (define (flush-tallies!)
   (define ask? (and (on-main-os-thread?) (not (in-atomic-mode?))))
   (define dead
-    (for/fold ([dead '()]) ([t (in-list (unbox tallies))])
+    (for/fold ([dead '()]) ([t (in-list (registered-tallies))])
       (define gone? (prunable? (tally-owner t) ask?))
       (flush! t)
       (if gone? (cons t dead) dead)))
   (unless (null? dead)
-    (cas-update! tallies
-                 (lambda (all) (filter-not (lambda (t) (memq t dead)) all))
-                 #:site 'tally))
+    (tally-update! tallies
+                   (lambda (r)
+                     (define kept (filter-not (lambda (t) (memq t dead)) (registry-all r)))
+                     (registry (length kept) kept))))
   (void))
