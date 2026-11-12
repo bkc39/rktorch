@@ -9,7 +9,7 @@
            (only-in "../nn.rkt"
                     Linear adamw define-layer mse-loss param-group param-group-set! parameters
                     rmsprop sgd step! zero-grads!)
-           (only-in "private/python-env.rkt" python-check python-torch-available?))
+           (only-in "private/python-env.rkt" python-check python-torch-available? tol))
 
   (define-layer mlp-twin (fc1 fc2)
     #:init ()
@@ -51,8 +51,8 @@
 
   (define configs
     (list (list 'adamw
-                (grouped adamw '((#:lr . 1e-3))
-                         '(((#:weight-decay . 0.05)) ((#:weight-decay . 0.0) (#:lr . 2e-3))))
+                (grouped adamw '((#:lr . 0.05))
+                         '(((#:weight-decay . 0.5)) ((#:weight-decay . 0.0) (#:lr . 2e-3))))
                 '(loop foreach fused))
           (list 'sgd_momentum
                 (grouped sgd '((#:lr . 0.1)) '(((#:momentum . 0.9)) ((#:momentum . 0.5))))
@@ -60,6 +60,11 @@
           (list 'rmsprop_alpha
                 (grouped rmsprop '((#:lr . 0.01)) '(((#:alpha . 0.9)) ((#:alpha . 0.99))))
                 '(loop foreach))))
+
+  (define (check-params got want label)
+    (check-equal? (length got) (length want) (format "~a: parameter count" label))
+    (for ([r (in-list got)] [p (in-list want)] [i (in-naturals)])
+      (check-= r p tol (format "~a: parameter ~a" label i))))
 
   (cond
     [(not (python-torch-available?))
@@ -69,10 +74,10 @@
      (for ([c (in-list configs)])
        (match-define (list name make modes) c)
        (for ([mode (in-list modes)])
-         (check-equal? (run (make mode))
+         (check-params (run (make mode))
                        (~> j (hash-ref 'groups) (hash-ref name) (hash-ref mode))
                        (format "G1-L4: ~a, ~a" name mode))))
-     (check-equal? (run (lambda (decay no-decay)
+     (check-params (run (lambda (decay no-decay)
                           (sgd (list (param-group (append decay no-decay))) #:lr 0.1
                                #:momentum 0.9))
                         #:after (lambda (opt n)

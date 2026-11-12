@@ -19,8 +19,8 @@ class MLP(nn.Module):
 
 
 configs = {
-    "adamw": (torch.optim.AdamW, {"lr": 1e-3},
-              [{"weight_decay": 0.05}, {"weight_decay": 0.0, "lr": 2e-3}], True),
+    "adamw": (torch.optim.AdamW, {"lr": 0.05},
+              [{"weight_decay": 0.5}, {"weight_decay": 0.0, "lr": 2e-3}], True),
     "sgd_momentum": (torch.optim.SGD, {"lr": 0.1},
                      [{"momentum": 0.9}, {"momentum": 0.5}], True),
     "rmsprop_alpha": (torch.optim.RMSprop, {"lr": 0.01},
