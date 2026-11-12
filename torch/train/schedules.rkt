@@ -9,9 +9,12 @@
 (define-named-contract schedulable-key/c
   (or/c 'lr 'weight-decay 'momentum 'beta1 'beta2 'eps 'alpha))
 
+(define real-curve/c (-> exact-nonnegative-integer? real?))
+
+(define nonnegative-curve/c (-> exact-nonnegative-integer? (>=/c 0)))
+
 (define (curve/c key)
-  (-> exact-nonnegative-integer?
-      (if (memq key '(beta1 beta2 eps)) real? (>=/c 0))))
+  (if (memq key '(beta1 beta2 eps)) real-curve/c nonnegative-curve/c))
 
 (define-callback hparam-scheduler (name curve interval)
   #:contract (->* (symbol? (-> exact-nonnegative-integer? real?)) (#:interval interval/c)
