@@ -195,6 +195,18 @@
       (check-conserved dev "after the releases")
       (check-equal? (charged dev) 0)))
 
+  (bounded-test "L14: the first charge after a collection lands on the young phantom"
+    (with-fake-device (dev 65)
+      (define first (box 'first))
+      (define second (box 'second))
+      (record-allocation! first mib dev)
+      (collect-garbage 'minor)
+      (record-allocation! second mib dev)
+      (check-equal? (young-charged dev) mib "the new epoch's charge")
+      (check-equal? (charged dev) (* 2 mib))
+      (unaccount-all! (list first second))
+      (check-conserved dev "after the releases")))
+
   (bounded-test "L14: charges keep the nursery collections a per-entry phantom ran"
     (with-fake-device (dev 63)
       (define ring 10)
