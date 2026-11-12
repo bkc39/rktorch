@@ -19,7 +19,8 @@
                   accelerator-if-available mps-if-available)
          (except-in "foreign/creation-ops.rkt" tensor zeros)
          (submod "foreign/creation-ops.rkt" checked)
-         (except-in "foreign/generator.rkt" generator-on?)
+         (except-in "foreign/generator.rkt"
+                    check-generator-on! generator-on? uniform-range?)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
@@ -48,6 +49,7 @@
          randn
          rand
          uniform!
+         normal!
          tensor?
          exn:fail:rktorch:oom?
          tensor-shape

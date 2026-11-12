@@ -79,8 +79,8 @@ with `backward!` outside the form as PyTorch recommends). From
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
-  `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
-  native construction (never construct-then-move), with one exception:
+  `uniform!` and `normal!`, each with `#:generator`, #356); every
+  constructor takes `#:device` / `#:dtype` chosen at native construction (never construct-then-move), with one exception:
   `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which
   no host vector type carries, is built and narrowed on the CPU and moved
   once, so an accelerator never holds the wide copy; `#:requires-grad?`
@@ -95,8 +95,9 @@ with `backward!` outside the form as PyTorch recommends). From
 - device generators (`torch/foreign/generator.rkt`, #389):
   `make-generator #:device` is `torch.Generator(device)`, `generator-device`
   names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
-  `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
-  tensor is on the CPU) blame a caller whose effective generator (the
+  `randn`, `rand-like`, `randn-like`, `multinomial`, `randperm` (whose
+  tensor is on the CPU), `uniform!`, `normal!` and the initializers of
+  `torch/nn/init.rkt` blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
   tensor, and `torch/nn`'s `dropout` and `Dropout` raise for one when they
   draw; `dataloader` and the augmentations of
@@ -106,7 +107,8 @@ with `backward!` outside the form as PyTorch recommends). From
   as uint8 CPU tensors (#481)
   (`tr_generator_new_on`, `tr_generator_device`, `tr_generator_state`,
   `tr_generator_set_state`, `tr_default_generator_state`,
-  `tr_default_generator_set_state`)
+  `tr_default_generator_set_state`); `data.scrbl`'s stream table lists
+  every random op (#356, #347)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
