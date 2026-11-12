@@ -4,6 +4,7 @@
          (only-in threading ~>)
          (only-in "../../foreign.rkt" native-memory-unaccounted native-memory-use)
          (only-in "../../foreign/raw/collector.rkt" drain-finalizers! wake-after-collection!)
+         (only-in "../../foreign/raw/tallies.rkt" flush-tallies!)
          (only-in (submod "../../runtime/reaper.rkt" private) reaper-statistics reaper-threads))
 
 (provide median-allocation)
@@ -42,11 +43,13 @@
   (define start
     (call-as-atomic
      (lambda ()
+       (flush-tallies!)
        (define phantom (phantom-bytes))
        (- (current-memory-use 'cumulative) phantom))))
   (call-with-values thunk void)
   (call-as-atomic
    (lambda ()
+     (flush-tallies!)
      (define heap (current-memory-use 'cumulative))
      (- heap (phantom-bytes) start))))
 
