@@ -995,8 +995,10 @@ Conventions:
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
   in schema order. A `_foreach_*` op's `Tensor[]` return (#187) fills a
-  caller-sized out array through `alloc_result_list`; `#:returns-list arg`
-  answers it as a list, and the manifest's `returns` is `list`. A
+  caller-sized out array through `alloc_result_list`, whose `out_len` must
+  equal the list length and whose every slot is NULL on error;
+  `#:returns-list arg` answers it as a list, and the manifest's `returns`
+  is `list`. A
   write-annotated `Tensor(b!)` beside the receiver is a `mutable-tensor`
   (`tr_tensor*`), compared after the call; an in-place op without a method
   variant calls `at::<base>_`. Any other non-Tensor return still skips. A private ATen name

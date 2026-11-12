@@ -37,7 +37,8 @@ HEADER = [
     ";; An op with several Tensor returns carries #:returns N and answers",
     ";; them as multiple values, in schema order. An op that returns",
     ";; nothing updates its mutable-tensor-list arguments and answers the",
-    ";; first.",
+    ";; first. An op answering a Tensor list carries #:returns-list arg",
+    ";; and answers a list as long as arg.",
 ]
 
 

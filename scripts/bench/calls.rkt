@@ -177,13 +177,12 @@
        (define outputs (+ bucket-norms (length total-norm-outputs)))
        (define fetches 1)
        (define native-calls (+ 2 (length total-norm-outputs)))
-       (define shape-reads outputs)
-       (define stack-checks 1)
+       (define shape-reads (+ outputs 1))
        (define first-call-placement-reads (* 2 n))
        (check-equal? (field clip 'frees) '(1))
        (check-equal? (field clip 'tensors) (list outputs))
        (check-equal? (field clip 'op_calls)
-                     (list (+ fetches native-calls shape-reads stack-checks
+                     (list (+ fetches native-calls shape-reads
                               first-call-placement-reads))))
 
      (test-case "a free off the measuring thread is no op call, wherever its crossing lands"

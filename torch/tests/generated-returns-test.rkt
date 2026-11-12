@@ -105,4 +105,13 @@
        (convert-syntax-error
         (let ()
           (define-generated-op nothing! tr_gen__foreach_sqrt_ #:inplace ())
+          (void))))))
+
+  (test-case "an unknown argument kind names the op"
+    (check-exn
+     #rx"unknown argument kind for mystery-op: tensr"
+     (lambda ()
+       (convert-syntax-error
+        (let ()
+          (define-generated-op mystery-op tr_gen_topk ([self tensr]))
           (void)))))))

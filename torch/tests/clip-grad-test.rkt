@@ -6,10 +6,11 @@
            (only-in racket/match match-define)
            rackunit
            (only-in threading ~>)
-           (only-in "../generated.rkt" linalg-vector-norm)
+           (prefix-in ag: (only-in "../foreign/autograd-ops.rkt" with-gradients))
+           (only-in "../generated.rkt" foreach-mul-tensor! foreach-norm-scalar linalg-vector-norm)
            (only-in "../main.rkt"
-                    * backward! cuda-available? device grad has-grad? item manual-seed! randn
-                    reshape sum tensor tensor->list zeros)
+                    * + / backward! cat clamp cuda-available? device grad has-grad? item
+                    manual-seed! randn reshape stack sum tensor tensor->list zeros)
            (only-in "../nn.rkt" Linear Parameter clip-grad-norm! clip-grad-value! parameters)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/op-calls.rkt" crossings-of op-calls-of)
@@ -123,11 +124,12 @@
     (apply max (map abs (append* (gradients ps)))))
 
   (bounded-test "G0-L6: a clamped float32 gradient's largest magnitude is the float32 bound"
-    (for ([bound (in-list '(0.25 0.1))])
+    (for* ([foreach? (in-list '(#t #f))] [bound (in-list '(0.25 0.1))])
       (define ps (scaled-linear-gradients))
       (check-true (> (largest-magnitude ps) bound))
-      (clip-grad-value! ps bound)
-      (check-= (largest-magnitude ps) (flsingle bound) 0.0 (format "bound ~a" bound)))
+      (clip-grad-value! ps bound #:foreach? foreach?)
+      (check-= (largest-magnitude ps) (flsingle bound) 0.0
+               (format "foreach? ~a, bound ~a" foreach? bound)))
     (check-false (= (flsingle 0.1) 0.1)))
 
   (when (cuda-available?)
@@ -156,43 +158,58 @@
       (~> (* p p) sum backward!)
       p))
 
+  (define (op-crossings call)
+    (call)
+    (crossings-of call))
+
   (define (steady-crossings clip! ps)
-    (clip! ps)
-    (crossings-of (lambda () (clip! ps))))
+    (op-crossings (lambda () (clip! ps))))
 
   (define (norm-clip! ps) (clip-grad-norm! ps 1.0))
   (define (value-clip! ps) (clip-grad-value! ps 0.25))
 
-  (define (per-result-crossings)
-    (define t (randn 3))
-    (- (steady-crossings (lambda (t) (linalg-vector-norm t 2.0 #f #f #f)) t) 1))
-
-  (define one-bucket-fixed 29)
-  (define extra-bucket-fixed 7)
-  (define cat-fixed 5)
+  (define (measured-costs)
+    (define v (randn 3))
+    (define g (randn 3))
+    (define s (linalg-vector-norm v 2.0 #f #f #f))
+    (define stacked (stack (list s)))
+    (define ps (steady-params 1 '(float32)))
+    (define r (sub1 (op-crossings (lambda () (linalg-vector-norm v 2.0 #f #f #f)))))
+    (define bucket
+      (+ (- (op-crossings (lambda () (foreach-norm-scalar (list v) 2.0 #f))) r)
+         (op-crossings (lambda () (stack (list s))))
+         (op-crossings (lambda () (foreach-mul-tensor! (list g) s)))))
+    (define once
+      (+ (op-crossings (lambda () (ag:with-gradients ([qs gs] ps) (void))))
+         (op-crossings (lambda () (linalg-vector-norm stacked 2.0 #f #f #f)))
+         (op-crossings (lambda () (+ s 1e-6)))
+         (op-crossings (lambda () (/ 1.0 s)))
+         (op-crossings (lambda () (clamp s #:max 1.0)))))
+    (define joined (op-crossings (lambda () (cat (list stacked stacked)))))
+    (list r bucket once joined))
 
   (define (norm-crossings n dtypes)
     (steady-crossings norm-clip! (steady-params n dtypes)))
 
-  (bounded-test "G0-L8: one bucket's steady clip-grad-norm! is 29 crossings plus r per parameter"
-    (define r (per-result-crossings))
+  (bounded-test "G0-L8: one bucket's steady clip-grad-norm! is its ops' crossings and r a parameter"
+    (match-define (list r bucket once _joined) (measured-costs))
     (define c1 (norm-crossings 1 '(float32)))
-    (check-equal? c1 (+ one-bucket-fixed r))
+    (check-equal? c1 (+ once bucket r))
     (for ([n (in-list '(8 64))])
       (check-equal? (- (norm-crossings n '(float32)) c1) (* (- n 1) r)
                     (format "~a parameters" n))))
 
-  (bounded-test "G0-L9: an extra bucket of k adds 7 crossings plus k r, the first extra a cat"
-    (define r (per-result-crossings))
+  (bounded-test "G0-L9: an extra bucket of k adds its ops' crossings plus k r, the first a cat"
+    (match-define (list r bucket _once joined) (measured-costs))
     (define one (norm-crossings 4 '(float32)))
     (for ([k (in-list '(1 4))])
       (define two (steady-crossings norm-clip!
                                     (append (steady-params 4 '(float32))
                                             (steady-params k '(float64)))))
-      (check-equal? (- two one) (+ cat-fixed extra-bucket-fixed (* k r)) (format "k = ~a" k)))
+      (check-equal? (- two one) (+ joined bucket (* k r)) (format "k = ~a" k)))
     (define two (norm-crossings 4 '(float32 float64)))
     (define three (norm-crossings 4 '(float32 float64 bfloat16)))
-    (check-equal? (- three two) (+ extra-bucket-fixed (* 4 r))))
+    (check-equal? (- three two) (+ bucket (* 4 r))))
 
   (bounded-test "G0-L10: one bucket's clip-grad-value! makes 4 crossings at any count"
     (for ([n (in-list '(1 8 64))])

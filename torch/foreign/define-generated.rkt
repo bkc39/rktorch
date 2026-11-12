@@ -68,8 +68,12 @@
      (values (list #`(#,arg : _int32)) (list #`(opt-dtype->code #,arg)))]
     [else
      (raise-syntax-error 'define-generated-op
-                         (format "unknown argument kind: ~a" kind)
+                         (format "unknown argument kind for ~a: ~a" (op-name stx) kind)
                          stx)]))
+
+(define-for-syntax (op-name form)
+  (syntax-parse form
+    [(_ name:id . _) (syntax-e #'name)]))
 
 (define-for-syntax (build-pieces stx args kinds)
   (define-values (rev-specs rev-call-args)
@@ -82,11 +86,11 @@
   (values (reverse rev-specs) (reverse rev-call-args)))
 
 (begin-for-syntax
-  (define-syntax-class signature
+  (define-syntax-class (signature form)
     #:attributes ([arg 1] [spec 1] [call-arg 1])
     (pattern ([arg:id kind:id] ...)
       #:do [(define-values (specs call-args)
-              (build-pieces this-syntax
+              (build-pieces form
                             (syntax->list #'(arg ...))
                             (syntax->datum #'(kind ...))))]
       #:with (spec ...) specs
@@ -155,7 +159,7 @@
 
 (define-syntax (define-generated-op stx)
   (syntax-parse stx
-    [(_ name:id c-id:id shape ... sig:signature)
+    [(_ name:id c-id:id shape ... (~var sig (signature stx)))
      #:with ((~var r (results (syntax->list #'(sig.arg ...))))) #'(shape ...)
      #:with raw-name (format-id #'name "~a/raw" #'name)
      #'(begin
