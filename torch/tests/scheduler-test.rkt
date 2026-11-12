@@ -219,4 +219,8 @@
     (step! s)
     (check-equal? (scheduler-step-count s) 1)
     (check-exn #rx"^sequential-lr: a chained or sequential schedule cannot start at a milestone"
-               (lambda () (step! s)))))
+               (lambda () (step! s))))
+
+  (test-case "cosine-annealing-warm-restarts anneals to zero by default"
+    (check-rates (rates (cosine-annealing-warm-restarts (fresh-opt) #:t-0 2) 4)
+                 '(0.1 0.05 0.1 0.05 0.1))))

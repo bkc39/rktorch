@@ -2,8 +2,8 @@
 0.02): get_last_lr() at construction and after each of twelve
 optimizer-then-scheduler steps, for each shape the Racket schedulers
 implement, chains, sequences and warm restarts, including sequences that
-start a warm restart or a lambda at a milestone and one that starts on a
-chain (G2-L1). Under "groups", the seven single shapes'
+start a warm restart or a lambda at a milestone and ones that start on a
+chain or on a sequence (G2-L1). Under "groups", the seven single shapes'
 _get_closed_form_lr() at each of those steps, or get_last_lr() where torch
 has no closed form (G1-L10). The Racket twin is scheduler-parity-test.rkt.
 """
@@ -79,6 +79,9 @@ composites = {
     "sequential_step_lambda": lambda o: S.SequentialLR(
         o, [S.StepLR(o, step_size=2, gamma=0.5),
             S.LambdaLR(o, lambda t: 1.0 / (t + 1))], milestones=[4]),
+    "sequential_nested": lambda o: S.SequentialLR(
+        o, [S.SequentialLR(o, [S.ExponentialLR(o, gamma=0.9)], milestones=[]),
+            S.StepLR(o, step_size=2, gamma=0.5)], milestones=[3]),
     "warm_restarts_3_2": lambda o: S.CosineAnnealingWarmRestarts(
         o, T_0=3, T_mult=2, eta_min=0.01),
     "warm_restarts_4_1": lambda o: S.CosineAnnealingWarmRestarts(

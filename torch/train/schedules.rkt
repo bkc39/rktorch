@@ -54,19 +54,19 @@
   (define opt (and (< index (length optimizers)) (list-ref optimizers index)))
   (define missing
     (and opt (findf (lambda (g) (>= g (param-group-count opt))) (or groups '()))))
-  (cond
-    [(not opt)
-     (raise-arguments-error 'param-group-scheduler
-                            "define-optimizers returned no optimizer at this index"
-                            "optimizer" index "optimizers" (length optimizers))]
-    [missing
-     (raise-arguments-error 'param-group-scheduler
-                            "the optimizer has no parameter group at this index"
-                            "group" missing "groups" (param-group-count opt))]
-    [(not (has-hyperparameter? opt key))
-     (raise-arguments-error 'param-group-scheduler "the optimizer has no such hyperparameter"
-                            "key" key)]
-    [else (void)]))
+  (define problem
+    (cond
+      [(not opt)
+       (list "define-optimizers returned no optimizer at this index"
+             "optimizer" index "optimizers" (length optimizers))]
+      [missing
+       (list "the optimizer has no parameter group at this index"
+             "group" missing "groups" (param-group-count opt))]
+      [(not (has-hyperparameter? opt key))
+       (list "the optimizer has no such hyperparameter" "key" key)]
+      [else #f]))
+  (when problem
+    (apply raise-arguments-error 'param-group-scheduler problem)))
 
 (define (write-groups! r key curve index groups at)
   (when at

@@ -84,6 +84,12 @@
     (check-equal? (list (param-group-ref opt 0 'weight-decay) (param-group-ref opt 1 'weight-decay))
                   (list (curve 2) (curve 2))))
 
+  (bounded-test "a beta1 schedule takes any real curve and writes the group's beta1"
+    (define opt-box (box #f))
+    (fit (Grouped opt-box) (toy-loader 4) #:max-epochs 1 #:logger #f
+         #:callbacks (list (param-group-scheduler 'beta1 (lambda (t) (- 0.9 (* 0.01 t))))))
+    (check-equal? (param-group-ref (unbox opt-box) 1 'beta1) (- 0.9 (* 0.01 1))))
+
   (define start-errors
     `(("an unknown hparam" hparam-scheduler ,(hparam-scheduler 'depth curve))
       ("an optimizer index past the last" param-group-scheduler
