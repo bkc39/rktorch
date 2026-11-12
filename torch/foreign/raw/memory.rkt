@@ -31,6 +31,7 @@
                   pressure-diagnostics
                   shadow-generation
                   unaccounted-bytes-by-device)
+         (only-in "phantoms.rkt" charge-epoch young-epoch?)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-cleanup with-uninterruptible)
          (only-in "syntax.rkt" _Tensor define-torch)
@@ -250,7 +251,7 @@
   (define kind (reaped 'generator (swallow-and-count-failure release-generator!)))
   (registered (lambda (h) (reap-when-dead! kind h))))
 
-(struct allocation (phantom nbytes device account [adopted #:mutable] [adopter #:mutable]))
+(struct allocation (epoch nbytes device account [adopted #:mutable] [adopter #:mutable]))
 
 (define-torch tr-tensor-nbytes/raw
   (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
@@ -293,10 +294,10 @@
 (define (record-allocation! key nbytes dev #:adopt [adopt #f])
   (define lt (lifetime-of! key))
   (define a (account-of dev))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
+  (define entry (allocation (charge-epoch) nbytes dev a 0 #f))
   (define (charge! p)
     (with-uninterruptible
-      (count-live! a p nbytes 1)
+      (count-live! a p nbytes 1 nbytes)
       (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
@@ -304,8 +305,7 @@
          (count-checked! a p nbytes)
          (when adopt (adopt entry))]
         [else
-         (count-live! a p (- nbytes) -1)
-         (set-phantom-bytes! (allocation-phantom entry) 0)])
+         (count-live! a p (- nbytes) -1 (- nbytes))])
       (when p (tally-op! p nbytes))))
   (if adopt (with-ledger (charge! #f)) (charge! (tally-of a))))
 
@@ -324,11 +324,11 @@
           (release-entry! key a))))))
 
 (define (release-entry! key a)
-  (match-define (allocation phantom nbytes _ account adopted _) a)
+  (match-define (allocation epoch nbytes _ account adopted _) a)
   (define p (and (zero? adopted) (tally-of account)))
-  (count-live! account p (if p (- nbytes) 0) -1)
+  (define young (if (young-epoch? epoch) (- nbytes) 0))
+  (count-live! account p (if p (- nbytes) 0) -1 (if p young 0))
   (race-point entry-unaccounted key)
-  (set-phantom-bytes! phantom 0)
   ;; an adoption's bytes leave the ledger and return to the shadow in
   ;; one section: a refresh between them would charge them twice. A
   ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
@@ -336,7 +336,7 @@
     [p (tally-op! p nbytes)]
     [else
      (with-ledger
-       (count-live! account #f (- nbytes) 0)
+       (count-live! account #f (- nbytes) 0 young)
        (race-point live-returned key)
        (race-point adoption-returning key)
        (when (positive? (allocation-adopted a))

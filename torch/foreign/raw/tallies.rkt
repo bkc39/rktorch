@@ -6,10 +6,13 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
+         (only-in "phantoms.rkt" fresh-phantoms note-young! sync-phantoms!)
          (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
          counters-live counters-entries counters-since-check counters-since-sample
+         counters-phantoms
+         sync-counters-phantoms!
          note-counters-mark!
          forget-mark!
          pending-of
@@ -33,14 +36,17 @@
 (define-syntax-parse-rule (tally-update! b:expr f:expr)
   (cas-update! b f #:site 'tally))
 
-(struct counters (index live entries since-check since-sample [limit #:mutable]))
+(struct counters (index live entries since-check since-sample phantoms [limit #:mutable]))
 
 (define counted (box 0))
 
 (define (fresh-counters)
-  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) 0))
+  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) (fresh-phantoms) 0))
 
-(struct pending (tally counters live entries since-check since-sample))
+(define (sync-counters-phantoms! c)
+  (sync-phantoms! (counters-phantoms c) (counters-live c)))
+
+(struct pending (tally counters live entries since-check since-sample young))
 
 (struct tally (owner slots [ops #:mutable]))
 
@@ -97,7 +103,7 @@
 (define (pending-of c)
   (define t (own-tally))
   (or (slot-of t c)
-      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0))])
+      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0) (box 0))])
         (tally-update! (tally-slots t)
                        (lambda (slots) (with-slot slots (counters-index c) p)))
         p)))
@@ -122,9 +128,11 @@
 (define (tally-staleness c)
   (* 2 (tally-count) (counters-limit c)))
 
-(define (tally-live! p nbytes entries)
+(define (tally-live! p nbytes entries young)
   (tally-add! (pending-live p) nbytes)
-  (tally-add! (pending-entries p) entries))
+  (tally-add! (pending-entries p) entries)
+  (unless (eqv? 0 young)
+    (tally-add! (pending-young p) young)))
 
 (define (tally-checked! p nbytes)
   (tally-add! (pending-since-check p) nbytes)
@@ -147,14 +155,23 @@
   (unless (eqv? 0 (unbox from))
     (cas-add! to (tally-take! from))))
 
-(define (flush! t)
+(define (take! from)
+  (if (eqv? 0 (unbox from)) 0 (tally-take! from)))
+
+(define (flush! t #:sync-all? [sync-all? #f])
   (with-uninterruptible
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
       (define c (pending-counters p))
-      (move! (pending-live p) (counters-live c))
+      (define live (take! (pending-live p)))
+      (define young (take! (pending-young p)))
+      (unless (eqv? 0 live)
+        (cas-add! (counters-live c) live))
       (move! (pending-entries p) (counters-entries c))
       (move! (pending-since-check p) (counters-since-check c))
-      (move! (pending-since-sample p) (counters-since-sample c)))
+      (move! (pending-since-sample p) (counters-since-sample c))
+      (note-young! (counters-phantoms c) young)
+      (unless (and (eqv? 0 live) (eqv? 0 young) (not sync-all?))
+        (sync-counters-phantoms! c)))
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))
 
@@ -171,7 +188,7 @@
   (define dead
     (for/fold ([dead '()]) ([t (in-list (registered-tallies))])
       (define gone? (prunable? (tally-owner t) ask?))
-      (flush! t)
+      (flush! t #:sync-all? #t)
       (if gone? (cons t dead) dead)))
   (unless (null? dead)
     (tally-update! tallies

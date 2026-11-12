@@ -79,7 +79,7 @@ holds. A reaper takes any thread's claim on a dead handle without asking
 progress keeps its handle reachable from the freeing thread, so a thread
 holding a dead handle's lifetime has left the free before its release.
 Killed at `free-unaccounted`, after the unaccounting, it leaves a live,
-usable tensor that is off the ledger, its phantom bytes zeroed,
+usable tensor that is off the ledger and its phantoms,
 until a reaper releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
 
@@ -255,8 +255,8 @@ recovery in `torch/train/private/dispatch.rkt`. On 9.3 the restore is a no-op.
 ## Phantom-bytes accounting
 
 `make-phantom-bytes` is Racket-CS's way to charge native allocations
-to the GC. `tensor-allocator` stores one phantom of the tensor's
-`nbytes` in its lifetime's `charge`, in a table keyed weakly by the handle
+to the GC. `tensor-allocator` records each tensor's `nbytes` in its
+lifetime's `charge`, in a table keyed weakly by the handle
 (`lifetimes`); an unaccounting takes the charge by CAS to `#f`, so exactly
 one subtracts it:
 
@@ -267,6 +267,46 @@ one subtracts it:
   for pressure; the approximation is deliberate.
 - a failed size probe charges 0 — accounting is best-effort and never
   a new failure mode on the allocation path.
+
+**One phantom pair per account, moved at a flush (#508).** An entry holds
+no phantom. Every `make-phantom-bytes` and `set-phantom-bytes!` takes Chez's
+process-wide `S_tc_mutex` (`alloc.c`, `S_phantom_bytevector_adjust`), 3.4 µs
+a call at eight threads whichever phantom it touches, so the phantoms move
+only when a tally flushes (`torch/foreign/raw/phantoms.rkt`). Each account
+holds two: an *old* phantom made with the account, and a *young* one made
+again after each collection. Together they hold the account's shared live
+bytes, clamped at 0; the young one holds the bytes charged since the last
+collection, net of that interval's releases, and the old one the rest. The
+young one is the point: Chez fires a collection once gen-0 bytes plus the
+phantom bytes of *gen-0 phantoms* reach 8 MiB, and a phantom made before the
+last collection is no longer in gen 0. One long-lived phantom ran one minor
+collection over 4,000 ops at a steady 10 MiB live, against 332 for a phantom
+per entry; the pair runs the per-entry count (331).
+
+- **Epochs.** A collection is seen through a weak box whose value nothing
+  else holds (`charge-epoch`): a collection clears it, and the next charge
+  installs a fresh one. An entry records the epoch it was charged in, and a
+  release counts against the young bytes only while that epoch is live, as
+  a per-entry phantom released before it was promoted lowered gen 0.
+  `young-count` is the pair of an epoch and its bytes, so the first count
+  after a collection starts a new one, and a young phantom of a dead epoch
+  rolls into the old one at the next sync. A tally's pending young bytes
+  count toward the epoch they are flushed in: across a collection the young
+  figure is off by at most a tally's limit.
+- **The sync.** A flush moves its tally's pending live and young bytes to the
+  shared counters, then `sync-phantoms!` sets the pair to the counters, one
+  or two `set-phantom-bytes!`, lowering before raising. The sync is claimed
+  by a CAS; a thread that finds it claimed leaves its bytes to the claimant,
+  which looks again after letting go (a CAS, so the look cannot pass it)
+  and at most four rounds in all, so threads that keep flushing cannot keep
+  it there. Every reader's `flush-tallies!` syncs every account it has a
+  slot for, so what a claimant left reaches the pair at the next reader or
+  flush. Concurrent flushes of one account cost one claimant's sets, not
+  one per thread. The claim is taken inside the flush's uninterruptible
+  region, so a kill never strands it, and it is no lock: nobody waits on it,
+  and the lock order (take lock, then ledger lock) is unchanged.
+- Adoptions and adopted releases, which write the shared counters under the
+  ledger, sync the pair there.
 
 **GPU bytes charge 1:1 with host bytes into the same pool.** This is
 the point of the design: pressure scales with total native footprint,
@@ -544,7 +584,7 @@ the last defence when a trough collection is not yet due:
   all kinds).
 
 **The shadow** (#213). Storage that only the autograd graph or libtorch
-holds reaches no wrapper, so the per-tensor phantoms never charge it:
+holds reaches no wrapper, so the ledger never charges it:
 saved state such as a dropout mask or `layer_norm`'s statistics, and the
 storage of a wrapper that died while the graph still holds it. At the
 #145 failure that was 12.6 GB on the ledger against 21.4 GB on the card.

@@ -9,10 +9,13 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
          (only-in "pressure-settings.rkt" margin-over)
+         (only-in "phantoms.rkt" note-young!)
          (only-in "race-points.rkt" race-point)
+         (only-in "regions.rkt" with-uninterruptible)
          (only-in "tallies.rkt"
-                  counters-entries counters-live counters-since-check
+                  counters-entries counters-live counters-phantoms counters-since-check
                   counters-since-sample flush-tallies! forget-mark!
+                  sync-counters-phantoms!
                   fresh-counters own-pending-checks pending-of tally-staleness
                   tally-checked! tally-live!
                   note-counters-mark!))
@@ -134,8 +137,12 @@
 (define (tally-of a)
   (pending-of (account-counters a)))
 
-(define (note-live! a nbytes)
-  (cas-add! (counters-live (account-counters a)) nbytes))
+(define (note-live! a nbytes [young 0])
+  (define c (account-counters a))
+  (cas-add! (counters-live c) nbytes)
+  (note-young! (counters-phantoms c) young)
+  (with-uninterruptible
+    (sync-counters-phantoms! c)))
 
 (define (note-checked! a nbytes)
   (define c (account-counters a))
@@ -149,11 +156,12 @@
 (define (note-unaccounted! a nbytes)
   (note-live! a (- nbytes)))
 
-(define (count-live! a p nbytes entries)
+(define (count-live! a p nbytes entries young)
   (cond
-    [p (tally-live! p nbytes entries)]
+    [p (tally-live! p nbytes entries young)]
     [else
-     (note-live! a nbytes)
+     (unless (eqv? 0 nbytes)
+       (note-live! a nbytes young))
      (cas-add! (counters-entries (account-counters a)) entries)]))
 
 (define (count-checked! a p nbytes)
