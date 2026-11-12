@@ -65,6 +65,26 @@ tr_tensor* tr_gen_fmod_scalar(const tr_tensor* self, double other) {
                                 [&] { return at::fmod(self->value, other); });
 }
 
+tr_tensor* tr_gen_linalg_vector_norm(const tr_tensor* self, double ord,
+                                     const int64_t* dim, int64_t dim_len,
+                                     bool dim_has, bool keepdim,
+                                     int32_t dtype) {
+  if (!self || (dim_has && (!dim || dim_len <= 0))) {
+    return torchrkt::null_arg("tr_gen_linalg_vector_norm");
+  }
+  return torchrkt::alloc_result("tr_gen_linalg_vector_norm", [&] {
+    return at::linalg_vector_norm(
+        self->value, ord,
+        dim_has ? c10::optional<at::IntArrayRef>(
+                      at::IntArrayRef(dim, static_cast<size_t>(dim_len)))
+                : c10::optional<at::IntArrayRef>(),
+        keepdim,
+        dtype < 0 ? c10::optional<at::ScalarType>()
+                  : c10::optional<at::ScalarType>(
+                        static_cast<at::ScalarType>(dtype)));
+  });
+}
+
 tr_tensor* tr_gen_maximum(const tr_tensor* self, const tr_tensor* other) {
   if (!self || !other) {
     return torchrkt::null_arg("tr_gen_maximum");

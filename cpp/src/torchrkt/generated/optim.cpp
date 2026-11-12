@@ -13,6 +13,43 @@
 
 extern "C" {
 
+int tr_gen__amp_foreach_non_finite_check_and_unscale_(
+    tr_tensor* const* self, int64_t self_len, tr_tensor* found_inf,
+    const tr_tensor* inv_scale) {
+  if (self_len < 0 || (!self && self_len > 0) || !found_inf || !inv_scale) {
+    return torchrkt::null_arg_status(
+        "tr_gen__amp_foreach_non_finite_check_and_unscale_");
+  }
+  return torchrkt::status_call(
+      "tr_gen__amp_foreach_non_finite_check_and_unscale_", [&] {
+        std::vector<at::Tensor> self_vec;
+        self_vec.reserve(static_cast<size_t>(self_len));
+        for (int64_t i = 0; i < self_len; ++i) {
+          if (!self[i]) {
+            throw std::invalid_argument("null tensor in self");
+          }
+          self_vec.push_back(self[i]->value);
+        }
+        at::_amp_foreach_non_finite_check_and_unscale_(
+            self_vec, found_inf->value, inv_scale->value);
+      });
+}
+
+int tr_gen__amp_update_scale_(tr_tensor* self, tr_tensor* growth_tracker,
+                              const tr_tensor* found_inf,
+                              double scale_growth_factor,
+                              double scale_backoff_factor,
+                              int64_t growth_interval) {
+  if (!self || !growth_tracker || !found_inf) {
+    return torchrkt::null_arg_status("tr_gen__amp_update_scale_");
+  }
+  return torchrkt::status_call("tr_gen__amp_update_scale_", [&] {
+    at::_amp_update_scale_(self->value, growth_tracker->value, found_inf->value,
+                           scale_growth_factor, scale_backoff_factor,
+                           growth_interval);
+  });
+}
+
 int tr_gen__foreach_add__list(tr_tensor* const* self, int64_t self_len,
                               const tr_tensor* const* other, int64_t other_len,
                               double alpha) {
@@ -173,6 +210,42 @@ int tr_gen__foreach_addcmul__scalar(tr_tensor* const* self, int64_t self_len,
   });
 }
 
+int tr_gen__foreach_clamp_max__scalar(tr_tensor* const* self, int64_t self_len,
+                                      double scalar) {
+  if (self_len < 0 || (!self && self_len > 0)) {
+    return torchrkt::null_arg_status("tr_gen__foreach_clamp_max__scalar");
+  }
+  return torchrkt::status_call("tr_gen__foreach_clamp_max__scalar", [&] {
+    std::vector<at::Tensor> self_vec;
+    self_vec.reserve(static_cast<size_t>(self_len));
+    for (int64_t i = 0; i < self_len; ++i) {
+      if (!self[i]) {
+        throw std::invalid_argument("null tensor in self");
+      }
+      self_vec.push_back(self[i]->value);
+    }
+    at::_foreach_clamp_max_(self_vec, scalar);
+  });
+}
+
+int tr_gen__foreach_clamp_min__scalar(tr_tensor* const* self, int64_t self_len,
+                                      double scalar) {
+  if (self_len < 0 || (!self && self_len > 0)) {
+    return torchrkt::null_arg_status("tr_gen__foreach_clamp_min__scalar");
+  }
+  return torchrkt::status_call("tr_gen__foreach_clamp_min__scalar", [&] {
+    std::vector<at::Tensor> self_vec;
+    self_vec.reserve(static_cast<size_t>(self_len));
+    for (int64_t i = 0; i < self_len; ++i) {
+      if (!self[i]) {
+        throw std::invalid_argument("null tensor in self");
+      }
+      self_vec.push_back(self[i]->value);
+    }
+    at::_foreach_clamp_min_(self_vec, scalar);
+  });
+}
+
 int tr_gen__foreach_copy_(tr_tensor* const* self, int64_t self_len,
                           const tr_tensor* const* src, int64_t src_len,
                           bool non_blocking) {
@@ -265,6 +338,48 @@ int tr_gen__foreach_mul__scalar(tr_tensor* const* self, int64_t self_len,
     }
     at::_foreach_mul_(self_vec, scalar);
   });
+}
+
+int tr_gen__foreach_mul__tensor(tr_tensor* const* self, int64_t self_len,
+                                const tr_tensor* other) {
+  if (self_len < 0 || (!self && self_len > 0) || !other) {
+    return torchrkt::null_arg_status("tr_gen__foreach_mul__tensor");
+  }
+  return torchrkt::status_call("tr_gen__foreach_mul__tensor", [&] {
+    std::vector<at::Tensor> self_vec;
+    self_vec.reserve(static_cast<size_t>(self_len));
+    for (int64_t i = 0; i < self_len; ++i) {
+      if (!self[i]) {
+        throw std::invalid_argument("null tensor in self");
+      }
+      self_vec.push_back(self[i]->value);
+    }
+    at::_foreach_mul_(self_vec, other->value);
+  });
+}
+
+int tr_gen__foreach_norm_scalar(const tr_tensor* const* self, int64_t self_len,
+                                double ord, int32_t dtype, tr_tensor** out,
+                                int64_t out_len) {
+  if (!self || self_len < 0 || !out || out_len != self_len) {
+    return torchrkt::null_arg_list("tr_gen__foreach_norm_scalar", out, out_len);
+  }
+  return torchrkt::alloc_result_list(
+      "tr_gen__foreach_norm_scalar", out, out_len, [&] {
+        std::vector<at::Tensor> self_vec;
+        self_vec.reserve(static_cast<size_t>(self_len));
+        for (int64_t i = 0; i < self_len; ++i) {
+          if (!self[i]) {
+            throw std::invalid_argument("null tensor in self");
+          }
+          self_vec.push_back(self[i]->value);
+        }
+        return at::_foreach_norm(self_vec, ord,
+                                 dtype < 0
+                                     ? c10::optional<at::ScalarType>()
+                                     : c10::optional<at::ScalarType>(
+                                           static_cast<at::ScalarType>(dtype)));
+      });
 }
 
 int tr_gen__foreach_sqrt_(tr_tensor* const* self, int64_t self_len) {
