@@ -255,10 +255,10 @@ recovery in `torch/train/private/dispatch.rkt`. On 9.3 the restore is a no-op.
 ## Phantom-bytes accounting
 
 `make-phantom-bytes` is Racket-CS's way to charge native allocations
-to the GC. `tensor-allocator` stores one phantom of the tensor's
-`nbytes` in its lifetime's `charge`, in a table keyed weakly by the handle
-(`lifetimes`); an unaccounting takes the charge by CAS to `#f`, so exactly
-one subtracts it:
+to the GC. `tensor-allocator` charges the tensor's `nbytes` to a phantom
+group (below) and stores the entry in its lifetime's `charge`, in a table
+keyed weakly by the handle (`lifetimes`); an unaccounting takes the charge
+by CAS to `#f`, so exactly one subtracts it:
 
 - weak keys: the entry — and its charged pressure — vanishes with the
   handle; no lifetime coupling beyond the allocator wrap itself.
@@ -272,6 +272,62 @@ one subtracts it:
 the point of the design: pressure scales with total native footprint,
 so the ordinary GC cycle collects dead CUDA tensors as gracefully as
 host ones — user code never calls the collector by hand.
+
+### Phantom groups (#508)
+
+Every `make-phantom-bytes` and `set-phantom-bytes!` takes Chez's
+process-wide `S_tc_mutex` (`alloc.c`, `S_phantom_bytevector_adjust`); at
+eight threads a per-tensor phantom made and zeroed cost 6.7 µs an op. So a
+tensor's bytes go to a group (`torch/foreign/raw/groups.rkt`), one per
+flushed batch of a tally's slot (one device of one thread's tally), and
+the group, not the tensor, holds the phantom:
+
+- **Charges.** A charge adds its bytes to its slot's forming group and
+  records the group in its entry. The forming group has no phantom; the
+  tally's flush closes it, puts a fresh group in the slot, and makes one
+  phantom of the group's bytes, or none when they net to 0. Young bytes
+  stay in young phantoms: rumble's collect trip counts gen-0 phantom
+  bytes only (`alloc.c:209`), and the nursery collections #377 depends on
+  stop under a phantom that has grown old. A tensor of the device's limit
+  or more flushes at once, so its group is its own, as before groups.
+- **Releases.** A release subtracts its bytes from its entry's group and
+  leaves the phantom alone. The add that takes a group's requests (the
+  adds since its last settle) from 0 to 1 puts the group on its own
+  thread's tally (`touched`), and
+  that tally's next flush sets the phantom once, to the group's bytes, so
+  a batch's releases of one group cost one `set-phantom-bytes!`. A group
+  at 0 drops its phantom; the entries that held it are gone, so the group
+  goes with the next collection. Setting the phantom on every release
+  measured 1.5 µs an op at eight threads.
+- **One settler.** A group's bytes and requests share one fixnum box,
+  bytes above the low 12 bits and requests below, so an add is one CAS. A
+  group holds at most a batch of 64 entries and sees at most two adds per
+  entry (its charge, and its release or a lost claim's undo), so the
+  requests never carry into the bytes. The requests are the group's
+  token: a fresh group starts at 1, held by its slot (or, for an adoption's charge, which has no
+  tally, by the charge, which settles it before it adopts), and the add
+  that takes it from 0 makes its thread the settler. A settler reads the
+  count, sets the phantom, and CASes the count back to 0; an add since the
+  read fails the CAS and the settler goes round again. So exactly one
+  thread sets a group's phantom at a time and the last set sees every add.
+  A flush settles inside its uninterruptible region, so a kill never
+  strands a token, and a killed thread's touched groups settle at the
+  next `flush-tallies!`, with its counts.
+- **Never negative.** A charge adds to its group before it publishes its
+  entry, and a release subtracts only the entry it unpublished, so a
+  group's bytes are never below 0, even when a release from another thread
+  reaches the group, or its flush closes it, before the charge's own flush.
+- **Unbatched paths.** An adoption's charge, under the ledger, makes its own
+  group and phantom at once; an adopted release lowers its group at once.
+- **Locks.** None: the group's count is a box CASed at site `'group`,
+  the touched list a box CASed at `'tally`, and no rumble table is on the
+  path. The lock order is unchanged.
+
+Between flushes a thread's phantoms are behind its counts by at most what
+its tally holds pending, the same bound as the shared live count's. The
+charge side of that lag delays the collect trip by up to a limit per
+thread: a loop of 16 KiB results ran 7% fewer minors than per-tensor
+phantoms, and its sampled peak live rose by half a MiB.
 
 ### Pressure-driven collection
 
@@ -544,7 +600,7 @@ the last defence when a trough collection is not yet due:
   all kinds).
 
 **The shadow** (#213). Storage that only the autograd graph or libtorch
-holds reaches no wrapper, so the per-tensor phantoms never charge it:
+holds reaches no wrapper, so the ledger's phantoms never charge it:
 saved state such as a dropout mask or `layer_norm`'s statistics, and the
 storage of a wrapper that died while the graph still holds it. At the
 #145 failure that was 12.6 GB on the ledger against 21.4 GB on the card.

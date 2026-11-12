@@ -3,7 +3,7 @@
 (require (for-syntax racket/base syntax/parse)
          (only-in ffi/unsafe
                   _enum _fun _int _int64 _list _ptr _void set-cpointer-tag!)
-         (only-in racket/list filter-map remove-duplicates)
+         (only-in racket/list filter-map remove-duplicates take)
          (only-in racket/match match-define match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../runtime/reaper.rkt" reap-when-dead! reaped)
@@ -15,6 +15,7 @@
                   finalizer-runs
                   note-finalizer-run!)
          (only-in "fault.rkt" native-fault? note-native-fault! with-fault-handlers)
+         (only-in "groups.rkt" fresh-group lower-group! settle!)
          (only-in "oom.rkt"
                   collect-and-drain!
                   oom-retry
@@ -34,7 +35,7 @@
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-cleanup with-uninterruptible)
          (only-in "syntax.rkt" _Tensor define-torch)
-         (only-in "tallies.rkt" flush-tally! tally-op!))
+         (only-in "tallies.rkt" flush-tally! tally-charge! tally-group-add! tally-op!))
 
 (provide account!
          adopted-bytes
@@ -71,8 +72,7 @@
          tr-tensor-free/unwrapped)
 
 (define-torch tr-tensor-free/unwrapped
-  (_fun _Tensor -> _void)
-  #:c-id tr_tensor_free)
+  (_fun _Tensor -> _void) #:c-id tr_tensor_free)
 
 (define-torch tr-tensors-free/unwrapped
   (_fun (hs : (_list i _Tensor)) (_int64 = (length hs)) -> _void)
@@ -80,8 +80,7 @@
 
 (struct lifetime (state charge))
 
-(define (fresh-lifetime)
-  (lifetime (box 'live) (box #f)))
+(define (fresh-lifetime) (lifetime (box 'live) (box #f)))
 
 (define lifetimes (make-weak-hasheq))
 
@@ -177,9 +176,7 @@
     [else "non-exn value raised from a native release"]))
 
 (define (take-at-most n xs)
-  (cond
-    [(or (zero? n) (null? xs)) '()]
-    [else (cons (car xs) (take-at-most (sub1 n) (cdr xs)))]))
+  (take xs (min n (length xs))))
 
 ;; Guarded: this is the handler below, so nothing else protects it.
 (define (record-failure! e)
@@ -250,7 +247,7 @@
   (define kind (reaped 'generator (swallow-and-count-failure release-generator!)))
   (registered (lambda (h) (reap-when-dead! kind h))))
 
-(struct allocation (phantom nbytes device account [adopted #:mutable] [adopter #:mutable]))
+(struct allocation (group nbytes device account [adopted #:mutable] [adopter #:mutable]))
 
 (define-torch tr-tensor-nbytes/raw
   (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
@@ -293,19 +290,21 @@
 (define (record-allocation! key nbytes dev #:adopt [adopt #f])
   (define lt (lifetime-of! key))
   (define a (account-of dev))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
   (define (charge! p)
     (with-uninterruptible
+      (define g (if p (tally-charge! p nbytes) (fresh-group nbytes)))
+      (define entry (allocation g nbytes dev a 0 #f))
       (count-live! a p nbytes 1)
       (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
          (race-point ledger-entry-added key)
          (count-checked! a p nbytes)
+         (unless p (settle! g))
          (when adopt (adopt entry))]
         [else
          (count-live! a p (- nbytes) -1)
-         (set-phantom-bytes! (allocation-phantom entry) 0)])
+         (when p (tally-group-add! p g (- nbytes)))])
       (when p (tally-op! p nbytes))))
   (if adopt (with-ledger (charge! #f)) (charge! (tally-of a))))
 
@@ -324,17 +323,18 @@
           (release-entry! key a))))))
 
 (define (release-entry! key a)
-  (match-define (allocation phantom nbytes _ account adopted _) a)
+  (match-define (allocation group nbytes _ account adopted _) a)
   (define p (and (zero? adopted) (tally-of account)))
   (count-live! account p (if p (- nbytes) 0) -1)
   (race-point entry-unaccounted key)
-  (set-phantom-bytes! phantom 0)
   ;; an adoption's bytes leave the ledger and return to the shadow in
   ;; one section: a refresh between them would charge them twice. A
   ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
   (cond
-    [p (tally-op! p nbytes)]
+    [p (tally-group-add! p group (- nbytes))
+       (tally-op! p nbytes)]
     [else
+     (lower-group! group nbytes)
      (with-ledger
        (count-live! account #f (- nbytes) 0)
        (race-point live-returned key)

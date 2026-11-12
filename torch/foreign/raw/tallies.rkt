@@ -5,7 +5,8 @@
          (only-in racket/list filter-not)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
-         (only-in "cas.rkt" cas-add! cas-take! cas-update!)
+         (only-in "cas.rkt" cas-add! cas-claim! cas-take! cas-update!)
+         (only-in "groups.rkt" fresh-group group-add! group-used? settle!)
          (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
@@ -18,11 +19,13 @@
          tally-live!
          tally-checked!
          tally-op!
+         tally-charge!
+         tally-group-add!
          flush-tally!
          flush-tallies!)
 
 (module+ private
-  (provide own-pending registered-tallies tally-count tally-limit tally-owner))
+  (provide own-group own-pending registered-tallies tally-count tally-limit tally-owner))
 
 (define-syntax-parse-rule (tally-add! b:expr n:expr)
   (cas-add! b n #:site 'tally))
@@ -40,9 +43,9 @@
 (define (fresh-counters)
   (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) 0))
 
-(struct pending (tally counters live entries since-check since-sample))
+(struct pending (tally counters live entries since-check since-sample group))
 
-(struct tally (owner slots [ops #:mutable]))
+(struct tally (owner slots touched [ops #:mutable]))
 
 (struct registry (count all))
 
@@ -77,7 +80,7 @@
 
 (define (own-tally)
   (or (thread-cell-ref current-tally)
-      (let ([t (tally (make-weak-box (current-thread)) (box (vector)) 0)])
+      (let ([t (tally (make-weak-box (current-thread)) (box (vector)) (box '()) 0)])
         (tally-update! tallies
                        (lambda (r) (registry (add1 (registry-count r)) (cons t (registry-all r)))))
         (thread-cell-set! current-tally t)
@@ -97,7 +100,7 @@
 (define (pending-of c)
   (define t (own-tally))
   (or (slot-of t c)
-      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0))])
+      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0) (box (fresh-group 0)))])
         (tally-update! (tally-slots t)
                        (lambda (slots) (with-slot slots (counters-index c) p)))
         p)))
@@ -111,6 +114,9 @@
   (if p
       (values (unbox (pending-since-check p)) (unbox (pending-since-sample p)))
       (values 0 0)))
+
+(define (own-group c)
+  (unbox (pending-group (pending-of c))))
 
 (define (own-pending c)
   (define p (own-slot c))
@@ -130,6 +136,15 @@
   (tally-add! (pending-since-check p) nbytes)
   (tally-add! (pending-since-sample p) nbytes))
 
+(define (tally-group-add! p g nbytes)
+  (when (group-add! g nbytes)
+    (tally-update! (tally-touched (pending-tally p)) (lambda (gs) (cons g gs)))))
+
+(define (tally-charge! p nbytes)
+  (define g (unbox (pending-group p)))
+  (tally-group-add! p g nbytes)
+  g)
+
 (define (tally-op! p nbytes)
   (define t (pending-tally p))
   (define limit (counters-limit (pending-counters p)))
@@ -147,6 +162,21 @@
   (unless (eqv? 0 (unbox from))
     (cas-add! to (tally-take! from))))
 
+(define (close! p)
+  (define forming (pending-group p))
+  (define g (unbox forming))
+  (when (and (group-used? g)
+             (cas-claim! forming g (fresh-group 0) #:site 'tally))
+    (settle! g)))
+
+(define (take-touched! t)
+  (define touched (tally-touched t))
+  (let retry ()
+    (define gs (unbox touched))
+    (if (or (null? gs) (cas-claim! touched gs '() #:site 'tally))
+        gs
+        (retry))))
+
 (define (flush! t)
   (with-uninterruptible
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
@@ -154,7 +184,9 @@
       (move! (pending-live p) (counters-live c))
       (move! (pending-entries p) (counters-entries c))
       (move! (pending-since-check p) (counters-since-check c))
-      (move! (pending-since-sample p) (counters-since-sample c)))
+      (move! (pending-since-sample p) (counters-since-sample c))
+      (close! p))
+    (for-each settle! (take-touched! t))
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))
 
