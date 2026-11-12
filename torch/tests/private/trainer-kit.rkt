@@ -23,6 +23,7 @@
          collecting-rows
          collecting-steps
          interval-message
+         ManualRecorded
          recorder
          Recorded
          scenario
@@ -115,6 +116,36 @@
       [(state-dict) #'((hasheq))]
       [else #'()]))
 
+  (define (optimization-clauses mode)
+    (case mode
+      [(automatic)
+       #'((define-optimizers
+            (record! sc 'trainer 'configure-optimizers run)
+            (define opt (sgd (parameters net) #:lr 0.1))
+            (define schedule (step-lr opt #:step-size 1 #:gamma 0.5))
+            (values opt
+                    (if (scenario-step-scheduler? sc)
+                        (scheduler-config schedule #:interval 'step)
+                        schedule)))
+          (define-training-step (x y)
+            (record! sc 'trainer 'training-step run)
+            (when (at? (scenario-fail-at sc) run) (raise-planned sc))
+            (when (at? (scenario-stop-at sc) run) (request-stop! run))
+            (when (at? (scenario-skip-step sc) run) (skip-step! run))
+            (and (not (at? (scenario-skip-loss sc) run)) (mse-loss (net x) y))))]
+      [(manual)
+       #'(#:automatic-optimization? #f
+          (define-optimizers
+            (record! sc 'trainer 'configure-optimizers run)
+            (values (sgd (parameters net) #:lr 0.1) (sgd (parameters net) #:lr 0.1)))
+          (define-training-step (x y)
+            (record! sc 'trainer 'training-step run)
+            (for ([opt (in-list (run-optimizers run))])
+              (manual-zero-grads! run opt)
+              (manual-backward! run (mse-loss (net x) y))
+              (manual-step! run opt))
+            #f))]))
+
   (define (hook-definitions source side?)
     (for/list ([h (in-list definable-hooks)] #:when (side? h))
       (define name (hook-name h))
@@ -126,25 +157,15 @@
           (record! sc '#,source '#,name run)
           #,@(special source name)))))
 
-(define-syntax-parse-rule (define-recorded-trainer name:id)
+(define-syntax-parse-rule (define-recorded-trainer name:id mode:id)
   #:with (hook ...) (hook-definitions 'trainer trainer-hook?)
+  #:with (option ... optimizers training-step) (optimization-clauses (syntax-e #'mode))
   (define-trainer name (net sc)
+    option ...
     (define-init (s) (set! net (Linear 2 1)) (set! sc s))
     (define-callbacks (record! sc 'trainer 'configure-callbacks run) '())
-    (define-optimizers
-      (record! sc 'trainer 'configure-optimizers run)
-      (define opt (sgd (parameters net) #:lr 0.1))
-      (define schedule (step-lr opt #:step-size 1 #:gamma 0.5))
-      (values opt
-              (if (scenario-step-scheduler? sc)
-                  (scheduler-config schedule #:interval 'step)
-                  schedule)))
-    (define-training-step (x y)
-      (record! sc 'trainer 'training-step run)
-      (when (at? (scenario-fail-at sc) run) (raise-planned sc))
-      (when (at? (scenario-stop-at sc) run) (request-stop! run))
-      (when (at? (scenario-skip-step sc) run) (skip-step! run))
-      (and (not (at? (scenario-skip-loss sc) run)) (mse-loss (net x) y)))
+    optimizers
+    training-step
     (define-validation-step (x y)
       (record! sc 'trainer 'validation-step run)
       (mse-loss (net x) y))
@@ -162,5 +183,6 @@
     (define-state-key "recorder")
     hook ...))
 
-(define-recorded-trainer Recorded)
+(define-recorded-trainer Recorded automatic)
+(define-recorded-trainer ManualRecorded manual)
 (define-recorder recorder)
