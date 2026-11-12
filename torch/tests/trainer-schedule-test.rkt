@@ -46,7 +46,8 @@
         [(list 'train _ _ temp) temp]
         [(list 'val _ step temp)
          (check-equal? temp last-train (format "~a: a validation batch at step ~a" label step))
-         last-train])))
+         last-train]))
+    (void))
 
   (bounded-test "G2-L7: a 'step hparam schedule writes curve(global step) at every batch"
     (for* ([accumulate (in-range 1 4)] [train (in-range 1 6)])
@@ -201,6 +202,13 @@
            #:fast-dev-run (opt 'fast-dev-run))
       (match-define (list _ _ estimated) (unbox seen))
       (check-equal? estimated (hash-ref row 'estimated) (format "~s" row))))
+
+  (bounded-test "G2-C1: with neither limit fit refuses before define-optimizers reads an estimate"
+    (define seen (box #f))
+    (check-exn (blames-caller? "trainer-schedule-test")
+               (lambda () (fit (Scheduled seen) (toy-loader 4) #:logger #f
+                               #:max-epochs #f #:max-steps #f)))
+    (check-false (unbox seen)))
 
   (define (warm-then-cosine opt)
     (sequential-lr opt (list (linear-lr opt #:start-factor 0.1 #:total-iters 3)
