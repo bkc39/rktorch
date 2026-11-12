@@ -20,16 +20,15 @@
   ;; Every op in the codegen manifest needs an input recipe here (a missing
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (index-tensors (i ...) #f ...) int64 index
-  ;; tensors or None, (bool-tensor ...) a genuine bool handle
-  ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
-  ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
-  ;; a seeded rand (non-negative, for probabilities), (uniform-tensors ...)
-  ;; a list of them, (step-tensors v ...) 0-dim float32 tensors holding each
-  ;; v, (scalar-list v ...) a list of reals, (int32-scalar-tensor v) a 0-dim
-  ;; int32 tensor, (nonfinite-tensors ...) a list of randns whose first
-  ;; element is +inf.0, other heads are
-  ;; literals with #f = None. A recipe of 'device-only marks an op with no CPU
-  ;; kernel, which a device-guarded test drives instead.
+  ;; tensors or None, (bool-tensor ...) a genuine bool handle via `ne 0`,
+  ;; (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only aten
+  ;; arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...) a
+  ;; seeded rand (non-negative, for probabilities), (uniform-tensors ...) a
+  ;; list of them, (step-tensors v ...) 0-dim float32 tensors holding each v,
+  ;; (scalar-list v ...) a list of reals, (int32-scalar-tensor v) a 0-dim int32
+  ;; tensor, (nonfinite-tensors ...) a list of randns whose first element is
+  ;; +inf.0; other heads are literals with #f = None. A recipe of 'device-only
+  ;; marks an op with no CPU kernel, which a device-guarded test drives instead.
   (define fused-adam-recipe
     '((tensors (3) (2 2)) (tensors (3) (2 2)) (tensors (3) (2 2))
       (uniform-tensors (3) (2 2)) (tensors) (step-tensors 1.0 3.0)
@@ -254,11 +253,9 @@
       [(int32-scalar-tensor)
        (~> (cadr spec) exact->inexact tensor (g:sum-dim-intlist #f #f 'int32))]
       [(nonfinite-tensors)
-       (match (spec->racket-arg (cons 'tensors (cdr spec)))
-         [(cons first others)
-          (define values-in (~> first (reshape -1) tensor->list))
-          (cons (apply reshape (tensor (cons +inf.0 (cdr values-in))) (tensor-shape first))
-                others)])]
+       (match-define (cons head others) (spec->racket-arg (cons 'tensors (cdr spec))))
+       (match-define (cons _ tail) (~> head (reshape -1) tensor->list))
+       (cons (apply reshape (tensor (cons +inf.0 tail)) (tensor-shape head)) others)]
       [(bool-tensor) (~> (cadr spec) tensor (ne 0))]
       [(int64 double bool int-array optional-int64 optional-int-array
         optional-scalar dtype)
@@ -267,10 +264,10 @@
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
   (define (python-number v)
-    (cond
-      [(eqv? v +inf.0) "float('inf')"]
-      [(eqv? v -inf.0) "float('-inf')"]
-      [else (number->string v)]))
+    (match v
+      [+inf.0 "inf"]
+      [-inf.0 "-inf"]
+      [_ (number->string v)]))
 
   (define (spec->python-expr spec)
     (define (csv vs)
@@ -315,10 +312,9 @@
                       "None"))
                 ", "))]
       [(scalar-tensor) (format "torch.tensor(~a)" (cadr spec))]
-      [(int32-scalar-tensor) (format "torch.tensor(~a, dtype=torch.int32)" (cadr spec))]
+      [(int32-scalar-tensor) (format "int32_scalar(~a)" (cadr spec))]
       [(nonfinite-tensors)
-       (format "(lambda ts: (ts[0].view(-1).__setitem__(0, float('inf')), ts)[1])(~a)"
-               (spec->python-expr (cons 'tensors (cdr spec))))]
+       (format "nonfinite(~a)" (spec->python-expr (cons 'tensors (cdr spec))))]
       [(bool-tensor)
        (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
       [(int64 double) (python-number (cadr spec))]
@@ -343,9 +339,11 @@
       [(dtype) (format "dtype=a~a" i)]
       [else (format "a~a" i)]))
 
+  (define (mutable? kind)
+    (and (memq kind '(mutable-tensor-list mutable-tensor)) #t))
+
   (define (mutable-positions kinds)
-    (for/list ([k (in-list kinds)] [i (in-naturals)]
-               #:when (memq k '(mutable-tensor-list mutable-tensor)))
+    (for/list ([k (in-list kinds)] [i (in-naturals)] #:when (mutable? k))
       i))
 
   (struct parity-case (entry specs label))
@@ -377,13 +375,9 @@
                        [i (in-naturals)])
               (format "a~a = ~a\n" i (spec->python-expr s))))
      (cond
-       [(and inplace? (eqv? returns 1))
-        (format "~a\nrs = (a0, ~a)\n" invoke mutated)]
-       [(pair? mutables)
-        (format "~a\nrs = [t for a in (~a) for t in (a if isinstance(a, list) else [a])]\n"
-                invoke mutated)]
-       [else (format "r = ~a\nrs = r if isinstance(r, (tuple, list)) else (r,)\n"
-                     invoke)])))
+       [(and inplace? (eqv? returns 1)) (format "~a\nrs = flattened(a0, ~a)\n" invoke mutated)]
+       [(pair? mutables) (format "~a\nrs = flattened(~a)\n" invoke mutated)]
+       [else (format "rs = as_results(~a)\n" invoke)])))
 
   (define (python-results snippets)
     (parameterize ([current-input-port (~> snippets jsexpr->string open-input-string)])
@@ -411,16 +405,14 @@
     (match-define (parity-case (list name _ kinds _ returns) specs label) check)
     (check-equal? (length specs) (length kinds)
                   (format "~a~a: recipe arity matches manifest" name label))
-    (define mutables (mutable-positions kinds))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
     (define answered (call-with-values (lambda () (apply op args)) list))
     (define mutated
-      (for*/list ([i (in-list mutables)]
-                  [t (in-list (match (list-ref args i)
-                                [(? list? ts) ts]
-                                [t (list t)]))])
+      (for*/list ([(arg kind) (in-parallel args kinds)]
+                  #:when (mutable? kind)
+                  [t (in-list (if (list? arg) arg (list arg)))])
         (as-float64 t)))
     (define results
       (match* (returns answered)

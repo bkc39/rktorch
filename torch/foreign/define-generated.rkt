@@ -81,107 +81,87 @@
               (append (reverse c) call-args))))
   (values (reverse rev-specs) (reverse rev-call-args)))
 
+(begin-for-syntax
+  (define-syntax-class signature
+    #:attributes ([arg 1] [spec 1] [call-arg 1])
+    (pattern ([arg:id kind:id] ...)
+      #:do [(define-values (specs call-args)
+              (build-pieces this-syntax
+                            (syntax->list #'(arg ...))
+                            (syntax->datum #'(kind ...))))]
+      #:with (spec ...) specs
+      #:with (call-arg ...) call-args))
+
+  (define-syntax-class (argument-of args)
+    #:description "one of the op's arguments"
+    (pattern aligned:id
+      #:fail-unless (member #'aligned args free-identifier=?)
+      "the aligned list is one of the arguments"))
+
+  (define-splicing-syntax-class retry
+    #:attributes (single outputs)
+    (pattern (~seq #:no-retry)
+      #:with single #'tensor-allocator/no-retry
+      #:with outputs #'tensor-allocator/outputs/no-retry)
+    (pattern (~seq)
+      #:with single #'tensor-allocator
+      #:with outputs #'tensor-allocator/outputs))
+
+  (define-splicing-syntax-class (results args)
+    #:attributes ([out 1] [ret 1] wrap finish [extra 1])
+    (pattern (~seq #:inplace)
+      #:fail-when (null? args) "an in-place op takes its receiver first"
+      #:with (out ...) #'()
+      #:with (ret ...) #'(_int)
+      #:attr wrap #f
+      #:with finish #'status->receiver
+      #:with (extra ...) (list (car args)))
+    (pattern (~seq r:retry #:returns n:nat)
+      #:fail-when (and (< (syntax-e #'n) 2) #'n)
+      "a single return takes no #:returns clause"
+      #:with (slot ...) (generate-temporaries (build-list (syntax-e #'n) values))
+      #:with (out ...) #'((slot : (_ptr o _Tensor/null)) ...)
+      #:with (ret ...) #'((rc : _int) -> (and (zero? rc) (list slot ...)))
+      #:with wrap #'r.outputs
+      #:with finish #'outputs->values
+      #:with (extra ...) #'())
+    (pattern (~seq r:retry #:returns-list (~var aligned (argument-of args)))
+      #:with aligned-len (format-id #'aligned "~a-len" #'aligned)
+      #:with (out ...) #'((slots : (_list o _Tensor/null aligned-len))
+                          (slots-len : _int64 = aligned-len))
+      #:with (ret ...) #'((rc : _int) -> (and (zero? rc) slots))
+      #:with wrap #'r.outputs
+      #:with finish #'outputs->list
+      #:with (extra ...) #'())
+    (pattern (~seq r:retry)
+      #:with (out ...) #'()
+      #:with (ret ...) #'(_Tensor/null)
+      #:with wrap #'r.single
+      #:with finish #'handle->tensor
+      #:with (extra ...) #'())))
+
+(define (status->receiver who rc receiver)
+  (check-ok rc who)
+  receiver)
+
+(define (handle->tensor who handle)
+  (wrap-tensor (check-handle who handle)))
+
+(define (outputs->values who handles)
+  (apply values (outputs->list who handles)))
+
+(define (outputs->list who handles)
+  (map wrap-tensor (check-outputs who handles)))
+
 (define-syntax (define-generated-op stx)
   (syntax-parse stx
-    [(_ name:id c-id:id #:inplace ([arg:id kind:id] ...+))
-     #:do [(define-values (specs call-args)
-             (build-pieces stx
-                           (syntax->list #'(arg ...))
-                           (syntax->datum #'(kind ...))))]
+    [(_ name:id c-id:id shape ... sig:signature)
+     #:with ((~var r (results (syntax->list #'(sig.arg ...))))) #'(shape ...)
      #:with raw-name (format-id #'name "~a/raw" #'name)
-     #:with (spec ...) specs
-     #:with (call-arg ...) call-args
-     #:with recv (car (syntax->list #'(arg ...)))
      #'(begin
          (define-torch raw-name
-           (_fun spec ... -> _int)
-           #:c-id c-id)
-         (define (name arg ...)
-           (check-ok (raw-name call-arg ...) 'name)
-           recv))]
-    [(_ name:id c-id:id (~optional (~and #:no-retry no-retry?)) #:returns n:nat
-        ([arg:id kind:id] ...))
-     #:fail-when (and (< (syntax-e #'n) 2) #'n)
-     "a single return takes no #:returns clause"
-     #:do [(define-values (specs call-args)
-             (build-pieces stx
-                           (syntax->list #'(arg ...))
-                           (syntax->datum #'(kind ...))))]
-     #:with raw-name (format-id #'name "~a/raw" #'name)
-     #:with (spec ...) specs
-     #:with (call-arg ...) call-args
-     #:with (out ...) (generate-temporaries
-                       (build-list (syntax-e #'n) values))
-     #:with wrap (if (attribute no-retry?)
-                     #'tensor-allocator/outputs/no-retry
-                     #'tensor-allocator/outputs)
-     #'(begin
-         (define-torch raw-name
-           (_fun spec ... (out : (_ptr o _Tensor/null)) ...
-                 -> (rc : _int)
-                 -> (and (zero? rc) (list out ...)))
+           (_fun sig.spec ... r.out ... -> r.ret ...)
            #:c-id c-id
-           #:wrap wrap)
-         (define (name arg ...)
-           (apply values
-                  (map wrap-tensor
-                       (check-outputs 'name (raw-name call-arg ...))))))]
-    [(_ name:id c-id:id (~optional (~and #:no-retry no-retry?)) #:returns-list aligned:id
-        ([arg:id kind:id] ...))
-     #:fail-unless (memf (lambda (a) (free-identifier=? a #'aligned))
-                         (syntax->list #'(arg ...)))
-     "the aligned list is one of the arguments"
-     #:do [(define-values (specs call-args)
-             (build-pieces stx
-                           (syntax->list #'(arg ...))
-                           (syntax->datum #'(kind ...))))]
-     #:with raw-name (format-id #'name "~a/raw" #'name)
-     #:with (spec ...) specs
-     #:with (call-arg ...) call-args
-     #:with aligned-len (format-id #'aligned "~a-len" #'aligned)
-     #:with wrap (if (attribute no-retry?)
-                     #'tensor-allocator/outputs/no-retry
-                     #'tensor-allocator/outputs)
-     #'(begin
-         (define-torch raw-name
-           (_fun spec ...
-                 (out : (_list o _Tensor/null aligned-len))
-                 (out-len : _int64 = aligned-len)
-                 -> (rc : _int)
-                 -> (and (zero? rc) out))
-           #:c-id c-id
-           #:wrap wrap)
-         (define (name arg ...)
-           (map wrap-tensor (check-outputs 'name (raw-name call-arg ...)))))]
-    [(_ name:id c-id:id #:no-retry ([arg:id kind:id] ...))
-     #:do [(define-values (specs call-args)
-             (build-pieces stx
-                           (syntax->list #'(arg ...))
-                           (syntax->datum #'(kind ...))))]
-     #:with raw-name (format-id #'name "~a/raw" #'name)
-     #:with (spec ...) specs
-     #:with (call-arg ...) call-args
-     #'(begin
-         (define-torch raw-name
-           (_fun spec ... -> _Tensor/null)
-           #:c-id c-id
-           #:wrap tensor-allocator/no-retry)
-         (define (name arg ...)
-           (wrap-tensor
-            (check-handle 'name (raw-name call-arg ...)))))]
-    [(_ name:id c-id:id ([arg:id kind:id] ...))
-     #:do [(define-values (specs call-args)
-             (build-pieces stx
-                           (syntax->list #'(arg ...))
-                           (syntax->datum #'(kind ...))))]
-     #:with raw-name (format-id #'name "~a/raw" #'name)
-     #:with (spec ...) specs
-     #:with (call-arg ...) call-args
-     #'(begin
-         (define-torch raw-name
-           (_fun spec ... -> _Tensor/null)
-           #:c-id c-id
-           #:wrap tensor-allocator)
-         (define (name arg ...)
-           (wrap-tensor
-            (check-handle 'name (raw-name call-arg ...)))))]))
+           (~? (~@ #:wrap r.wrap)))
+         (define (name sig.arg ...)
+           (r.finish 'name (raw-name sig.call-arg ...) r.extra ...)))]))

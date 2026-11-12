@@ -86,4 +86,23 @@
        (convert-syntax-error
         (let ()
           (define-generated-op one tr_gen_topk #:returns 1 ([self tensor]))
+          (void))))))
+
+  (test-case "#:returns-list names one of the op's arguments"
+    (check-exn
+     #rx"the aligned list is one of the arguments"
+     (lambda ()
+       (convert-syntax-error
+        (let ()
+          (define-generated-op norms tr_gen__foreach_norm_scalar #:returns-list other
+            ([self tensor-list] [ord scalar] [dtype optional-dtype]))
+          (void))))))
+
+  (test-case "#:inplace takes a receiver"
+    (check-exn
+     #rx"an in-place op takes its receiver first"
+     (lambda ()
+       (convert-syntax-error
+        (let ()
+          (define-generated-op nothing! tr_gen__foreach_sqrt_ #:inplace ())
           (void)))))))

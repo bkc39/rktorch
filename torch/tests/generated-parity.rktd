@@ -6,8 +6,6 @@
 ;; cloned receiver; returns counts the Tensor returns, compared
 ;; elementwise against the Python tuple when above 1. returns 0:
 ;; every mutable-tensor-list argument is compared after the call.
-;; returns list: a Tensor list, compared elementwise. Every
-;; mutable-tensor argument is compared after the call too.
 ;; Consumed by torch/tests/generated-parity-test.rkt.
 (
  (abs-tensor "abs" (tensor) #f 1)

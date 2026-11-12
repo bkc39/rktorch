@@ -21,9 +21,31 @@ def flat(t):
             "values": [rkt(v) for v in t.flatten().tolist()]}
 
 
+def int32_scalar(v):
+    return torch.tensor(v, dtype=torch.int32)
+
+
+def nonfinite(ts):
+    ts[0].view(-1)[0] = math.inf
+    return ts
+
+
+def flattened(*args):
+    return [t for a in args for t in (a if isinstance(a, list) else [a])]
+
+
+def as_results(r):
+    return r if isinstance(r, (tuple, list)) else (r,)
+
+
+HELPERS = {"torch": torch, "inf": math.inf, "int32_scalar": int32_scalar,
+           "nonfinite": nonfinite, "flattened": flattened,
+           "as_results": as_results}
+
+
 def run(snippet):
     torch.manual_seed(0)
-    scope = {"torch": torch}
+    scope = dict(HELPERS)
     try:
         exec(snippet, scope)
         return [flat(t) for t in scope["rs"]]

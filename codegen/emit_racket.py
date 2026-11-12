@@ -1,6 +1,8 @@
-"""Emit the Racket layer: torch/generated.rkt (compact define-generated-op
-forms — the macro in torch/foreign/define-generated.rkt owns the actual
-expansion into raw FFI binding + wrapper) and the parity manifest."""
+"""Emit the Racket layer: one torch/generated/<shard>.rkt per allowlist shard
+(compact define-generated-op forms — the macro in
+torch/foreign/define-generated.rkt owns the actual expansion into raw FFI
+binding + wrapper), the torch/generated.rkt facade re-exporting them, and the
+parity manifest."""
 
 from __future__ import annotations
 
@@ -19,51 +21,83 @@ def _rkt_arg(name: str, kind: str) -> str:
     return f"{arg}-arg" if arg == kind else arg
 
 
-def emit_wrappers(shards: dict[str, list[Op]]) -> str:
-    all_ops = sorted(
-        (op for ops in shards.values() for op in ops),
-        key=lambda o: o.racket_name,
-    )
-    lines = ["#lang racket/base", "", BANNER.rstrip()]
+WIDTH = 100
+
+HEADER = [
+    ";;",
+    ";; The UNSTABLE generated surface. One define-generated-op form per",
+    ";; allowlist entry; the macro expands each into the raw FFI binding",
+    ";; and a thin uncontracted wrapper. Promotion into the contracted",
+    ";; public facade (torch/foreign.rkt) is hand-curated.",
+    ";;",
+    ";; Conventions: an optional tensor/int/int-array/scalar/float argument",
+    ";; takes #f for \"absent\" (an empty list '() is also absent for",
+    ";; int-arrays); loss ops follow ATen (nll_loss wants log-probabilities,",
+    ";; cross_entropy_loss wants raw logits).",
+    ";; An op with several Tensor returns carries #:returns N and answers",
+    ";; them as multiple values, in schema order. An op that returns",
+    ";; nothing updates its mutable-tensor-list arguments and answers the",
+    ";; first.",
+]
+
+
+def _wrapped(head: str, indent: str, pieces: list[str],
+             close: str) -> list[str]:
+    lines = [head]
+    for piece in pieces:
+        if len(lines[-1]) + 1 + len(piece) + len(close) <= WIDTH:
+            lines[-1] = f"{lines[-1]} {piece}"
+        else:
+            lines.append(f"{indent}{piece}")
+    lines[-1] += close
+    return lines
+
+
+def _form(op: Op) -> list[str]:
+    if op.inplace:
+        flags = ["#:inplace"]
+    else:
+        flags = ["#:no-retry"] if op.no_retry else []
+    if op.returns > 1:
+        flags += ["#:returns", str(op.returns)]
+    if op.list_return is not None:
+        aligned = _rkt_arg(op.list_return, op.params[0].kind)
+        flags += ["#:returns-list", aligned]
+    head = _wrapped(f"(define-generated-op {op.racket_name}", "  ",
+                    [op.c_name, *flags], "")
+    args = [f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params]
+    if not args:
+        return [*head, "  ())"]
+    first, *rest = args
+    return [*head, *_wrapped(f"  ({first}", "   ", rest, "))")]
+
+
+def shard_module(shard: str) -> str:
+    return f"generated/{shard}.rkt"
+
+
+def emit_shard(ops: list[Op]) -> str:
+    ordered = sorted(ops, key=lambda o: o.racket_name)
+    lines = ["#lang racket/base", "", BANNER.rstrip(), ""]
     lines += [
-        ";;",
-        ";; The UNSTABLE generated surface. One define-generated-op form per",
-        ";; allowlist entry; the macro expands each into the raw FFI binding",
-        ";; and a thin uncontracted wrapper. Promotion into the contracted",
-        ";; public facade (torch/foreign.rkt) is hand-curated.",
-        ";;",
-        ";; Conventions: an optional tensor/int/int-array/scalar/float argument",
-        ";; takes #f for \"absent\" (an empty list '() is also absent for",
-        ";; int-arrays); loss ops follow ATen (nll_loss wants log-probabilities,",
-        ";; cross_entropy_loss wants raw logits).",
-        ";; An op with several Tensor returns carries #:returns N and answers",
-        ";; them as multiple values, in schema order. An op that returns",
-        ";; nothing updates its mutable-tensor-list arguments and answers the",
-        ";; first. An op answering a Tensor list carries #:returns-list arg",
-        ";; and answers a list as long as arg.",
-        "",
-        '(require (only-in "foreign/define-generated.rkt"',
+        '(require (only-in "../foreign/define-generated.rkt"',
         "                  define-generated-op))",
         "",
+        "(provide "
+        + "\n         ".join(op.racket_name for op in ordered) + ")",
     ]
-    provides = [op.racket_name for op in all_ops]
-    lines.append("(provide " + "\n         ".join(provides) + ")")
-    for op in all_ops:
-        args = " ".join(
-            f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
-        )
-        flag = " #:inplace" if op.inplace else (" #:no-retry" if op.no_retry
-                                        else "")
-        if op.returns > 1:
-            flag += f" #:returns {op.returns}"
-        if op.list_return is not None:
-            aligned = _rkt_arg(op.list_return, op.params[0].kind)
-            flag += f" #:returns-list {aligned}"
-        lines += [
-            "",
-            f"(define-generated-op {op.racket_name} {op.c_name}{flag}",
-            f"  ({args}))",
-        ]
+    for op in ordered:
+        lines += ["", *_form(op)]
+    return "\n".join(lines) + "\n"
+
+
+def emit_wrappers(shards: dict[str, list[Op]]) -> str:
+    modules = [f'"{shard_module(shard)}"' for shard in sorted(shards)]
+    lines = ["#lang racket/base", "", BANNER.rstrip(), *HEADER, ""]
+    lines.append("(require " + "\n         ".join(modules) + ")")
+    lines.append("")
+    lines.append("(provide (all-from-out "
+                 + "\n                       ".join(modules) + "))")
     return "\n".join(lines) + "\n"
 
 
@@ -80,8 +114,6 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
         ";; cloned receiver; returns counts the Tensor returns, compared",
         ";; elementwise against the Python tuple when above 1. returns 0:",
         ";; every mutable-tensor-list argument is compared after the call.",
-        ";; returns list: a Tensor list, compared elementwise. Every",
-        ";; mutable-tensor argument is compared after the call too.",
         ";; Consumed by torch/tests/generated-parity-test.rkt.",
         "(",
     ]
