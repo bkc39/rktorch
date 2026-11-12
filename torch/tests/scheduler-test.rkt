@@ -186,6 +186,17 @@
     (check-exn #rx"^rmsprop: contract violation"
                (lambda () (rmsprop ps #:weight-decay -1))))
 
+  (test-case "a later schedule starts from the rate the first recorded, as initial_lr does"
+    (define opt (fresh-opt))
+    (step! (exponential-lr opt #:gamma 0.5))
+    (set-learning-rate! opt 0.3)
+    (check-eqv? (scheduler-rate (lambda-lr opt (lambda (_t) 1.0))) 0.1))
+
+  (test-case "one-cycle-lr records max-lr over div-factor as every group's initial rate"
+    (define opt (fresh-opt))
+    (one-cycle-lr opt #:max-lr 1.0 #:total-steps 10)
+    (check-= (scheduler-rate (lambda-lr opt (lambda (_t) 1.0))) 0.04 1e-12))
+
   (test-case "set-learning-rate! and a scheduler on adam and rmsprop"
     (define a (adam (list (Parameter (zeros 2))) #:lr 0.01))
     (set-learning-rate! a 0.5)

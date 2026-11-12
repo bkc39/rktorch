@@ -6,36 +6,35 @@
          (only-in racket/generic define/generic)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "optim-groups.rkt" store-initial-lrs! store-set-each!)
          (only-in "optim.rkt"
-                  gen:optimizer optimizer-lr optimizer-parameters optimizer-root
-                  optimizer-set-lr! optimizer? param-group-count))
+                  gen:optimizer group-index? optimizer-parameters optimizer-root optimizer-store
+                  optimizer?))
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
-(struct scheduler (optimizer base-lr lr-at [last #:mutable]
-                             [last-rate #:mutable])
+(struct scheduler (optimizer bases lr-at [last #:mutable] [last-rates #:mutable])
   #:constructor-name make-scheduler
   #:name scheduler-value ;; noqa
   #:methods gen:optimizer
   [(define/generic inner-parameters optimizer-parameters)
-   (define/generic inner-lr optimizer-lr)
-   (define/generic inner-set-lr! optimizer-set-lr!)
+   (define/generic inner-store optimizer-store)
    (define/generic inner-root optimizer-root)
    (define (optimizer-parameters s) (inner-parameters (scheduler-optimizer s)))
-   (define (optimizer-lr s) (inner-lr (scheduler-optimizer s)))
-   (define (optimizer-set-lr! s lr) (inner-set-lr! (scheduler-optimizer s) lr))
+   (define (optimizer-store s) (inner-store (scheduler-optimizer s)))
    (define (optimizer-root s) (inner-root (scheduler-optimizer s)))
    (define (optimizer-step! s)
      (apply-rate! s (add1 (scheduler-last s))))])
 
 (define (apply-rate! s t)
-  (define lr ((scheduler-lr-at s) (scheduler-base-lr s) t))
+  (define lr-at (scheduler-lr-at s))
+  (define rates (map (lambda (base) (real->double-flonum (lr-at base t))) (scheduler-bases s)))
   (set-scheduler-last! s t)
-  (set-scheduler-last-rate! s lr)
-  (optimizer-set-lr! (scheduler-optimizer s) lr))
+  (set-scheduler-last-rates! s rates)
+  (store-set-each! (optimizer-store s) 'lr rates))
 
-(define (build opt lr-at)
-  (define s (make-scheduler opt (optimizer-lr opt) lr-at 0 #f))
+(define (build opt lr-at #:initial [initial #f])
+  (define s (make-scheduler opt (store-initial-lrs! (optimizer-store opt) initial) lr-at 0 #f))
   (apply-rate! s 0)
   s)
 
@@ -46,11 +45,9 @@
 (define/contract-out (scheduler-rate s #:group [group 0]) ;; noqa
   (->i ([s scheduler?]) (#:group [group exact-nonnegative-integer?])
        #:pre/name (s group) "the optimizer has no parameter group with this index"
-       (or (unsupplied-arg? group) (zero? group) (< group (param-group-count s)))
+       (or (unsupplied-arg? group) (group-index? s group))
        [_ real?])
-  (cond
-    [(zero? group) (scheduler-last-rate s)]
-    [else (error 'unimplemented)]))
+  (list-ref (scheduler-last-rates s) group))
 
 (define/contract-out (step-lr opt #:step-size step-size #:gamma [gamma 0.1]) ;; noqa
   (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
@@ -117,6 +114,7 @@
   (define (anneal start end pct)
     (+ end (* (/ (- start end) 2.0) (+ 1.0 (cos (* pi pct))))))
   (build opt
+         #:initial initial
          (lambda (_base t)
            (when (> t total-steps)
              (raise-arguments-error 'one-cycle-lr

@@ -51,8 +51,8 @@
 
   (define configs
     (list (list 'adamw
-                (grouped adamw '((#:lr . 1e-3))
-                         '(((#:weight-decay . 0.05)) ((#:weight-decay . 0.0) (#:lr . 2e-3))))
+                (grouped adamw '((#:lr . 0.05))
+                         '(((#:weight-decay . 0.5)) ((#:weight-decay . 0.0) (#:lr . 2e-3))))
                 '(loop foreach fused))
           (list 'sgd_momentum
                 (grouped sgd '((#:lr . 0.1)) '(((#:momentum . 0.9)) ((#:momentum . 0.5))))
@@ -78,7 +78,8 @@
                        (~> j (hash-ref 'groups) (hash-ref name) (hash-ref mode))
                        (format "G1-L4: ~a, ~a" name mode))))
      (check-params (run (lambda (decay no-decay)
-                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1))
+                          (sgd (list (param-group (append decay no-decay))) #:lr 0.1
+                               #:momentum 0.9))
                         #:after (lambda (opt n)
                                   (when (= n 2) (param-group-set! opt 0 'weight-decay 0.01))))
                    (hash-ref j 'set_weight_decay)
