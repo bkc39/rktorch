@@ -207,4 +207,16 @@
     (step! s)
     (check-= (learning-rate r) 0.001 1e-15)
     (check-exn exn:fail:contract?
-               (lambda () (one-cycle-lr a #:max-lr 0 #:total-steps 3)))))
+               (lambda () (one-cycle-lr a #:max-lr 0 #:total-steps 3))))
+
+  (test-case "a chained schedule after a sequence's first milestone raises there, as in torch"
+    (define opt (fresh-opt))
+    (define first (exponential-lr opt #:gamma 0.9))
+    (define later (chained-scheduler (list (step-lr opt #:step-size 2))))
+    (define s (sequential-lr opt (list first later) #:milestones '(2)))
+    (check-equal? (scheduler-step-count first) 0)
+    (check-equal? (scheduler-step-count later) 0)
+    (step! s)
+    (check-equal? (scheduler-step-count s) 1)
+    (check-exn #rx"^sequential-lr: a chained or sequential schedule cannot start at a milestone"
+               (lambda () (step! s)))))

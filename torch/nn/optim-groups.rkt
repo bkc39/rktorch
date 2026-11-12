@@ -15,7 +15,8 @@
          store-ref
          store-set!
          store-set-all!
-         store-set-each!)
+         store-set-each!
+         store-values)
 
 (struct store (groups-box initial-lrs params owner))
 
@@ -50,6 +51,9 @@
 
 (define (store-ref st i key)
   (hash-ref (param-group-settings (list-ref (store-groups st) i)) key))
+
+(define (store-values st key)
+  (map (lambda (g) (hash-ref (param-group-settings g) key)) (store-groups st)))
 
 (define (with-setting g key v)
   (make-param-group (param-group-tensors g) (hash-set (param-group-settings g) key (setting v))))
