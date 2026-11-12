@@ -4,8 +4,8 @@
          (only-in ffi/unsafe/atomic in-atomic-mode?)
          (only-in racket/list filter-not)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
+         (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
@@ -38,7 +38,7 @@
 (define counted (box 0))
 
 (define (fresh-counters)
-  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) 0))
+  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) #f))
 
 (struct pending (tally counters live entries since-check since-sample))
 
@@ -53,18 +53,24 @@
 (define (tally-limit mark)
   (if mark (min limit-cap (quotient mark limit-divisor)) limit-cap))
 
-(define (set-limit! c limit)
-  (define was (counters-limit c))
-  (unless (eqv? limit was)
-    (set-counters-limit! c limit)
-    (when (< limit was)
-      (flush-tallies!))))
+(define (limit-of c)
+  (or (counters-limit c) 0))
+
+(define (lower-limit! c limit)
+  (set-counters-limit! c limit)
+  (flush-tallies!))
 
 (define (note-counters-mark! c mark)
-  (set-limit! c (tally-limit mark)))
+  (define was (counters-limit c))
+  (define limit (tally-limit mark))
+  (cond
+    [(not was) (set-counters-limit! c limit)]
+    [(< limit was) (lower-limit! c limit)]
+    [else (void)]))
 
 (define (forget-mark! c)
-  (set-limit! c 0))
+  (when (counters-limit c)
+    (lower-limit! c #f)))
 
 (define current-tally (make-thread-cell #f #f))
 (define tallies (box (registry 0 '())))
@@ -120,7 +126,7 @@
       '(0 0 0 0)))
 
 (define (tally-staleness c)
-  (* 2 (tally-count) (counters-limit c)))
+  (* 2 (tally-count) (limit-of c)))
 
 (define (tally-live! p nbytes entries)
   (tally-add! (pending-live p) nbytes)
@@ -132,14 +138,13 @@
 
 (define (tally-op! p nbytes)
   (define t (pending-tally p))
-  (define limit (counters-limit (pending-counters p)))
+  (define limit (limit-of (pending-counters p)))
   (define ops (add1 (tally-ops t)))
   (cond
     [(or (>= ops flush-ops)
          (>= nbytes limit)
          (>= (abs (unbox (pending-live p))) limit)
-         (>= (unbox (pending-since-check p)) limit)
-         (>= (unbox (pending-since-sample p)) limit))
+         (>= (unbox (pending-since-check p)) limit))
      (flush! t)]
     [else (set-tally-ops! t ops)]))
 
@@ -167,10 +172,12 @@
   (or (not th) (and ask? (thread-dead? th))))
 
 (define (flush-tallies!)
-  (define ask? (and (on-main-os-thread?) (not (in-atomic-mode?))))
+  (define ask? (not (in-atomic-mode?)))
+  (race-point tallies-flushing ask?)
   (define dead
     (for/fold ([dead '()]) ([t (in-list (registered-tallies))])
       (define gone? (prunable? (tally-owner t) ask?))
+      (race-point tally-judged t)
       (flush! t)
       (if gone? (cons t dead) dead)))
   (unless (null? dead)
