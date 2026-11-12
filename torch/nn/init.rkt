@@ -1,13 +1,23 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->i and/c listof)
+(require (for-syntax racket/base
+                     (only-in racket/syntax format-id)
+                     ;; whole-module on purpose: the syntax classes need
+                     ;; bindings only-in would strip
+                     syntax/parse/pre)
+         (only-in racket/contract/base
+                  -> ->i and/c contract-out flat-contract-predicate
+                  flat-named-contract listof)
          (only-in racket/match match-define)
-         (only-in racket/math infinite? sqr)
+         (only-in racket/math infinite? nan? sqr)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  * + - / > clamp item log ne randn sum tensor? uniform! where
-                  zeros)
-         (only-in "../foreign/generator.rkt" generator-on? normal!)
+                  * + - / > clamp item log ne normal! sum tensor? uniform!
+                  where zeros)
+         (only-in "../foreign/generator.rkt"
+                  check-generator-on! generator-on? generator/c range-message
+                  uniform-range?)
          (only-in "../private/contract.rkt" define/checked-out supplied-or)
          (only-in "../private/erf.rkt" erf))
 
@@ -15,67 +25,146 @@
 
 (define dims/c (listof exact-nonnegative-integer?))
 
-;; zeros + uniform! consumes the RNG exactly as torch's empty().uniform_().
-(define/checked-out (uniform-init dims low high)
-  (->i ([dims dims/c] [low real?] [high real?])
-       #:pre/name () "the generator lives on the target device"
-       (generator-on? #f #f)
-       [result tensor?])
+(define dims? (flat-contract-predicate dims/c))
+
+(define fan-dims/c
+  (flat-named-contract 'fan-dims
+                       (lambda (d) (and (dims? d) (>= (length d) 2)))))
+
+(define slope/c
+  (flat-named-contract 'slope
+                       (lambda (a)
+                         (and (real? a)
+                              (not (nan? a))
+                              (or (infinite? a) (~> a sqr infinite? not))))))
+
+(define (init-range? low high)
+  (uniform-range? 'float32 low high))
+
+(begin-for-syntax
+  (define-splicing-syntax-class formal
+    #:attributes (name (spec 1) (arg 1))
+    (pattern name:id
+             #:with (spec ...) #'(name)
+             #:with (arg ...) #'(name))
+    (pattern (~seq kw:keyword [name:id default:expr])
+             #:with (spec ...) #'(kw [name default])
+             #:with (arg ...) #'(kw name)))
+
+  (define-splicing-syntax-class precondition
+    #:attributes ((clause 1))
+    (pattern (~seq #:pre/name deps message:str check:expr)
+             #:with (clause ...) #'(#:pre/name deps message check))
+    (pattern (~seq #:pre/name deps
+                   (#:range low:str high:str (~optional condition:str))
+                   check:expr)
+             #:with message
+             (datum->syntax
+              #'check
+              (string-append
+               (range-message (syntax-e #'low) (syntax-e #'high) "float32's")
+               (if (attribute condition)
+                   (string-append " when " (syntax-e #'condition))
+                   "")))
+             #:with (clause ...) #'(#:pre/name deps message check))))
+
+(define-syntax-parse-rule (define-init (name:id formal:formal ...)
+                            ((~literal ->i) (mandatory ...) (optional ...)
+                                            pre:precondition ...
+                                            result)
+                            body:expr ...+)
+  #:with generator (format-id #'name "generator")
+  #:with contracted (syntax/loc #'name contracted)
+  (begin
+    (define contracted
+      (let ()
+        (define (name formal.spec ... ... #:generator [generator #f])
+          body ...)
+        name))
+    (define (name formal.spec ... ... #:generator [generator #f])
+      (check-generator-on! 'name generator #f)
+      (contracted formal.arg ... ... #:generator generator))
+    (provide name)
+    (module+ checked
+      (provide
+       (contract-out
+        [rename contracted name
+                (->i (mandatory ...)
+                     (optional ... #:generator [generator generator/c])
+                     pre.clause ... ...
+                     #:pre/name (generator)
+                     "the generator lives on the target device"
+                     (generator-on? (supplied-or generator) #f)
+                     result)])))))
+
+(define (uniform-draw dims low high generator)
   (define t (apply zeros dims))
-  (uniform! t low high)
+  (uniform! t low high #:generator generator)
   t)
 
-;; randn is empty().normal_(): the same RNG consumption as init.normal_.
-(define/checked-out (normal-init dims) ;; noqa
-  (-> dims/c tensor?)
-  (apply randn dims))
+(define (normal-draw dims mean std generator)
+  (define t (apply zeros dims))
+  (normal! t mean std #:generator generator)
+  t)
+
+(define-init (uniform-init dims low high) ;; noqa
+  (->i ([dims dims/c] [low real?] [high real?])
+       ()
+       #:pre/name (low high) (#:range "low" "high") (init-range? low high)
+       [result tensor?])
+  (uniform-draw dims low high generator))
+
+(define-init (normal-init dims) ;; noqa
+  (->i ([dims dims/c]) () [result tensor?])
+  (normal-draw dims 0.0 1.0 generator))
 
 (define/checked-out (fan-in dims)
   (-> dims/c exact-nonnegative-integer?)
   (apply * (cdr dims)))
 
-;; the default #:a (sqrt 5) is what nn.Linear.reset_parameters passes
-(define/checked-out (kaiming-uniform dims #:a [a (sqrt 5.0)]) ;; noqa
-  (->i ([dims dims/c])
-       (#:a [a real?])
-       #:pre/name () "the generator lives on the target device"
-       (generator-on? #f #f)
-       [result tensor?])
+(define-init (kaiming-uniform dims #:a [a (sqrt 5.0)]) ;; noqa
+  (->i ([dims fan-dims/c]) (#:a [a slope/c]) [result tensor?])
   (define gain (sqrt (/ 2.0 (+ 1.0 (* a a)))))
-  (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
-  (uniform-init dims (- bound) bound))
+  (cond
+    [(memv 0 dims) (apply zeros dims)]
+    [else
+     (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
+     (uniform-draw dims (- bound) bound generator)]))
 
-;; the bias of nn.Linear and _ConvNd: U(-1/sqrt fan, 1/sqrt fan)
-(define (uniform-bias n fan)
-  (define bound (/ 1.0 (sqrt fan)))
-  (uniform-init (list n) (- bound) bound))
+(define (uniform-bias n fan #:generator [generator #f])
+  (check-generator-on! 'uniform-bias generator #f)
+  ;; reset_parameters' bound 0 at fan 0: a zero-width draw that still
+  ;; advances the stream, one value per element
+  (define bound (if (zero? fan) 0 (/ 1.0 (sqrt fan))))
+  (uniform-draw (list n) (- bound) bound generator))
 
 (define (any? mask)
   (~> mask sum item positive?))
 
-(define (normal-draw dims mean std)
-  (define t (apply zeros dims))
-  (normal! t mean std)
-  t)
+(define (float32 v)
+  (floating-point-bytes->real (real->floating-point-bytes v 4)))
 
-(define (redrawn-normal dims mean std a b)
-  (let loop ([result (normal-draw dims mean std)])
-    (define outside (ne result (clamp result #:min a #:max b)))
+(define (redrawn-normal dims mean std a b generator)
+  (define lo (float32 a))
+  (define hi (float32 b))
+  (let loop ([result (normal-draw dims mean std generator)])
+    (define outside (ne result (clamp result #:min lo #:max hi)))
     (cond
-      [(any? outside) (loop (where outside (normal-draw dims mean std) result))]
+      [(any? outside)
+       (loop (where outside (normal-draw dims mean std generator) result))]
       [else result])))
 
-(define (accepted-uniform dims mean std a b)
+(define (accepted-uniform dims mean std a b generator)
   (define log-peak (~> (min mean b) (max a) (- mean) (/ std) sqr (* -0.5)))
   (define (rejected candidates)
     (define z (/ (- candidates mean) std))
     (define log-density (- (* z z -0.5) log-peak))
-    (~> (uniform-init dims 0.0 1.0) log (> log-density)))
-  (define drawn (uniform-init dims a b))
+    (~> (uniform-draw dims 0.0 1.0 generator) log (> log-density)))
+  (define drawn (uniform-draw dims a b generator))
   (let loop ([result drawn] [pending (rejected drawn)])
     (cond
       [(any? pending)
-       (define candidates (uniform-init dims a b))
+       (define candidates (uniform-draw dims a b generator))
        (loop (where pending candidates result)
              (where pending (rejected candidates) pending))]
       [else result])))
@@ -88,11 +177,11 @@
 (define (uniform-branch? mean std a b)
   (~> (normal-mass mean std a b) (> 0.3) not))
 
-(define/checked-out (trunc-normal-init dims ;; noqa
-                                       #:mean [mean 0.0]
-                                       #:std [std 1.0]
-                                       #:a [a -2.0]
-                                       #:b [b 2.0])
+(define-init (trunc-normal-init dims ;; noqa
+                                #:mean [mean 0.0]
+                                #:std [std 1.0]
+                                #:a [a -2.0]
+                                #:b [b 2.0])
   (->i ([dims dims/c])
        (#:mean [mean real?]
         #:std [std (and/c real? positive?)]
@@ -101,15 +190,13 @@
        #:pre/name (a b) "#:a is below #:b"
        (< (supplied-or a -2.0) (supplied-or b 2.0))
        #:pre/name (mean std a b)
-       "#:a and #:b are finite when [a, b] holds at most 0.3 of the mass"
+       (#:range "#:a" "#:b" "[a, b] holds at most 0.3 of the mass")
        (let ([a (supplied-or a -2.0)] [b (supplied-or b 2.0)])
-         (not (and (uniform-branch? (supplied-or mean 0.0) (supplied-or std 1.0)
-                                    a b)
-                   (or (infinite? a) (infinite? b)))))
-       #:pre/name () "the generator lives on the target device"
-       (generator-on? #f #f)
+         (or (not (uniform-branch? (supplied-or mean 0.0) (supplied-or std 1.0)
+                                   a b))
+             (init-range? a b)))
        [result tensor?])
   (match-define (list μ σ lo hi) (map exact->inexact (list mean std a b)))
   (cond
-    [(uniform-branch? mean std a b) (accepted-uniform dims μ σ lo hi)]
-    [else (redrawn-normal dims μ σ lo hi)]))
+    [(uniform-branch? mean std a b) (accepted-uniform dims μ σ lo hi generator)]
+    [else (redrawn-normal dims μ σ lo hi generator)]))

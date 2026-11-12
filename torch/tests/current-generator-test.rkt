@@ -5,6 +5,8 @@
            "../data/loader.rkt"
            (prefix-in g: (only-in "../generated.rkt" multinomial))
            "../main.rkt"
+           (only-in "../nn.rkt"
+                    kaiming-uniform normal-init trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blamed contract-violation?))
@@ -17,6 +19,11 @@
   (define images (~> (* 4 3 6 6) arange (reshape 4 3 6 6)))
   (define probabilities (tensor '(0.1 0.2 0.3 0.4 0.5)))
 
+  (define ((filled fill!) g)
+    (define t (zeros 4))
+    (fill! t g)
+    t)
+
   (define random-ops
     (list (cons 'rand (lambda (g) (rand 2 3 #:generator g)))
           (cons 'randn (lambda (g) (randn 2 3 #:generator g)))
@@ -25,7 +32,16 @@
           (cons 'randperm (lambda (g) (randperm 8 #:generator g)))
           (cons 'draw-seed (lambda (g) (draw-seed #:generator g)))
           (cons 'multinomial
-                (lambda (g) (multinomial probabilities 3 #:generator g)))))
+                (lambda (g) (multinomial probabilities 3 #:generator g)))
+          (cons 'uniform! (filled (lambda (t g) (uniform! t #:generator g))))
+          (cons 'normal! (filled (lambda (t g) (normal! t #:generator g))))
+          (cons 'uniform-init
+                (lambda (g) (uniform-init '(2 3) -1 1 #:generator g)))
+          (cons 'kaiming-uniform
+                (lambda (g) (kaiming-uniform '(3 2) #:generator g)))
+          (cons 'normal-init (lambda (g) (normal-init '(2 3) #:generator g)))
+          (cons 'trunc-normal-init
+                (lambda (g) (trunc-normal-init '(2 3) #:generator g)))))
 
   (define transforms
     (list (cons 'random-horizontal-flip

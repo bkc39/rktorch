@@ -75,6 +75,24 @@ tr_tensor* tr_randperm(int64_t n, tr_generator* g);
  * that replays its batch order needs the same draw. 0 success, 1 error. */
 int tr_generator_draw_seed(tr_generator* g, int64_t* out);
 
+/* g.get_state(): a copy of g's state, a CPU uint8 tensor (5056 bytes for a
+ * CPU generator, 16 for CUDA: seed then Philox offset). NULL on error. */
+tr_tensor* tr_generator_state(const tr_generator* g);
+
+/* g.set_state(state): g continues from a copy of state. 0 success, 1 error
+ * (libtorch's own size/type/mt19937 checks; the shim adds none). */
+int tr_generator_set_state(tr_generator* g, const tr_tensor* state);
+
+/* torch.get_rng_state() / torch.cuda.get_rng_state(index): the device's
+ * default generator, the one tr_manual_seed seeds. NULL on error (unknown
+ * device, an index out of range, a backend that is not built in). */
+tr_tensor* tr_default_generator_state(tr_device_type type, int64_t index);
+
+/* torch.set_rng_state(state) / torch.cuda.set_rng_state(state, index), as
+ * tr_generator_set_state on the device's default generator. */
+int tr_default_generator_set_state(tr_device_type type, int64_t index,
+                                   const tr_tensor* state);
+
 #ifdef __cplusplus
 }
 #endif
