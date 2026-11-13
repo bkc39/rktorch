@@ -444,7 +444,8 @@ returned, as Lightning's @tt{LightningOptimizer} wraps them.}
          callback?]{
 Sets the trainer's hparam @racket[name] to @racket[(curve (run-global-step run))]
 at each training batch start, or to @racket[(curve (run-epoch run))] at each
-epoch start. It keeps no state: the value depends only on the step or epoch.}
+epoch start. It keeps no state: the value depends only on the step or epoch, and one
+instance serves any number of fits, in turn or at once.}
 
 @defproc[(param-group-scheduler [key schedulable-key/c]
                                 [curve (-> exact-nonnegative-integer? real?)]

@@ -20,11 +20,13 @@
 (define (curve/c key)
   (if (memq key '(beta1 beta2 eps)) real-curve/c nonnegative-curve/c))
 
-(define (write-scheduled! r interval at counter write!)
-  (when (eq? interval at)
-    (write! (counter r))))
+(define counters (hasheq 'epoch run-epoch 'step run-global-step))
 
-(define-callback hparam-scheduler (name curve interval writer)
+(define (write-scheduled! r interval at write!)
+  (when (eq? interval at)
+    (write! ((hash-ref counters at) r))))
+
+(define-callback hparam-scheduler (name curve interval)
   #:contract (->* (symbol? (-> exact-nonnegative-integer? real?)) (#:interval interval/c)
                   callback?)
   #:kind plain
@@ -37,12 +39,11 @@
     (unless (memq name (trainer-hparam-names tr))
       (raise-arguments-error 'hparam-scheduler
                              "the trainer has no define-hparams field of this name"
-                             "name" name "hparams" (trainer-hparam-names tr)))
-    (set! writer (hparam-writer run name curve)))
+                             "name" name "hparams" (trainer-hparam-names tr))))
   (define-hook (on-train-epoch-start)
-    (write-scheduled! run interval 'epoch run-epoch writer))
+    (write-scheduled! run interval 'epoch (hparam-writer run name curve)))
   (define-hook (on-train-batch-start . _)
-    (write-scheduled! run interval 'step run-global-step writer)))
+    (write-scheduled! run interval 'step (hparam-writer run name curve))))
 
 (define ((hparam-writer r name curve) t)
   (set-hparam! (run-trainer r) name (curve t)))
@@ -84,7 +85,7 @@
     (for ([g (in-list targets)])
       (param-group-set! opt g key v))))
 
-(define-callback param-group-scheduler (key curve optimizer groups interval writer)
+(define-callback param-group-scheduler (key curve optimizer groups interval)
   #:contract (->i ([key schedulable-key/c] [curve (key) (curve/c key)])
                   (#:optimizer [optimizer exact-nonnegative-integer?]
                    #:groups [groups (or/c #f (non-empty-listof exact-nonnegative-integer?))]
@@ -98,9 +99,8 @@
     (set! groups gs)
     (set! interval i))
   (define-hook (on-train-start)
-    (check-schedulable! run key optimizer groups)
-    (set! writer (group-writer run key curve optimizer groups)))
+    (check-schedulable! run key optimizer groups))
   (define-hook (on-train-epoch-start)
-    (write-scheduled! run interval 'epoch run-epoch writer))
+    (write-scheduled! run interval 'epoch (group-writer run key curve optimizer groups)))
   (define-hook (on-train-batch-start . _)
-    (write-scheduled! run interval 'step run-global-step writer)))
+    (write-scheduled! run interval 'step (group-writer run key curve optimizer groups))))
