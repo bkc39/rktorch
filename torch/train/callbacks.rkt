@@ -63,24 +63,32 @@
                               (not/c hash-empty?))))
 
 (define (factor-at scheduling epoch)
-  (match (filter (lambda (e) (<= e epoch)) (hash-keys scheduling))
-    ['() 1]
-    [started (hash-ref scheduling (apply max started))]))
+  (define-values (_start factor)
+    (for/fold ([start -1] [factor 1])
+              ([(e f) (in-hash scheduling)]
+               #:when (< start e (add1 epoch)))
+      (values e f)))
+  factor)
+
+(define manual-scheduling-message
+  (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
+                 " are not supported for manual optimization; remove the callback or"
+                 " switch to automatic optimization"))
+
+(define fixed-accumulation-message
+  (string-append "you have set #:accumulate-grad-batches and are using the"
+                 " gradient-accumulation-scheduler callback; either remove"
+                 " #:accumulate-grad-batches from fit or remove the callback"))
 
 (define (check-schedulable! r)
-  (unless (trainer-automatic? (run-trainer r))
-    (raise-arguments-error
-     'gradient-accumulation-scheduler
-     (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
-                    " are not supported for manual optimization; remove the callback or"
-                    " switch to automatic optimization")))
-  (unless (= 1 (run-accumulate-grad-batches r))
-    (raise-arguments-error
-     'gradient-accumulation-scheduler
-     (string-append "you have set #:accumulate-grad-batches and are using the"
-                    " gradient-accumulation-scheduler callback; either remove"
-                    " #:accumulate-grad-batches from fit or remove the callback")
-     "#:accumulate-grad-batches" (run-accumulate-grad-batches r))))
+  (define accumulate (run-accumulate-grad-batches r))
+  (cond
+    [(not (trainer-automatic? (run-trainer r)))
+     (raise-arguments-error 'gradient-accumulation-scheduler manual-scheduling-message)]
+    [(not (= 1 accumulate))
+     (raise-arguments-error 'gradient-accumulation-scheduler fixed-accumulation-message
+                            "#:accumulate-grad-batches" accumulate)]
+    [else (void)]))
 
 (define (accumulation-hook cb name)
   (match name
