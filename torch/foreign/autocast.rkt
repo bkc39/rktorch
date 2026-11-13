@@ -23,13 +23,14 @@
 (define (type-of spec)
   (if (device? spec) (device-type spec) spec))
 
+(define (cuda-half index)
+  (if (cuda-bfloat16-supported? index) 'bfloat16 'float16))
+
 (define (default-autocast-dtype spec)
-  (define cuda-index
-    (match spec
-      ['cuda (default-cuda-index)]
-      [(device 'cuda index) index]
-      [_ #f]))
-  (if (and cuda-index (not (cuda-bfloat16-supported? cuda-index))) 'float16 'bfloat16))
+  (match spec
+    ['cuda (cuda-half (default-cuda-index))]
+    [(device 'cuda index) (cuda-half index)]
+    [_ 'bfloat16]))
 
 (define/contract-out (autocast-enabled? [device (default-device)]) ;; noqa
   (->* [] [device-spec/c] boolean?)
