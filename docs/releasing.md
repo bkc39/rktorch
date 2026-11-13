@@ -113,7 +113,7 @@ published:
 - The package server's build, docs and test columns for `torch` are green,
   and the manual renders with its example chapters.
 - `release-canary.yml`, dispatched: `raco pkg install torch` from
-  pkgs.racket-lang.org on `ubuntu-latest` and `macos-14`, with Racket 9.1
+  pkgs.racket-lang.org on `ubuntu-latest` and `macos-15`, with Racket 9.1
   and stable, trains `04-mlp` and checks the package deps. It also runs
   weekly, to catch catalog drift and new Racket releases. Once a release is
   published, a catalog that doesn't have `torch` fails it.

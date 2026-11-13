@@ -698,8 +698,8 @@ generator is present but python3 is not.
 `accelerator-if-available` picks CUDA, then MPS, then CPU — what the examples'
 `pick-device` returns, and the analogue of PyTorch's
 `torch.accelerator.current_accelerator()`, except that it picks MPS only once
-one element has been allocated there (#353): GitHub's macos-14 runners
-advertise MPS and cannot allocate on it. `mps-available?` keeps PyTorch's
+one element has been allocated there (#353): GitHub's retired macos-14
+runners advertised MPS and could not allocate on it. `mps-available?` keeps PyTorch's
 meaning, so the device suite guards its CUDA and MPS bodies separately on the
 `-available?` predicates, and on such a host its MPS cases fail; the example
 runners train on whichever accelerator the helper returns. Both verify real
@@ -1184,8 +1184,8 @@ installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
 manual renders with all its deps declared. `platform-macos-build.yml` proves
 `torch-aarch64-macosx` builds, audits, installs and passes the smoke on
 `macos-latest`; `platform-macos.yml` calls it and proves the zip passes the
-CPU suites on `macos-14` (whose runners advertise MPS but cannot allocate on
-it), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
+CPU suites and the accelerator suite on `macos-15` (GitHub retired
+`macos-14`, the package's floor, on 2026-11-02), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
 Linux zip (see [The package build server](#the-package-build-server)).
 `release.yml`, on a `v*` tag, checks the versions and the ABI stamp
 (`scripts/release/`, tested by the `release-test` and `release-current`
