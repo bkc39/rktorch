@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/list take)
+           (only-in racket/match match-define)
            rackunit
            (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
@@ -12,7 +13,8 @@
            "../train.rkt"
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/lightning-names.rkt" expected-logged-steps)
-           (only-in "private/trainer-kit.rkt" collecting-logger collecting-rows toy-loader)
+           (only-in "private/trainer-kit.rkt"
+                    collecting-logger collecting-rows step-each! toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "trainer-manual-test"))
@@ -104,11 +106,7 @@
     (define-optimizers (values (sgd (parameters net) #:lr 0.1) (sgd (parameters net) #:lr 0.1)))
     (define-training-step (x y)
       (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
-      (for ([opt (in-list (run-optimizers run))]
-            [_ (in-range steps)])
-        (manual-zero-grads! run opt)
-        (manual-backward! run (mse-loss (net x) y))
-        (manual-step! run opt))
+      (step-each! run (take (run-optimizers run) steps) (lambda () (mse-loss (net x) y)))
       #f)
     (define-validation-step (x y)
       (log! 'vl 2.0)
