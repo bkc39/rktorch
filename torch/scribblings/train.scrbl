@@ -193,8 +193,8 @@ not yet support training from a loader with @racket[#:workers].
 device supports it and @racket['16-mixed] otherwise; @racket['16-mixed] scales
 the loss with a @racket[grad-scaler], unscales before
 @racket[on-before-optimizer-step], and on the CPU runs as
-@racket['bf16-mixed], as Lightning does. A mixed precision runs the four steps
-under @racket[call-with-autocast] and no other hook. @racket[#:gradient-clip-val]
+@racket['bf16-mixed], as Lightning does. A mixed precision runs the training
+and validation steps under @racket[call-with-autocast] and no other hook. @racket[#:gradient-clip-val]
 clips each optimizer's parameters after @racket[on-before-optimizer-step], by
 @racket[clip-grad-norm!] or, for @racket['value], @racket[clip-grad-value!];
 under a scaler, clipping with a fused optimizer raises at
