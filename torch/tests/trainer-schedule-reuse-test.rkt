@@ -42,7 +42,8 @@
                gate-seconds))
       (match (unbox result)
         [(list v) v]
-        [e (raise e)])))
+        [(? exn? e) (raise e)]
+        [#f (error 'trainer-schedule-reuse-test "the first fit's thread left no result")])))
 
   (define (check-own-curve events label)
     (for ([e (in-list events)])
@@ -91,10 +92,10 @@
       opt)
     (define-training-step (x y) (mse-loss (net x) y)))
 
-  (bounded-test "a param-group-scheduler kept after its fit does not keep the optimizer alive"
+  (bounded-test "a param-group-scheduler still reachable after its fit holds no optimizer"
     (define cb (param-group-scheduler 'weight-decay (lambda (t) (+ 1.0 t))))
     (define wb (box #f))
     (fit (Retained wb) (toy-loader 6) #:max-epochs 1 #:logger #f #:callbacks (list cb))
     (for ([_ (in-range 3)]) (collect-garbage 'major))
     (check-false (weak-box-value (unbox wb)))
-    (check-pred callback? cb)))
+    (black-box cb)))

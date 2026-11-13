@@ -236,13 +236,13 @@
   (define rise (- (real->double-flonum end-factor) start))
   (define total (->fl total-iters))
   (shaped-by opt
-            (lambda (_base lr t initial?)
-              (cond
-                [(zero? t) (* lr start)]
-                [(or initial? (> t total-iters)) lr]
-                [else (* lr (+ 1.0 (/ rise (+ (* total start) (* (->fl (sub1 t)) rise)))))]))
-            #:closed (lambda (base t)
-                       (* base (+ start (/ (* rise (->fl (min total-iters t))) total))))))
+             (lambda (_base lr t initial?)
+               (cond
+                 [(zero? t) (* lr start)]
+                 [(or initial? (> t total-iters)) lr]
+                 [else (* lr (+ 1.0 (/ rise (+ (* total start) (* (->fl (sub1 t)) rise)))))]))
+             #:closed (lambda (base t)
+                        (* base (+ start (/ (* rise (->fl (min total-iters t))) total))))))
 
 ;; the two cosine phases of torch's OneCycleLR (anneal_strategy "cos",
 ;; three_phase False); momentum is left alone, cycle_momentum=False there

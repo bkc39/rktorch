@@ -20,12 +20,6 @@
 (define (curve/c key)
   (if (memq key '(beta1 beta2 eps)) real-curve/c nonnegative-curve/c))
 
-(define counters (hasheq 'epoch run-epoch 'step run-global-step))
-
-(define (write-scheduled! r interval at write!)
-  (when (eq? interval at)
-    (write! ((hash-ref counters at) r))))
-
 (define-callback hparam-scheduler (name curve interval)
   #:contract (->* (symbol? (-> exact-nonnegative-integer? real?)) (#:interval interval/c)
                   callback?)
@@ -41,11 +35,13 @@
                              "the trainer has no define-hparams field of this name"
                              "name" name "hparams" (trainer-hparam-names tr))))
   (define-hook (on-train-epoch-start)
-    (write-scheduled! run interval 'epoch (hparam-writer run name curve)))
+    (when (eq? interval 'epoch)
+      (write-hparam! run name curve (run-epoch run))))
   (define-hook (on-train-batch-start . _)
-    (write-scheduled! run interval 'step (hparam-writer run name curve))))
+    (when (eq? interval 'step)
+      (write-hparam! run name curve (run-global-step run)))))
 
-(define ((hparam-writer r name curve) t)
+(define (write-hparam! r name curve t)
   (set-hparam! (run-trainer r) name (curve t)))
 
 (define (optimizer-at r index)
@@ -72,18 +68,16 @@
                             "key" key)]
     [else (void)]))
 
-(define (group-writer r key curve index groups)
+(define (write-groups! r key curve index groups t)
   (define opt (optimizer-at r index))
   (define value/c (hyperparameter-value/c opt key))
-  (define targets (or groups (range (param-group-count opt))))
-  (lambda (t)
-    (define v (curve t))
-    (unless (contract-first-order-passes? value/c v)
-      (raise-arguments-error 'param-group-scheduler
-                             "the curve's value is out of range for this optimizer's hyperparameter"
-                             "key" key "at" t "value" v "expected" (contract-name value/c)))
-    (for ([g (in-list targets)])
-      (param-group-set! opt g key v))))
+  (define v (curve t))
+  (unless (contract-first-order-passes? value/c v)
+    (raise-arguments-error 'param-group-scheduler
+                           "the curve's value is out of range for this optimizer's hyperparameter"
+                           "key" key "at" t "value" v "expected" (contract-name value/c)))
+  (for ([g (in-list (or groups (range (param-group-count opt))))])
+    (param-group-set! opt g key v)))
 
 (define-callback param-group-scheduler (key curve optimizer groups interval)
   #:contract (->i ([key schedulable-key/c] [curve (key) (curve/c key)])
@@ -101,6 +95,8 @@
   (define-hook (on-train-start)
     (check-schedulable! run key optimizer groups))
   (define-hook (on-train-epoch-start)
-    (write-scheduled! run interval 'epoch (group-writer run key curve optimizer groups)))
+    (when (eq? interval 'epoch)
+      (write-groups! run key curve optimizer groups (run-epoch run))))
   (define-hook (on-train-batch-start . _)
-    (write-scheduled! run interval 'step (group-writer run key curve optimizer groups))))
+    (when (eq? interval 'step)
+      (write-groups! run key curve optimizer groups (run-global-step run)))))
