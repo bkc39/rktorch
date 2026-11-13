@@ -71,6 +71,40 @@
         (logged-steps
          .
          #hasheq(
+   (manual
+    .
+    (
+     (0 (epoch tl_step))
+     (1 (epoch tl_step))
+     (2 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (4 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
+   (manual-log-every-4
+    .
+    (
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
+   (manual-no-steps
+    .
+    (
+     (0 (epoch tl_step))
+     (1 (epoch tl_step))
+     (2 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (4 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
    (skip-loss
     .
     (

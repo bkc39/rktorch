@@ -8,7 +8,8 @@ logger row is labelled with in fits that skip a window (#445), and records
 trainer.estimated_stepping_batches as configure_optimizers reads it for a
 table of fit options (G2-L11 of the T2 spec, #385), and the fits of G3-L17,
 L19 and L22: a GradientAccumulationScheduler, manual optimization over two
-optimizers, and bf16-mixed precision. Writes
+optimizers, and bf16-mixed precision, and the logged rows of manual fits
+that step two optimizers or none each batch. Writes
 torch/tests/lightning-hooks.rktd, or the path given as the first argument;
 lightning-hooks-parity-test.rkt regenerates it and compares.
 
@@ -306,13 +307,38 @@ class Logged(Base):
         return super().validation_step(batch, batch_idx)
 
 
-def logged(scenario_kwargs, train=6, accumulate=1, log_every=1):
+class ManualLogged(Logged):
+    """Manual optimization stepping the first `steps` of two SGDs each batch."""
+
+    def __init__(self, scenario, steps):
+        super().__init__(scenario)
+        self.automatic_optimization = False
+        self.steps = steps
+
+    def training_step(self, batch, batch_idx):
+        self.log("tl", 1.0, on_step=True, on_epoch=True)
+        x, y = batch
+        for opt in self.optimizers()[:self.steps]:
+            opt.zero_grad()
+            self.manual_backward(nn.functional.mse_loss(self(x), y))
+            opt.step()
+
+    def configure_optimizers(self):
+        return [torch.optim.SGD(self.layer.parameters(), lr=0.1),
+                torch.optim.SGD(self.layer.parameters(), lr=0.1)]
+
+
+def logged(scenario_kwargs, train=6, accumulate=1, log_every=1, module=Logged):
     torch.manual_seed(0)
     rows = Rows()
     t = trainer([], logger=rows, log_every_n_steps=log_every,
                 accumulate_grad_batches=accumulate)
-    t.fit(Logged(Scenario(**scenario_kwargs)), loader(train), loader(4))
+    t.fit(module(Scenario(**scenario_kwargs)), loader(train), loader(4))
     return rows.rows
+
+
+def manual(steps):
+    return lambda scenario: ManualLogged(scenario, steps)
 
 
 LOGGED = {
@@ -322,6 +348,9 @@ LOGGED = {
         {"skip_loss": (0, 1)}, train=10, accumulate=2),
     "skip-loss-log-every-2": lambda: logged(
         {"skip_loss": (0, 1)}, log_every=2),
+    "manual": lambda: logged({}, module=manual(2)),
+    "manual-log-every-4": lambda: logged({}, log_every=4, module=manual(2)),
+    "manual-no-steps": lambda: logged({}, module=manual(0)),
 }
 
 

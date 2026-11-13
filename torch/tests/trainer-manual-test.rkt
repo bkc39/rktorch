@@ -11,7 +11,8 @@
                     zero-grads!)
            "../train.rkt"
            (only-in "private/blame.rkt" blames-caller?)
-           (only-in "private/trainer-kit.rkt" toy-loader)
+           (only-in "private/lightning-names.rkt" expected-logged-steps)
+           (only-in "private/trainer-kit.rkt" collecting-logger collecting-rows toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "trainer-manual-test"))
@@ -95,4 +96,32 @@
 
   (bounded-test "G3-L21: skip-step! in manual mode blames the caller"
     (check-exn blames-this-test?
-               (lambda () (fit (Skipper) (toy-loader 2) #:max-epochs 1 #:logger #f)))))
+               (lambda () (fit (Skipper) (toy-loader 2) #:max-epochs 1 #:logger #f))))
+
+  (define-trainer ManualLogged (net steps)
+    #:automatic-optimization? #f
+    (define-init (n) (set! net (Linear 2 1)) (set! steps n))
+    (define-optimizers (values (sgd (parameters net) #:lr 0.1) (sgd (parameters net) #:lr 0.1)))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (for ([opt (in-list (run-optimizers run))]
+            [_ (in-range steps)])
+        (manual-zero-grads! run opt)
+        (manual-backward! run (mse-loss (net x) y))
+        (manual-step! run opt))
+      #f)
+    (define-validation-step (x y)
+      (log! 'vl 2.0)
+      (mse-loss (net x) y)))
+
+  (define (check-manual-rows name steps #:log-every-n-steps [log-every 1])
+    (define l (collecting-logger))
+    (fit (ManualLogged steps) (toy-loader 6) #:val (toy-loader 4) #:max-epochs 2
+         #:num-sanity-val-steps 1 #:log-every-n-steps log-every #:logger l)
+    (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name)))
+
+  (bounded-test "G3 M2: manual rows are labelled and paced by batches, as Lightning's"
+    (check-manual-rows 'manual 2)
+    (check-manual-rows 'manual-log-every-4 2 #:log-every-n-steps 4)
+    (check-manual-rows 'manual-no-steps 0)))
+
