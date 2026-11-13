@@ -116,8 +116,8 @@
     (follow-moves! root)
     (with-gradients ([qs gs] (optimizer-parameters opt))
       (for/fold ([acc init]) ([bucket (in-list (group-by key-of (map cons qs gs)))])
-        (match-define (cons dev _) (key-of (car bucket)))
-        (proc acc dev (map cdr bucket))))))
+        (match-define (cons dev dt) (key-of (car bucket)))
+        (proc acc dev dt (map cdr bucket))))))
 
 (define (optimizer-fused? opt)
   (match (optimizer-root opt)
