@@ -5,8 +5,21 @@
          (only-in rackunit fail test-case)
          (only-in syntax/parse/define define-syntax-parse-rule))
 
-(provide memory-bounded-test
+(provide memory-after-majors
+         memory-bounded-test
+         minors-during
          within-memory)
+
+(define (memory-after-majors)
+  (for ([_ (in-range 2)]) (collect-garbage 'major))
+  (current-memory-use))
+
+(define (minors-during thunk)
+  (define receiver (make-log-receiver (current-logger) 'debug 'GC))
+  (thunk)
+  (for/sum ([event (in-producer (lambda () (sync/timeout 0 receiver)) #f)])
+    (define mode (vector-ref (struct->vector (vector-ref event 2)) 1))
+    (if (memq mode '(minor minor-incremental)) 1 0)))
 
 (define (within-memory megabytes thunk #:seconds [seconds 60])
   (define limited (make-custodian))
