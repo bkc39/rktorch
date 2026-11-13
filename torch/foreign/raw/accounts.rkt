@@ -225,7 +225,7 @@
   (set-phantom-bytes! (account-shadow a) bytes))
 
 (define (set-shadow! a reading)
-  (charge-shadow! a (max 0 (- reading (live-of a)))))
+  (charge-shadow! a (max 0 (- reading (live-bytes a)))))
 
 (define (note-adopted! a nbytes)
   (define taken (min nbytes (account-unaccounted a)))
@@ -239,7 +239,7 @@
 ;; another moment, and lowers nothing.
 (define (lower-shadow! a reading live)
   (define excess (max 0 (- reading live)))
-  (when (and (= live (live-of a))
+  (when (and (= live (live-bytes a))
              (< excess (account-unaccounted a)))
     (charge-shadow! a excess)))
 

@@ -1,12 +1,11 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base syntax/parse)
+  (require (for-syntax racket/base)
            (only-in racket/dict dict-ref)
            (only-in racket/list append-map shuffle)
            (only-in racket/match match-define)
            rackunit
-           (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in "../foreign.rkt" backward! cpu-device grad native-memory-unaccounted
                     native-memory-use sum zeros
                     [finalizer-diagnostics checked-finalizer-diagnostics])
@@ -35,11 +34,11 @@
                     own-pending tally-count tally-limit)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
-                    check-ledger churn-once! join join-all ledger-snapshot settle! spawn
-                    stop! with-race-hook worker-thread)
+                    check-ledger churn-once! join-all ledger-snapshot settle! spawn stop!)
            (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
            (only-in "private/tally-devices.rkt"
-                    kib mark mib shared-live with-batched-device with-unmarked-device)
+                    call-with-held-charge charging collections-of kib mark mib shared-live
+                    unaccount-all! with-batched-device with-parked with-unmarked-device)
            (only-in "private/within.rkt" bounded-test))
 
   (define limit (tally-limit mark))
@@ -47,55 +46,6 @@
 
   (define (fold-of dev) (dict-ref (native-memory-use/fold) dev 0))
   (define (pending dev) (own-pending (account-counters (account-of dev))))
-
-  (define (unaccount-all! keys)
-    (for-each unaccount! keys)
-    (flush-tallies!))
-
-  (define ((charging dev keys nbytes))
-    (for ([k (in-list keys)])
-      (record-allocation! k nbytes dev)))
-
-  (define (call-with-parked work proc #:pool [pool 'own])
-    (define done (make-semaphore 0))
-    (define hold (make-semaphore 0))
-    (define w
-      (spawn (lambda ()
-               (work)
-               (semaphore-post done)
-               (semaphore-wait hold))
-             #:pool pool))
-    (semaphore-wait done)
-    (dynamic-wind
-     void
-     (lambda () (proc w))
-     (lambda ()
-       (semaphore-post hold)
-       (unless (thread-dead? (worker-thread w))
-         (join w)))))
-
-  (define-syntax-parse-rule (with-parked (w:id work:expr
-                                               (~optional (~seq #:pool pool:expr)
-                                                          #:defaults ([pool #''own])))
-                              body:expr ...+)
-    (call-with-parked work (lambda (w) body ...) #:pool pool))
-
-  (define (call-with-held-charge dev nbytes thunk)
-    (flush-tally!)
-    (define key (box 'held))
-    (begin0
-      (with-parked (_w (charging dev (list key) nbytes))
-        (thunk))
-      (unaccount-all! (list key))))
-
-  (define (collections-of dev thunk)
-    (define resets (box 0))
-    (define (count-resets name subject)
-      (when (and (eq? name 'checks-resetting) (equal? subject dev))
-        (set-box! resets (add1 (unbox resets)))))
-    (with-race-hook count-resets
-      (thunk))
-    (unbox resets))
 
   (bounded-test "L1: churners killed at random leave the counter at the fold"
     (with-batched-device (dev 40)

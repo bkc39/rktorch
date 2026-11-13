@@ -401,12 +401,27 @@ the last defence when a trough collection is not yet due:
   different marks (a per-thread `native-memory-limit` or
   `native-memory-fraction`) do not flush every tally at every other gate;
   only a reset (`forget-mark!`) unsets it, back to the first gate's start.
-  Each fall, and each reset, is followed by a flush of every tally, so no
-  tally holds counts built up under a larger limit and the bound below
-  holds with the current one. Each
+  Each fall, and each reset, sets the limit and flushes every tally in
+  one uninterruptible region, so no tally holds counts built up under a
+  larger limit once the smaller one is visible and the bound below holds
+  with the current one: a kill of the gate's thread waits for the whole
+  flush, where a kill between tallies would leave the smaller limit
+  published with larger counts pending and no later gate to flush them.
+  That flush runs in atomic mode, so it prunes only the tallies of
+  collected threads. Each
   flush moves every pending count with a `cas-take!` and a `cas-add!` in
   one uninterruptible region, so a kill never strands an amount between
-  them, and takes no lock. Adoptions and adopted releases still write
+  them, and takes no lock. A flush counts itself in its tally's `moving`
+  box for the length of that region, and every flush that promises its
+  counts have landed (`flush-tally!`, so the reaper's `#:after-batch`
+  hook, and each tally of `flush-tallies!`) waits after its own transfer
+  for that count to reach 0: another thread's flush may have taken the
+  tally's counts and not yet added them, and without the wait a drain
+  could return `#t` with those releases still missing from the shared
+  counters. The wait spins, since the transfer it waits for is a few
+  CASes in an uninterruptible region on another OS thread (one on its own
+  OS thread cannot be swapped out mid-region), and costs one `unbox` a
+  flush when nothing is moving. Adoptions and adopted releases still write
   the shared counters, under the ledger. Every
   reader that decides or reports (`live-bytes`, `checks-seen`, the
   `native-memory-*` readers, `finalizer-diagnostics` and the sampler,
@@ -425,7 +440,13 @@ the last defence when a trough collection is not yet due:
   safe outside one (a stress of six parallel threads flushing while
   killed and finished threads die, 60 s on 9.1 and 9.3, conserved every
   count and pruned every tally). Inside atomic mode a flush prunes only the
-  tallies whose threads were collected. The registry keeps its count beside the
+  tallies whose threads were collected. Registering a tally prunes as
+  well, once the registry holds more than twice what the last prune left
+  (and more than 32): CPU threads that each allocate and free without a
+  mark never reach a flush of every tally, and without it the registry
+  would keep every tally they made. That prune judges every tally the
+  same way, flushes only the prunable ones and records what it leaves, so
+  its walk is amortised O(1) a registration. The registry keeps its count beside the
   list, so the bound below reads R without walking it.
   The per-op gate reads the shared counts plus its own thread's pending
   ones, so the op that crosses the interval still opens it. Only a
@@ -506,7 +527,12 @@ the last defence when a trough collection is not yet due:
   the shadow alone. The lowering reads the ledger before the allocator and
   skips if the ledger has moved by the time it would apply, since another
   thread's tensor accounted or released in between would leave the two
-  figures describing different moments. Tensors that a finished collection moves into the
+  figures describing different moments. Both that check and the refresh's
+  subtraction read the ledger through `live-bytes`, which flushes every
+  tally first: a release still pending in another thread's tally when the
+  allocator answered has already left the allocator's figure, and the
+  unflushed ledger would count it, charging too little or lowering too
+  far. Tensors that a finished collection moves into the
   cache are charged again by the trough's refresh after its collection;
   a backstop collection, mid-forward, does not raise the charge for them,
   and the backstop itself still reads `driver-allocated` in full.
@@ -757,7 +783,9 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `gate-read` | the backstop has read its gate, before it acts | device |
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
 | `tallies-flushing` | `flush-tallies!` entered, before it walks the registry | whether it may ask `thread-dead?` |
-| `tally-judged` | `flush-tallies!` has judged a tally prunable or not, before it flushes it | the tally |
+| `tally-judged` | `flush-tallies!` or a registration's prune has judged a tally prunable or not, before it flushes it | the tally |
+| `tallies-pruning` | a registration's prune entered, before it walks the registry | whether it may ask `thread-dead?` |
+| `tally-moving` | a flush has taken one of a tally's pending counts and not yet added it to the shared counter | the tally |
 | `unaccount-entry-read` | a charge read, before the CAS that takes it | handle |
 | `entry-unaccounted` | inside the unaccounting region, the CAS won | handle |
 | `free-taken` | an explicit free has taken the handle, before it unaccounts | handle |
