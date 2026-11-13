@@ -351,17 +351,19 @@ accelerator suite to the smoke with
 `RKTORCH_EXPECT_ACCELERATOR=mps`, so every pull request fails if the probe
 rejects a working MPS. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
 and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
-job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
+job, on `macos-15`, installs racket-lang.org's notarized
 Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
 with `SMOKE_TESTS` (a space-separated list of modules in place of
 `torch/pkg-build/smoke`) naming the CPU suites for the native library,
-tensor ops and autograd, and the accelerator suite: GitHub's `macos-14`
-runners advertise MPS but cannot allocate on it, so the device suites' MPS
-cases fail there. The job sets `RKTORCH_EXPECT_ACCELERATOR=cpu`, so the
-accelerator suite asserts that `accelerator-if-available` falls back to the
-CPU there and that the real probe's failure is logged once (#353). After the
-Racket 9.1 suites it fails unless `(mps-available?)`, so a runner that stops
-advertising MPS cannot pass the `cpu` expectation by skipping the probe.
+tensor ops and autograd, and the accelerator suite with
+`RKTORCH_EXPECT_ACCELERATOR=mps`. After the Racket 9.1 suites it fails
+unless `(mps-available?)`. `macos-15` is the oldest image GitHub offers:
+it retired `macos-14` on 2026-11-02, so no CI job runs on the package's
+14.0 floor. `macos-14` runners advertised MPS and could not allocate on
+it, which ran the real probe's out-of-memory path (#353); no runner does
+that now. The accelerator suite runs that case only with
+`RKTORCH_EXPECT_ACCELERATOR=cpu`. Its stand-in probes test the fallback
+on every host.
 
 Weekly or on a manual run of `platform-macos.yml` itself, or when a calling
 workflow passes `mps: true`, an `mps` job on `macos-latest` installs the package on Racket 9.3, fails unless
@@ -602,9 +604,8 @@ installs, so the platform packages have lanes of their own:
   `platform-macos-build.yml`, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
-  `install`, on `macos-14`, runs the CPU suites and the accelerator suite at
-  Racket 9.1 and 9.3, since GitHub's `macos-14` runners advertise MPS but
-  cannot allocate on it;
+  `install`, on `macos-15`, runs the CPU suites and the accelerator suite at
+  Racket 9.1 and 9.3;
   `mps` runs the MPS suites ([above](#arm64-macos))
   weekly, on demand, or when a calling workflow passes `mps: true`. The lane
   runs on pull requests that touch the paths listed in the workflow, weekly,
