@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match)
+           rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
                     * + backward! cuda-available? grad manual-seed! randn reshape sum tensor
@@ -9,8 +10,12 @@
            (only-in "../nn.rkt"
                     Linear Parameter adam grad-scaler grad-scaler-enabled? grad-scaler-scale
                     grad-scaler-scale-loss grad-scaler-step! grad-scaler-unscale!
-                    grad-scaler-update! parameters sgd step!)
+                    grad-scaler-update! parameters sgd step! zero-grads!)
+           (only-in (submod "../nn/optim.rkt" private) optimizer-state)
+           (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/within.rkt" bounded-test))
+
+  (define blames-this-test? (blames-caller? "grad-scaler-edge-test"))
 
   (define (flat t)
     (~> t (reshape -1) tensor->list))
@@ -34,31 +39,82 @@
     (grad-scaler-update! s 4.0)
     (check-equal? (grad-scaler-scale s) 4.0))
 
-  (define (fused-run scaled? bad?)
+  (define (fused-adam ps)
+    (adam ps #:fused? #t #:lr 0.1))
+
+  (define (fused-sgd ps)
+    (sgd ps #:fused? #t #:lr 0.1 #:momentum 0.9))
+
+  (define (fused-run mode bad? #:optimizer [make-opt fused-adam])
     (manual-seed! 0)
     (define net (Linear 3 2))
     (define x (randn 4 3))
-    (define opt (adam (parameters net) #:fused? #t #:lr 0.1))
+    (define opt (make-opt (parameters net)))
     (define loss (* (sum (net x)) (if bad? +inf.0 1.0)))
-    (cond
-      [scaled?
-       (define s (cpu-scaler))
-       (backward! (grad-scaler-scale-loss s loss))
-       (grad-scaler-unscale! s opt)
-       (grad-scaler-step! s opt)
-       (grad-scaler-update! s)]
-      [else
+    (define s (cpu-scaler))
+    (match mode
+      ['plain
        (backward! loss)
-       (step! opt)])
+       (step! opt)]
+      [_
+       (backward! (grad-scaler-scale-loss s loss))
+       (when (eq? mode 'unscaled)
+         (grad-scaler-unscale! s opt))
+       (grad-scaler-step! s opt)
+       (grad-scaler-update! s)])
     (map flat (parameters net)))
 
   (bounded-test "a fused step after an explicit unscale equals the plain fused step"
-    (check-equal? (fused-run #t #f) (fused-run #f #f)))
+    (check-equal? (fused-run 'unscaled #f) (fused-run 'plain #f)))
 
   (bounded-test "a fused step after an explicit unscale skips an inf step"
     (manual-seed! 0)
     (define before (map flat (parameters (Linear 3 2))))
-    (check-equal? (fused-run #t #t) before))
+    (check-equal? (fused-run 'unscaled #t) before))
+
+  (bounded-test "G3 M3: a fused step with no explicit unscale equals the plain fused step"
+    (check-equal? (fused-run 'ready #f) (fused-run 'plain #f))
+    (check-equal? (fused-run 'ready #f #:optimizer fused-sgd)
+                  (fused-run 'plain #f #:optimizer fused-sgd)))
+
+  (bounded-test "G3 M3: a fused step with no explicit unscale leaves its state on an inf step"
+    (manual-seed! 0)
+    (define net (Linear 3 2))
+    (define x (randn 4 3))
+    (define opt (adam (parameters net) #:fused? #t #:lr 0.1))
+    (define s (cpu-scaler))
+    (define (scaled-step! factor)
+      (zero-grads! opt)
+      (backward! (grad-scaler-scale-loss s (* (sum (net x)) factor)))
+      (grad-scaler-step! s opt)
+      (grad-scaler-update! s))
+    (scaled-step! 1.0)
+    (define params-before (map flat (parameters net)))
+    (define state-before (map flat (optimizer-state opt)))
+    (scaled-step! +inf.0)
+    (check-equal? (map flat (parameters net)) params-before)
+    (check-equal? (map flat (optimizer-state opt)) state-before)
+    (check-equal? (grad-scaler-scale s) 32768.0))
+
+  (bounded-test "G3 L4: an update to a given scale needs no step"
+    (define p (Parameter (tensor '(0.5 -0.25))))
+    (define s (cpu-scaler))
+    (grad-scaler-scale-loss s (sum (* p p)))
+    (grad-scaler-update! s 8.0)
+    (check-equal? (grad-scaler-scale s) 8.0))
+
+  (bounded-test "G3 L4: an update before any loss is scaled blames the caller"
+    (check-exn blames-this-test? (lambda () (grad-scaler-update! (cpu-scaler) 8.0))))
+
+  (bounded-test "G3 L5: unscaling float16 gradients raises, as torch's unscale_ does"
+    (define p (Parameter (tensor '(0.5 -0.25) #:dtype 'float16)))
+    (define opt (sgd (list p) #:lr 0.1))
+    (define s (cpu-scaler))
+    (backward! (grad-scaler-scale-loss s (sum (* p p))))
+    (check-exn #rx"grad-scaler-unscale!: attempting to unscale FP16 gradients"
+               (lambda () (grad-scaler-unscale! s opt)))
+    (check-exn #rx"grad-scaler-step!: attempting to unscale FP16 gradients"
+               (lambda () (grad-scaler-step! s opt))))
 
   (bounded-test "two dtypes on one device share one inf check"
     (define p32 (Parameter (tensor '(0.5 -0.25))))

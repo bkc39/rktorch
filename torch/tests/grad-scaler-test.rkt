@@ -11,6 +11,7 @@
                     grad-scaler-scale grad-scaler-scale-loss grad-scaler-step!
                     grad-scaler-unscale! grad-scaler-update! layer-copy parameters sgd step!
                     zero-grads!)
+           (only-in (submod "../nn/grad-scaler.rkt" private) host-reads)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/op-calls.rkt" crossings-of)
@@ -138,9 +139,14 @@
          (backward! loss)
          (crossings-of (lambda () (step! opt)))])))
 
-  (bounded-test "G3-L7: a fused scaled step costs a fused step, a foreach one a constant more"
-    (check-equal? (step-crossings 2 #:fused? #t #:scaled? #t)
-                  (step-crossings 2 #:fused? #t #:scaled? #f))
+  (bounded-test "G3-L7: a scaled step costs a constant more, and a fused one reads no host"
+    (define (fused-extra n)
+      (- (step-crossings n #:fused? #t #:scaled? #t) (step-crossings n #:fused? #t #:scaled? #f)))
+    (check-equal? (fused-extra 2) (fused-extra 1))
+    (check-equal? (fused-extra 4) (fused-extra 1))
+    (define reads-before (host-reads))
+    (step-crossings 2 #:fused? #t #:scaled? #t)
+    (check-equal? (host-reads) reads-before)
     (define (extra n)
       (- (step-crossings n #:fused? #f #:scaled? #t) (step-crossings n #:fused? #f #:scaled? #f)))
     (check-equal? (extra 1) (extra 4))
