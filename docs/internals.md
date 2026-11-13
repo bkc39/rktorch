@@ -291,9 +291,18 @@ per entry; the pair runs the per-entry count (331).
   `young-count` is the pair of an epoch and its bytes, so the first count
   after a collection starts a new one, and a young phantom of a dead epoch
   rolls into the old one at the next sync. A tally's pending young bytes
-  carry the epoch they were gathered in: once that epoch has ended, a later
-  charge or the flush carries only what is above 0 into the next one, so a
-  release pending across a collection never lowers the next epoch's count.
+  carry the epoch of the entries they count: a gather into a tally whose
+  epoch has ended tags it with the entry's epoch, not the current one, so a
+  release whose epoch ended after it read it as live stays tagged with that
+  epoch. Once the tag's epoch has ended, a later charge or the flush carries
+  only what is above 0 into the next one. A negative count reaches the
+  shared count only when its tag is the shared count's epoch
+  (`note-young!`); otherwise it counts as 0. So a collection that lands
+  between a release reading its epoch as live and its bytes reaching the
+  shared count drops the release, whether it lands before the gather, in a
+  flush between taking the pending bytes and counting them, or on an
+  adopted release, which counts straight into the shared count; it never
+  lowers the next epoch's count.
   The tag is a box beside the count, not a pair with it, so a charge
   allocates nothing (a pair per op cost 40 ns at eight threads): only the
   tally's own thread writes either, clamping the count before it re-tags

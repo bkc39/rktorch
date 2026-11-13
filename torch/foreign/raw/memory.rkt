@@ -337,7 +337,7 @@
     [p (tally-op! p nbytes)]
     [else
      (with-ledger
-       (count-live! account #f (- nbytes) 0 #:young young)
+       (count-live! account #f (- nbytes) 0 #:young young #:epoch epoch)
        (race-point live-returned key)
        (race-point adoption-returning key)
        (when (positive? (allocation-adopted a))

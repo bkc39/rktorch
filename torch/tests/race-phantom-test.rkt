@@ -4,11 +4,15 @@
   (require (only-in racket/dict dict-ref)
            (only-in racket/list append-map shuffle)
            rackunit
+           (only-in "../foreign/raw/accounts.rkt"
+                    account-of note-live! note-unadopted! with-ledger)
+           (only-in (submod "../foreign/raw/accounts.rkt" private) account-counters)
            (only-in "../foreign/raw/memory.rkt"
-                    native-memory-use/fold record-allocation! unaccount!)
+                    adopt-gradient! native-memory-use/fold record-allocation! unaccount!)
            (only-in "../foreign/raw/phantoms.rkt" charge-epoch young-epoch?)
            (only-in (submod "../foreign/raw/phantoms.rkt" private) rounds young-count-of)
-           (only-in "../foreign/raw/tallies.rkt" flush-tallies! flush-tally!)
+           (only-in "../foreign/raw/tallies.rkt"
+                    flush-tallies! flush-tally! pending-of tally-live!)
            (only-in "private/race-harness.rkt"
                     join spawn stop! with-race-hook worker-thread)
            (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
@@ -334,6 +338,92 @@
   (bounded-test "L14: a release flushed before its charge holds the young count at 0"
     (check-equal? (within-one-epoch 80 release-flushed-before-charge) 0
                   "the young count after the release's flush, within one epoch"))
+
+  (define (release-gathered-after-its-epoch dev on-other)
+    (define p (pending-of (account-counters (account-of dev))))
+    (define mine (box 'mine))
+    (define released (box 'released))
+    (define charged-after (box 'charged-after))
+    (record-allocation! mine (* 8 kib) dev)
+    (flush-tally!)
+    (collect-garbage 'minor)
+    (on-other (lambda () (record-allocation! released (* 16 kib) dev) (flush-tally!)))
+    (define e1 (charge-epoch))
+    (collect-garbage 'minor)
+    (define e2 (charge-epoch))
+    (on-other (lambda () (record-allocation! charged-after (* 16 kib) dev) (flush-tally!)))
+    (tally-live! p (- (* 16 kib)) -1 (- (* 16 kib)) e1)
+    (flush-tally!)
+    (define count (young-count-of (phantoms-of dev)))
+    (tally-live! p (* 16 kib) 1 0)
+    (unaccount-all! (list mine released charged-after))
+    (check-conserved dev "after the releases")
+    (and (young-epoch? e2) (not (young-epoch? e1)) count))
+
+  (bounded-test "L14: a release gathered after its epoch ended leaves the next epoch's count"
+    (check-equal? (within-one-epoch 90 release-gathered-after-its-epoch) (* 16 kib)
+                  "the next epoch's young count after the late release"))
+
+  (define (collect-and-charge-at point subject dev)
+    (define e (box #f))
+    (define (hook name at)
+      (when (and (eq? name point) (eq? at subject) (not (unbox e)))
+        (collect-garbage 'minor)
+        (set-box! e (charge-epoch))
+        (note-live! (account-of dev) (* 16 kib) #:young (* 16 kib) #:epoch (unbox e))))
+    (values e hook))
+
+  (define (count-after-the-charge dev e)
+    (define count (young-count-of (phantoms-of dev)))
+    (note-live! (account-of dev) (- (* 16 kib)))
+    (flush-tallies!)
+    (check-conserved dev "after the releases")
+    (and (unbox e) (young-epoch? (unbox e)) count))
+
+  (define (flush-across-a-collection dev _on-other)
+    (define released (box 'released))
+    (record-allocation! released (* 16 kib) dev)
+    (flush-tally!)
+    (unaccount! released)
+    (define p (pending-of (account-counters (account-of dev))))
+    (define-values (e hook) (collect-and-charge-at 'young-taken p dev))
+    (with-race-hook hook (flush-tally!))
+    (count-after-the-charge dev e))
+
+  (bounded-test "L14: a flush whose epoch ends before it counts leaves the next epoch's count"
+    (check-equal? (within-one-epoch 100 flush-across-a-collection) (* 16 kib)
+                  "the next epoch's young count after the flush"))
+
+  (define (charge-adopted! dev)
+    (define key (box 'adopted))
+    (define param (box 'param))
+    (with-ledger (note-unadopted! (account-of dev) (* 16 kib)))
+    (record-allocation! key (* 16 kib) dev #:adopt (lambda (e) (adopt-gradient! (list param) key e)))
+    key)
+
+  (define (adopted-release-within-its-epoch dev _on-other)
+    (define e (charge-epoch))
+    (define key (charge-adopted! dev))
+    (define charged (young-count-of (phantoms-of dev)))
+    (unaccount! key)
+    (define released (young-count-of (phantoms-of dev)))
+    (flush-tallies!)
+    (check-conserved dev "after the release")
+    (and (young-epoch? e) (list charged released)))
+
+  (bounded-test "L14: an adopted release within its epoch lowers the young count"
+    (check-equal? (within-one-epoch 120 adopted-release-within-its-epoch) (list (* 16 kib) 0)
+                  "(young count after the adopted charge, after its release)"))
+
+  (define (adopted-release-across-a-collection dev _on-other)
+    (define key (charge-adopted! dev))
+    (define-values (e hook) (collect-and-charge-at 'entry-unaccounted key dev))
+    (with-race-hook hook (unaccount! key))
+    (count-after-the-charge dev e))
+
+  (bounded-test "L14: an adopted release whose epoch ends before it counts leaves the next epoch's count"
+    (check-equal? (within-one-epoch 110 adopted-release-across-a-collection) (* 16 kib)
+                  "the next epoch's young count after the adopted release"))
 
   (define ring 40)
   (define ring-ops 2000)

@@ -40,13 +40,14 @@
   (define e (charge-epoch))
   (phantoms (box #f) (box (young-count e 0)) (make-phantom-bytes 0) (make-phantom-bytes 0) e 0 0))
 
-(define (note-young! ph nbytes)
+(define (note-young! ph nbytes from)
   (define e (charge-epoch))
   (define (current? held) (or (eq? held e) (young-epoch? held)))
+  (define (counted held) (if (eq? held from) nbytes (max 0 nbytes)))
   (unless (eqv? 0 nbytes)
     (cas-update! (phantoms-count ph)
                  (match-lambda
-                   [(young-count (? current? held) n) (young-count held (max 0 (+ n nbytes)))]
+                   [(young-count (? current? held) n) (young-count held (max 0 (+ n (counted held))))]
                    [_ (young-count e (max 0 nbytes))])
                  #:site 'phantom)))
 
@@ -60,7 +61,7 @@
   (match-define (struct* phantoms ([count count])) ph)
   (match-define (young-count e n) (unbox count))
   (define l (max 0 (unbox live)))
-  (define y (if (young-epoch? e) (max 0 (min l n)) 0))
+  (define y (if (young-epoch? e) (min l n) 0))
   (values e (- l y) y))
 
 (define (roll! ph e)

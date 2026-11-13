@@ -135,8 +135,8 @@
 (define (tally-of a)
   (pending-of (account-counters a)))
 
-(define (note-live! a nbytes #:young [young 0])
-  (note-counters-live! (account-counters a) nbytes young))
+(define (note-live! a nbytes #:young [young 0] #:epoch [epoch #f])
+  (note-counters-live! (account-counters a) nbytes young epoch))
 
 (define (note-checked! a nbytes)
   (define c (account-counters a))
@@ -155,7 +155,7 @@
     [p (tally-live! p nbytes entries young epoch)]
     [else
      (unless (eqv? 0 nbytes)
-       (note-live! a nbytes #:young young))
+       (note-live! a nbytes #:young young #:epoch epoch))
      (cas-add! (counters-entries (account-counters a)) entries)]))
 
 (define (count-checked! a p nbytes)

@@ -46,9 +46,9 @@
 (define (sync-counters-phantoms! c)
   (sync-phantoms! (counters-phantoms c) (counters-live c)))
 
-(define (note-counters-live! c nbytes young)
+(define (note-counters-live! c nbytes young epoch)
   (cas-add! (counters-live c) nbytes)
-  (note-young! (counters-phantoms c) young)
+  (note-young! (counters-phantoms c) young epoch)
   (with-uninterruptible
     (sync-counters-phantoms! c)))
 
@@ -156,7 +156,7 @@
   (unless (or (eq? epoch (unbox held)) (young-epoch? (unbox held)))
     (tally-update! (pending-young p) clamp)
     (memory-order-release)
-    (set-box! held (charge-epoch)))
+    (set-box! held (or epoch (charge-epoch))))
   (tally-add! (pending-young p) young))
 
 (define (tally-checked! p nbytes)
@@ -182,7 +182,7 @@
   (define held (unbox (pending-young-epoch p)))
   (memory-order-acquire)
   (define n (take! (pending-young p)))
-  (if (young-epoch? held) n (clamp n)))
+  (values held (if (young-epoch? held) n (clamp n))))
 
 (define (move! from to)
   (define n (take! from))
@@ -195,11 +195,12 @@
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
       (define c (pending-counters p))
       (define live (move! (pending-live p) (counters-live c)))
-      (define young (take-young! p))
+      (define-values (held young) (take-young! p))
       (move! (pending-entries p) (counters-entries c))
       (move! (pending-since-check p) (counters-since-check c))
       (move! (pending-since-sample p) (counters-since-sample c))
-      (note-young! (counters-phantoms c) young)
+      (race-point young-taken p)
+      (note-young! (counters-phantoms c) young held)
       (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
       (unless quiet?
         (sync-counters-phantoms! c)))
