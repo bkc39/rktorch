@@ -52,7 +52,7 @@ jobs:
       OUT: ${{ github.workspace }}/.scratch/macos/out
       RACKETS: ${{ github.workspace }}/.scratch/macos/racket
       SMOKE_TESTS: torch/tests/native-library-test torch/tests/tensor-ops-test torch/tests/autograd-test torch/tests/accelerator-test
-      RKTORCH_EXPECT_ACCELERATOR: cpu
+      RKTORCH_EXPECT_ACCELERATOR: mps
     steps:
       - uses: actions/checkout@v5
 
