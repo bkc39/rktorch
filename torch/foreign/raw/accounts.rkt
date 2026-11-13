@@ -150,7 +150,7 @@
 (define (note-unaccounted! a nbytes)
   (note-live! a (- nbytes)))
 
-(define (count-live! a p nbytes entries #:young [young 0] #:epoch [epoch #f])
+(define (count-live! a p nbytes entries #:young young #:epoch epoch)
   (cond
     [p (tally-live! p nbytes entries young epoch)]
     [else

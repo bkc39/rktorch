@@ -6,7 +6,7 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
          (only-in "phantoms.rkt"
-                  charge-epoch fresh-phantoms note-young! sync-phantoms! young-epoch?)
+                  fresh-phantoms note-young! sync-phantoms! young-epoch?)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-uninterruptible))
 
@@ -142,7 +142,7 @@
 (define (tally-staleness c)
   (* 2 (tally-count) (limit-of c)))
 
-(define (tally-live! p nbytes entries young [epoch #f])
+(define (tally-live! p nbytes entries young [epoch unheld])
   (tally-add! (pending-live p) nbytes)
   (tally-add! (pending-entries p) entries)
   (unless (eqv? 0 young)
@@ -156,7 +156,7 @@
   (unless (or (eq? epoch (unbox held)) (young-epoch? (unbox held)))
     (tally-update! (pending-young p) clamp)
     (memory-order-release)
-    (set-box! held (or epoch (charge-epoch))))
+    (set-box! held epoch))
   (tally-add! (pending-young p) young))
 
 (define (tally-checked! p nbytes)
