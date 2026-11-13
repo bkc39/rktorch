@@ -171,7 +171,8 @@ reads to the host at the end of every @racket[#:log-every-n-steps]-th
 accumulation window of the fit, counted across epochs, at the step of a
 @racket[request-stop!], and at each epoch end, in one transfer for all keys.
 The logger gets a training row, and a validation epoch's row, labelled with
-the windows ended before the current one; the first window's row is at step
+the windows ended before the current one, where under manual optimization
+each batch ends one whatever it steps; the first window's row is at step
 0, and an epoch's training row before any window ends is at step -1. Each row carries
 the key @racket['epoch], @racket[run-epoch], unless one was logged. A
 per-step value logged in a validation loop reaches the logger at each
