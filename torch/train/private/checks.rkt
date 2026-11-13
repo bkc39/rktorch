@@ -78,7 +78,8 @@
   v)
 
 (define (checked-hparams! who names vals)
-  (for-each (lambda (name v) (checked-hparam who name v)) names vals))
+  (for ([name (in-list names)] [v (in-list vals)])
+    (checked-hparam who name v)))
 
 (define (readable? v)
   (or (real? v) (string? v) (symbol? v) (boolean? v)
