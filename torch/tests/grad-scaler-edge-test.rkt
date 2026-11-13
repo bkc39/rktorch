@@ -85,7 +85,7 @@
     (define s (cpu-scaler))
     (define (scaled-step! factor)
       (zero-grads! opt)
-      (define loss (* (sum (net x)) factor))
+      (define loss (~> (net x) sum (* factor)))
       (backward! (grad-scaler-scale-loss s loss))
       (grad-scaler-step! s opt)
       (grad-scaler-update! s))
