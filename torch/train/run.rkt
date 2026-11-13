@@ -15,7 +15,7 @@
                   live? [run-accumulate accumulate-of] run-batch-index run-book
                   run-current-stage run-device run-entry run-epoch run-global-step
                   [run-grad-scaler grad-scaler-of] run-hook run-loop run-optimizers
-                  [run-precision precision-of] [run-schedulers run-scheduler-configs]
+                  [run-precision precision-of] run-scheduler-configs
                   run-step-pending? run-stepped? run-stepping-batches run-trainer run?
                   set-run-accumulate! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-stop?!)

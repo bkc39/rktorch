@@ -426,7 +426,8 @@ The fields of a @racket[scheduler-config].}
                        (hash/c symbol? real? #:immutable #t)])]{
 Read and write the fields named by @racket[define-hparams]; another
 @racket[name] is a contract violation. The next hook reads the written value
-from the field.
+from the field. Reading a field a hook has set to a non-real raises an error
+naming it.
 @examples[#:eval train-eval
 (define-trainer Tuned (net lr)
   (define-init () (set! net (Linear 1 1)) (set! lr 0.1))
@@ -487,7 +488,9 @@ epoch start. It keeps no state: the value depends only on the step or epoch.}
          callback?]{
 The same for @racket[key] of the selected parameter groups (every group for
 @racket[#f]) of the @racket[optimizer]-th optimizer, written as an absolute
-value.
+value. The curve's values are reals for @racket['beta1], @racket['beta2] and
+@racket['eps], and @racket[(>=/c 0)] for the other keys; a value the optimizer
+rejects, such as a negative RMSprop @racket['eps], raises naming the callback.
 
 @examples[#:eval train-eval
 (require (only-in racket/math pi))
