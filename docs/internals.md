@@ -305,8 +305,9 @@ per entry; the pair runs the per-entry count (331).
   lowers the next epoch's count.
   The tag is a box beside the count, not a pair with it, so a charge
   allocates nothing (a pair per op cost 40 ns at eight threads): only the
-  tally's own thread writes either, clamping the count before it re-tags
-  it, with `memory-order-release` between; a flush reads the tag, then
+  tally's own thread writes the tag or adds to the count (a flush on
+  another thread only takes the count), clamping the count before it
+  re-tags it, with `memory-order-release` between; a flush reads the tag, then
   `memory-order-acquire`, then takes the count, so a count it reads as live
   was clamped first, and a re-tag it misses drops a release's negative
   bytes, which only over-counts.
