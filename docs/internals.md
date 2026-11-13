@@ -294,6 +294,13 @@ per entry; the pair runs the per-entry count (331).
   carry the epoch they were gathered in: once that epoch has ended, a later
   charge or the flush carries only what is above 0 into the next one, so a
   release pending across a collection never lowers the next epoch's count.
+  The tag is a box beside the count, not a pair with it, so a charge
+  allocates nothing (a pair per op cost 40 ns at eight threads): only the
+  tally's own thread writes either, clamping the count before it re-tags
+  it, with `memory-order-release` between; a flush reads the tag, then
+  `memory-order-acquire`, then takes the count, so a count it reads as live
+  was clamped first, and a re-tag it misses drops a release's negative
+  bytes, which only over-counts.
   Pending charges do carry over, so across a collection the young figure can
   over-count by what the tallies held pending, which only adds pressure; it
   never under-counts. The shared count never goes below 0 either. A

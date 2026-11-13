@@ -52,10 +52,10 @@
         new
         (retry))))
 
-(define (take-loop site b empty)
+(define (take-loop site b)
   (let retry ()
     (define old (unbox b))
-    (if (cas! site b old empty)
+    (if (cas! site b old 0)
         old
         (retry))))
 
@@ -85,11 +85,9 @@
     (update-loop s b (lambda (old) (+ old by)))))
 
 (define-syntax-parse-rule (cas-take! b:expr
-                                    (~optional (~seq #:leaving empty:expr)
-                                               #:defaults ([empty #'0]))
                                     (~optional (~seq #:site s:site)
                                                #:defaults ([s #''update])))
-  (take-loop s b empty))
+  (take-loop s b))
 
 (define-syntax-parse-rule (cas-claim! b:expr from:expr to:expr
                                       (~optional (~seq #:site s:site)

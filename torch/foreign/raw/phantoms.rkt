@@ -1,15 +1,12 @@
 #lang racket/base
 
-(require (only-in racket/match match match-define match-lambda struct*)
+(require (only-in racket/match match-define match-lambda struct*)
          (only-in "cas.rkt" cas-claim! cas-update! with-claim)
          (only-in "race-points.rkt" race-point))
 
 (provide fresh-phantoms
          charge-epoch
          young-epoch?
-         no-young
-         gather-young
-         flushed-young
          note-young!
          sync-phantoms!)
 
@@ -33,18 +30,6 @@
   (and (weak-box-value e) #t))
 
 (struct young-count (epoch bytes))
-
-(define no-young (young-count (make-weak-box #f) 0))
-
-(define (gather-young held nbytes)
-  (match held
-    [(young-count (? young-epoch? e) n) (young-count e (+ n nbytes))]
-    [(young-count _ n) (young-count (charge-epoch) (+ (max 0 n) nbytes))]))
-
-(define flushed-young
-  (match-lambda
-    [(young-count (? young-epoch?) n) n]
-    [(young-count _ n) (max 0 n)]))
 
 (struct phantoms
   (claim count old
