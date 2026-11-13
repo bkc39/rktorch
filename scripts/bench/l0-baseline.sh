@@ -54,8 +54,14 @@ bench() {
     || { echo "l0-baseline: run.rkt $* exited $?" >&2; failed=1; }
 }
 
+intra_op() {
+  local n=$1
+  shift
+  OMP_NUM_THREADS=$n MKL_NUM_THREADS=$n "$@"
+}
+
 one_thread() {
-  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 "$@"
+  intra_op 1 "$@"
 }
 
 stage_cpu() {
@@ -63,6 +69,9 @@ stage_cpu() {
   bench "${micro[@]}" ops pytorch-ops
   one_thread bench "${micro[@]}" ops pytorch-ops
   one_thread bench "${micro[@]}" threads pytorch-threads
+  for n in 1 4 8; do
+    intra_op "$n" bench "${micro[@]}" threads pytorch-threads --mix grain
+  done
 }
 
 stage_cuda() {
@@ -75,7 +84,7 @@ stage_cuda() {
         < <(variant "$v-$w" "VARIANT=$v,WORKERS=$w" "$loader_smoke")
     done
   done
-  bench e2e "${e2e[@]}" --cache "$cache" \
+  one_thread bench e2e "${e2e[@]}" --cache "$cache" \
     --only 17-workers,py-17-workers,py-17-workers-per "${loader[@]}"
   local headline=()
   mapfile -t headline < <(variant headline "" "$training_smoke")
@@ -108,9 +117,9 @@ stage_loader() {
         < <(variant "$p-$w" "PIPELINE=$p,WORKERS=$w${tree:+,$tree}" "$png_resnet_smoke")
     done
   done
-  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+  one_thread bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
     --only cifar-loader,py-cifar-loader "${loader[@]}"
-  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+  one_thread bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
     --only cifar-resnet,py-cifar-resnet "${resnet[@]}"
 }
 

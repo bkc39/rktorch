@@ -2,12 +2,13 @@
 
 (require (only-in ffi/unsafe/custodian make-custodian-at-root)
          (only-in torch + @ backward! randn relu sum tensor)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
          (only-in torch/nn Linear Sequential cross-entropy parameters sgd step! zero-grads!)
          (only-in "harness.rkt" bench-case clock-ms))
 
 (provide thread-counts
          main-states
+         mix-names
          ops-per-iteration
          scaling-run
          scaling-cases)
@@ -15,6 +16,8 @@
 (define thread-counts '(1 2 4 8))
 (define main-states '(idle train))
 (define ops-per-iteration 4)
+(define task-dir "/proc/self/task")
+(define sample-interval 0.1)
 
 (define (op-mix)
   (define a8 (randn 8 8))
@@ -26,6 +29,39 @@
     (@ a64 b64)
     (relu a64)
     (sum b64)))
+
+(define (grain-mix)
+  (define a (randn 256 256))
+  (define b (randn 256 256))
+  (lambda ()
+    (@ a b)
+    (+ a b)))
+
+(define mixes
+  (list (list 'small op-mix ops-per-iteration)
+        (list 'grain grain-mix 2)))
+
+(define mix-names (map car mixes))
+
+(define (os-thread-count [tasks task-dir])
+  (and (directory-exists? tasks) (length (directory-list tasks))))
+
+(define (peak-count a b)
+  (and a b (max a b)))
+
+(define (start-peak-sampler #:tasks [tasks task-dir] #:interval [interval sample-interval])
+  (define peak (box (os-thread-count tasks)))
+  (define (sample!) (set-box! peak (peak-count (unbox peak) (os-thread-count tasks))))
+  (define sampler
+    (thread (lambda ()
+              (let loop ()
+                (sleep interval)
+                (sample!)
+                (loop)))))
+  (lambda ()
+    (kill-thread sampler)
+    (sample!)
+    (unbox peak)))
 
 (define (training-step)
   (define net (Sequential (Linear 784 256) relu (Linear 256 10)))
@@ -79,13 +115,16 @@
                      #:grace [grace 30]
                      #:mix [make-mix op-mix]
                      #:ops-per-mix [ops-per-mix ops-per-iteration]
-                     #:probe [probe void])
+                     #:probe [probe void]
+                     #:tasks [tasks task-dir])
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
   (define failure (box #f))
   (define-values (custodian workers) (start-workers n go? stop? counts failure make-mix))
+  (define stop-sampler (start-peak-sampler #:tasks tasks))
   (define stopped #f)
+  (define peak #f)
   (define probe-start (probe))
   (define t0 (clock-ms))
   (set-box! go? #t)
@@ -98,6 +137,7 @@
        (define ops (for/sum ([k (in-vector counts)]) k))
        (values steps elapsed ops (probe)))
      (lambda ()
+       (set! peak (stop-sampler))
        (set-box! stop? #t)
        (set! stopped (reap! custodian workers grace)))))
   (match (unbox failure)
@@ -107,6 +147,7 @@
                 'main_steps_per_s (/ main-steps elapsed-s)
                 'started_ms t0
                 'stopped stopped
+                'peak_os_threads peak
                 'probe_start probe-start
                 'probe_stop probe-stop)]
     [e (raise e)]))
@@ -114,20 +155,78 @@
 (define (scaling-cases #:seconds seconds
                        #:threads [threads thread-counts]
                        #:states [states main-states]
+                       #:mix [mix 'small]
                        #:on-run [on-run void])
+  (match-define (list _ make-mix ops-per-mix) (assq mix mixes))
   (for*/list ([state (in-list states)] [n (in-list threads)])
     (bench-case (string->symbol (format "~a/~a" state n))
                 (lambda (_reps)
-                  (define run (scaling-run n state #:seconds seconds))
+                  (define run (scaling-run n state #:seconds seconds #:mix make-mix
+                                           #:ops-per-mix ops-per-mix))
                   (on-run state n run)
                   (hash-ref run 'ops_per_s))
                 #:self-timed? #t)))
 
 (module+ test
-  (require (only-in racket/match exn:misc:match? match-define)
+  (require (only-in racket/file make-temporary-directory)
+           (only-in racket/match exn:misc:match?)
            rackunit
            (only-in torch/tests/private/wedge call-with-process-deadline)
-           (only-in "harness.rkt" measure result-name result-per-call))
+           (only-in "harness.rkt" measure result-name result-per-call with-temporary-path))
+
+  (define (touch! dir names)
+    (for ([name (in-list names)])
+      (call-with-output-file (build-path dir name) void)))
+
+  (define absent "/nonexistent/task")
+
+  (test-case "the OS thread count is the task directory's entries, and #f without one"
+    (with-temporary-path (dir (make-temporary-directory "tasks-~a"))
+      (touch! dir '("1" "2" "3"))
+      (check-equal? (os-thread-count dir) 3))
+    (check-false (os-thread-count absent))
+    (if (directory-exists? "/proc/self/task")
+        (check-true (exact-positive-integer? (os-thread-count)))
+        (check-false (os-thread-count))))
+
+  (test-case "the sampler keeps the most entries it saw, and #f without a directory"
+    (with-temporary-path (dir (make-temporary-directory "tasks-~a"))
+      (touch! dir '("1"))
+      (define stop! (start-peak-sampler #:tasks dir #:interval 0.01))
+      (touch! dir '("2" "3" "4"))
+      (sleep 0.2)
+      (for ([name (in-list '("2" "3" "4"))]) (delete-file (build-path dir name)))
+      (sleep 0.2)
+      (check-equal? (stop!) 4))
+    (check-false ((start-peak-sampler #:tasks absent #:interval 0.01)))
+    (check-false (peak-count 3 #f))
+    (check-equal? (peak-count 3 5) 5))
+
+  (test-case "a run records its peak OS threads: a thread per worker beside main, #f without /proc"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define run (scaling-run 2 'idle #:seconds 0.3))
+       (if (directory-exists? "/proc/self/task")
+           (check-true (> (hash-ref run 'peak_os_threads) 2) (format "~a" run))
+           (check-false (hash-ref run 'peak_os_threads)))
+       (check-false (hash-ref (scaling-run 1 'idle #:seconds 0.1 #:tasks absent)
+                              'peak_os_threads)))))
+
+  (test-case "a mix counts its own ops: four for the small mix, two for the grain-crossing one"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (for ([mix (in-list mix-names)] [ops (in-list '(4 2))])
+         (define runs '())
+         (measure (scaling-cases #:seconds 0.1 #:threads '(1) #:states '(idle) #:mix mix
+                                 #:on-run (lambda (_state _n run) (set! runs (cons run runs))))
+                  #:warmup 0 #:rounds 1 #:load void)
+         (match-define (list run) runs)
+         (check-true (positive? (hash-ref run 'mixes)) (format "~a" mix))
+         (check-= (/ (* (hash-ref run 'ops_per_s) (hash-ref run 'elapsed_s)) (hash-ref run 'mixes))
+                  ops 1e-9 (format "~a" mix)))
+       (check-exn exn:fail? (lambda () (scaling-cases #:seconds 0.1 #:mix 'huge))))))
 
   (test-case "workers on parallel threads count their ops, with main idle or training"
     (call-with-process-deadline

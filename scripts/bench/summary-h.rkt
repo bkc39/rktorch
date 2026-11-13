@@ -23,7 +23,8 @@
   (and (member (base-case c) h-cases) #t))
 
 (define (h-context r)
-  (format "~a; run ~a" (host r) (ref r 'run_id)))
+  (format "~a; OMP_NUM_THREADS=~a; run ~a" (host r) (or (ref r 'meta 'omp_num_threads) "unset")
+          (ref r 'run_id)))
 
 (define (setting r key)
   (define v (ref r 'settings key))
@@ -180,6 +181,7 @@
                   #:device "cpu"))
     (define lone (h "py-cifar-loader" "pytorch" "per-sample-8" 2.0 78.0 12.0 3.0 50.0))
     (check-equal? (h-context rk) (h-context py))
+    (check-regexp-match #rx"; OMP_NUM_THREADS=unset; run r1$" (h-context rk))
     (define md (h-section (list rk py lone)))
     (check-regexp-match
      #rx"^\\| loader only \\| per-sample \\| 2 \\| cuda \\| images/s \\| 4992 \\| 9984 \\| - \\| - \\|"
@@ -188,6 +190,13 @@
     (check-regexp-match
      #rx"^\\| loader only \\| per-sample \\| 8 \\| cuda \\| images/s \\| - \\| 9984 \\| - \\| - \\|.*\\| no twin \\|$"
      (row-of md "| loader only | per-sample | 8")))
+
+  (test-case "H's heading names the intra-op setting both sides ran under"
+    (define (at-one r) (hash-set r 'meta (hash-set (ref r 'meta) 'omp_num_threads "1")))
+    (define rk (at-one (h "cifar-loader" "rktorch" "batched-2" 10.0 39.0 25.0 5.0 100.0)))
+    (define py (at-one (h "py-cifar-loader" "pytorch" "batched-2" 2.0 78.0 12.0 3.0 50.0)))
+    (check-equal? (h-context rk) (h-context py))
+    (check-regexp-match #rx"; OMP_NUM_THREADS=1; run r1$" (h-context py)))
 
   (test-case "H gives no spread or noise floor from fewer than 3 rounds"
     (define md

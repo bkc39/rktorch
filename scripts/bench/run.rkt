@@ -15,7 +15,8 @@
          (only-in "layers.rkt" layer-cases)
          (only-in "ops.rkt" op-cases)
          (only-in "session.rkt" fresh-run-id record-writer wait-for-load)
-         (only-in "shim.rkt" aten-threads))
+         (only-in "shim.rkt" aten-threads)
+         (only-in "threads.rkt" mix-names))
 
 (provide run-suites
          parse-arguments
@@ -49,11 +50,15 @@
 (define (ops-device? d)
   (and (memq d '(cpu cuda mps)) #t))
 
+(define (op-mix? m)
+  (and (memq m mix-names) #t))
+
 (define (run-suites suites
                     #:rounds [rounds #f]
                     #:warmup [warmup #f]
                     #:scale [scale 1]
                     #:device [device #f]
+                    #:mix [mix 'small]
                     #:full? [full? #f]
                     #:only [only #f]
                     #:variants [variants '((#f))]
@@ -101,7 +106,7 @@
        (wait-for-load max-load log)
        (fprintf log "~a\n" suite)
        (run-l0-suite suite #:emit emit #:log log #:device on-device #:scale scale
-                     #:rounds rounds #:warmup warmup #:libtorch libtorch)]
+                     #:rounds rounds #:warmup warmup #:libtorch libtorch #:mix mix)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
@@ -137,6 +142,8 @@
                      (option! 'device
                               (flag-value "--device" string->symbol ops-device? "cpu, cuda or mps"
                                           d))]
+       [("--mix") m "Op mix for threads and pytorch-threads: small (default) or grain"
+                  (option! 'mix (flag-value "--mix" string->symbol op-mix? "small or grain" m))]
        [("--full") "Run examples at their full settings" (option! 'full? #t)]
        [("--only") names "Comma-separated example numbers"
                    (option! 'only (string-split names ","))]
@@ -174,7 +181,8 @@
     (run-suites suites
                 #:rounds (option 'rounds)
                 #:warmup (option 'warmup #f) #:scale (option 'scale 1)
-                #:device (option 'device) #:full? (option 'full?) #:only (option 'only)
+                #:device (option 'device) #:mix (option 'mix 'small) #:full? (option 'full?)
+                #:only (option 'only)
                 #:variants (option 'variants '((#f)))
                 #:cache (option 'cache) #:max-load (option 'max-load)
                 #:time-limit (option 'time-limit) #:out out))
@@ -240,7 +248,10 @@
     (check-equal? (parsed "crossings" "--rounds" "2" "layers")
                   (list '(crossings layers) (make-hasheq '((rounds . 2)))))
     (check-equal? (parsed "e2e" "--time-limit" "5")
-                  (list '(e2e) (make-hasheq '((time-limit . 5))))))
+                  (list '(e2e) (make-hasheq '((time-limit . 5)))))
+    (check-equal? (parsed "threads" "pytorch-threads" "--mix" "grain")
+                  (list '(threads pytorch-threads) (make-hasheq '((mix . grain)))))
+    (check-equal? (parsed "threads") (list '(threads) (make-hasheq))))
 
   (test-case "a flag rejects what is not its value"
     (define (fails flag value expected)
@@ -257,6 +268,7 @@
       (fails flag value "a finite positive number"))
     (fails "--device" "gpu" "cpu, cuda or mps")
     (fails "--device" "CUDA" "cpu, cuda or mps")
+    (fails "--mix" "huge" "small or grain")
     (define-values (_suites options)
       (parse-arguments (vector "micro" "--warmup" "0" "--scale" "0.5" "--max-load" "2.5")))
     (check-equal? options (make-hasheq '((warmup . 0) (scale . 0.5) (max-load . 2.5))))

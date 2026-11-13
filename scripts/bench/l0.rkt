@@ -24,7 +24,7 @@
 
 (define proxy-base 4)
 
-(define (scaling-records results runs meta settings)
+(define (scaling-records results runs meta settings mix)
   (for/list ([r (in-list results)])
     (define-values (state n) (name->case (result-name r)))
     (define timed
@@ -33,7 +33,12 @@
     (result->record r #:suite "scaling" #:group "threads" #:unit "ops/s" #:meta meta #:scale 1
                     #:extra (hasheq 'impl "rktorch" 'case (~a state) 'variant (~a n)
                                     'threads_run n 'main_steps_per_s (of 'main_steps_per_s)
-                                    'stopped (of 'stopped) 'settings settings))))
+                                    'stopped (of 'stopped) 'settings settings
+                                    'mix (~a mix)
+                                    'peak_os_threads (peak-of (of 'peak_os_threads))))))
+
+(define (peak-of counts)
+  (and (andmap values counts) (apply max counts)))
 
 (define (name->case name)
   (match (regexp-match #rx"^([^/]*)/([0-9]+)$" (symbol->string name))
@@ -49,6 +54,7 @@
                       #:libtorch libtorch
                       #:seconds [seconds (max 0.5 (* 2.0 scale))]
                       #:threads [threads thread-counts]
+                      #:mix [mix 'small]
                       #:phases [phases (hasheq)])
   (define (meta-on d) (host-meta #:device d #:libtorch libtorch #:threads (aten-threads)))
   (define warm (or warmup 1))
@@ -77,9 +83,9 @@
        (call-with-process-deadline
         scaling-deadline
         (lambda ()
-          (measure (scaling-cases #:seconds seconds #:threads threads #:on-run on-run)
+          (measure (scaling-cases #:seconds seconds #:threads threads #:mix mix #:on-run on-run)
                    #:warmup scaling-warmup #:rounds (or rounds 5)))))
-     (for-each emit (scaling-records results runs (meta-on 'cpu) scaling-settings))]
+     (for-each emit (scaling-records results runs (meta-on 'cpu) scaling-settings mix))]
     [(pytorch-threads)
      (require-pytorch 'pytorch-threads)
      (define load (load-average))
@@ -88,7 +94,8 @@
                                                "--warmup" scaling-warmup
                                                "--threads" (comma-list threads)
                                                "--states" (comma-list main-states)
-                                               "--intra-op" (aten-threads))
+                                               "--intra-op" (aten-threads)
+                                               "--mix" mix)
                                          #:log log))])
        (emit (~> (twin-record child #:suite "scaling" #:meta (meta-on 'cpu) #:load load)
                  (hash-set 'settings scaling-settings))))]
@@ -112,11 +119,11 @@
            (only-in "ops.rkt" op-names)
            (only-in "pytorch.rkt" pytorch-available?))
 
-  (define (records-of suite #:scale [scale 0.001] #:warmup [warmup 0])
+  (define (records-of suite #:scale [scale 0.001] #:warmup [warmup 0] #:mix [mix 'small])
     (define out '())
     (run-l0-suite suite #:emit (lambda (r) (set! out (cons r out))) #:log (open-output-nowhere)
                   #:device 'cpu #:scale scale #:rounds 1 #:warmup warmup #:libtorch "x"
-                  #:threads '(1 2) #:phases (hasheq 'batch 2 'samples 8 'base 4))
+                  #:threads '(1 2) #:mix mix #:phases (hasheq 'batch 2 'samples 8 'base 4))
     (reverse out))
 
   (define (shape-of r)
@@ -127,6 +134,12 @@
 
   (define scaling-floor (hasheq 'seconds 0.5 'warmup 1))
 
+  (define (check-peak r)
+    (define peak (hash-ref r 'peak_os_threads))
+    (if (directory-exists? "/proc/self/task")
+        (check-true (and (exact-integer? peak) (> peak (hash-ref r 'threads_run))) (format "~a" peak))
+        (check-not-false (memq peak '(#f null)) (format "~a" peak))))
+
   (test-case "threads records ops per second per main state and thread count"
     (define records (records-of 'threads))
     (check-equal? (cases-of records) '(("idle" "1") ("idle" "2") ("train" "1") ("train" "2")))
@@ -136,7 +149,16 @@
       (check-equal? (length (hash-ref r 'main_steps_per_s)) 1 "the warmup run is not kept")
       (check-equal? (hash-ref r 'stopped) (list (hash-ref r 'threads_run)))
       (check-equal? (hash-ref r 'settings) scaling-floor "a smoke run still times whole seconds")
+      (check-equal? (hash-ref r 'mix) "small")
+      (check-peak r)
       (check-true (>= (hash-ref (hash-ref r 'stats) 'median) 0))))
+
+  (test-case "threads runs the grain-crossing mix when asked, and records it"
+    (define records (records-of 'threads #:mix 'grain))
+    (check-equal? (cases-of records) '(("idle" "1") ("idle" "2") ("train" "1") ("train" "2")))
+    (for ([r (in-list records)])
+      (check-equal? (hash-ref r 'mix) "grain")
+      (check-peak r)))
 
   (test-case "calls and host-gpu run the warmup steps they are given, none included"
     (define (tensors-made suite warmup)
@@ -186,6 +208,14 @@
        (for ([r (in-list records)])
          (check-equal? (shape-of r) '("scaling" "threads" "pytorch"))
          (check-equal? (hash-ref r 'settings) scaling-floor)
+         (check-equal? (hash-ref r 'mix) "small")
+         (check-peak r)
+         (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))
+
+     (test-case "pytorch-threads runs the grain-crossing mix when asked"
+       (for ([r (in-list (records-of 'pytorch-threads #:mix 'grain))])
+         (check-equal? (hash-ref r 'mix) "grain")
+         (check-peak r)
          (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))
 
      (test-case "pytorch-threads counts the mixes done when main ends, from when the workers go"

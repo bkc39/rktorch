@@ -4,6 +4,7 @@ or trains the same MLP; throughput is the workers' ops per second."""
 
 import argparse
 import itertools
+import os
 import threading
 import time
 
@@ -14,6 +15,8 @@ import torch
 from torch import nn
 
 OPS_PER_ITERATION = 4
+TASK_DIR = "/proc/self/task"
+SAMPLE_INTERVAL = 0.1
 
 
 def op_mix():
@@ -27,6 +30,55 @@ def op_mix():
         b64.sum()
 
     return run
+
+
+def grain_mix():
+    a, b = torch.randn(256, 256), torch.randn(256, 256)
+
+    def run():
+        a @ b
+        a + b
+
+    return run
+
+
+MIXES = {"small": (op_mix, OPS_PER_ITERATION), "grain": (grain_mix, 2)}
+
+
+def os_thread_count(tasks=TASK_DIR):
+    try:
+        return len(os.listdir(tasks))
+    except FileNotFoundError:
+        return None
+
+
+def peak_count(a, b):
+    return None if a is None or b is None else max(a, b)
+
+
+class PeakSampler:
+    """The most OS threads seen while it runs, or None without the task directory."""
+
+    def __init__(self, tasks=TASK_DIR, interval=SAMPLE_INTERVAL):
+        self.tasks = tasks
+        self.interval = interval
+        self.peak = os_thread_count(tasks)
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+
+    def sample(self):
+        self.peak = peak_count(self.peak, os_thread_count(self.tasks))
+
+    def run(self):
+        while not self.done.wait(self.interval):
+            self.sample()
+
+    def stop(self):
+        self.done.set()
+        self.thread.join()
+        self.sample()
+        return self.peak
 
 
 def training_step():
@@ -55,7 +107,8 @@ def run_main(state, deadline):
     return steps
 
 
-def scaling_run(n, state, seconds, make_mix=op_mix):
+def scaling_run(n, state, seconds, make_mix=op_mix, ops_per_mix=OPS_PER_ITERATION,
+                tasks=TASK_DIR):
     go = threading.Event()
     stop = threading.Event()
     counts = [0] * n
@@ -77,20 +130,29 @@ def scaling_run(n, state, seconds, make_mix=op_mix):
                for i in range(n)]
     for w in workers:
         w.start()
+    sampler = PeakSampler(tasks)
     t0 = time.perf_counter()
     go.set()
-    main_steps = run_main(state, t0 + seconds)
-    elapsed = time.perf_counter() - t0
-    ops = sum(counts)
-    stop.set()
+    try:
+        main_steps = run_main(state, t0 + seconds)
+        elapsed = time.perf_counter() - t0
+        ops = sum(counts)
+    finally:
+        peak = sampler.stop()
+        stop.set()
     for w in workers:
         w.join(30)
     if failures:
         raise failures[0]
-    return {"ops_per_s": OPS_PER_ITERATION * ops / elapsed,
+    return {"ops_per_s": ops_per_mix * ops / elapsed,
             "main_steps_per_s": main_steps / elapsed,
             "started_s": t0,
-            "stopped": sum(not w.is_alive() for w in workers)}
+            "stopped": sum(not w.is_alive() for w in workers),
+            "peak_os_threads": peak}
+
+
+def peak_of(counts):
+    return None if None in counts else max(counts)
 
 
 def main():
@@ -101,20 +163,22 @@ def main():
     parser.add_argument("--threads", default="1,2,4,8")
     parser.add_argument("--states", default="idle,train")
     parser.add_argument("--intra-op", type=int, default=1)
+    parser.add_argument("--mix", choices=sorted(MIXES), default="small")
     args = parser.parse_args()
+    make_mix, ops_per_mix = MIXES[args.mix]
     torch.set_num_threads(args.intra_op)
     cases = list(itertools.product(args.states.split(","),
                                    [int(n) for n in args.threads.split(",")]))
     clock = GcClock()
     for _ in range(args.warmup):
         for state, n in cases:
-            scaling_run(n, state, args.seconds)
+            scaling_run(n, state, args.seconds, make_mix, ops_per_mix)
     rows = {case: [] for case in cases}
     for i in range(args.rounds):
         k = i % len(cases)
         for case in cases[k:] + cases[:k]:
             gc0 = clock.ms()
-            run = scaling_run(case[1], case[0], args.seconds)
+            run = scaling_run(case[1], case[0], args.seconds, make_mix, ops_per_mix)
             rows[case].append((run, clock.ms() - gc0))
     device = torch.device("cpu")
     for (state, n), runs in rows.items():
@@ -123,6 +187,8 @@ def main():
               "samples": [r["ops_per_s"] for r, _ in runs],
               "main_steps_per_s": [r["main_steps_per_s"] for r, _ in runs],
               "stopped": [r["stopped"] for r, _ in runs],
+              "mix": args.mix,
+              "peak_os_threads": peak_of([r["peak_os_threads"] for r, _ in runs]),
               "gc_ms": [ms for _, ms in runs], "meta": meta(device)})
 
 

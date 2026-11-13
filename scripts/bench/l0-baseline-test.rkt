@@ -70,6 +70,15 @@
   (define (thread-settings dir)
     (map call-thread-setting (bench-calls dir)))
 
+  (define (settings-where dir keep?)
+    (for/list ([call (in-list (bench-calls dir))] #:when (keep? call))
+      (second (call-thread-setting call))))
+
+  (define (grain? call) (string-contains? call " --mix grain"))
+
+  (define (loader? call)
+    (regexp-match? #rx" --only (17-workers|cifar-loader|cifar-resnet)," call))
+
   (define (jsonl dir) (file->lines (build-path dir "l0.jsonl")))
 
   (define (in-fresh-dir proc)
@@ -102,13 +111,14 @@
              (lambda (dir)
                (check-equal? (run-baseline dir stage #:threads "8") 0)
                (define settings (thread-settings dir))
+               (define defaults (settings-where dir (lambda (c) (not (or (grain? c) (loader? c))))))
                (with-check-info (['stage stage] ['settings settings])
                  (match stage
                    ["cpu" (check-not-false (member '("ops" "unset/unset") settings))]
                    ["cuda"
-                    (check-true (> (length settings) 1))
-                    (check-equal? (remove-duplicates (map second settings)) (list "unset/unset"))])
-                 (check-false (member "8/8" (map second settings))))))))
+                    (check-true (> (length defaults) 1))
+                    (check-equal? (remove-duplicates defaults) (list "unset/unset"))])
+                 (check-false (member "8/8" defaults)))))))
 
         (test-case "the one-thread passes set one thread"
           (in-fresh-dir
@@ -117,7 +127,29 @@
              (define settings (thread-settings dir))
              (with-check-info (['settings settings])
                (check-not-false (member '("ops" "1/1") settings))
-               (check-not-false (member '("threads" "1/1") settings))))))
+               (check-equal? (settings-where dir (lambda (c) (and (string-contains? c " threads ")
+                                                                  (not (grain? c)))))
+                             '("1/1"))))))
+
+        (test-case "the loader passes, C's and H's, run every worker at one intra-op thread"
+          (in-fresh-dir
+           (lambda (dir)
+             (for ([stage (in-list '("cuda" "loader"))])
+               (check-equal? (run-baseline dir stage #:threads "8") 0))
+             (define calls (filter loader? (bench-calls dir)))
+             (with-check-info (['calls calls])
+               (check-equal? (length calls) 3)
+               (check-equal? (settings-where dir loader?) '("1/1" "1/1" "1/1"))))))
+
+        (test-case "the cpu stage runs both arms on the grain-crossing mix at 1, 4 and 8 intra-op threads"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "cpu" #:threads "2") 0)
+             (define calls (filter grain? (bench-calls dir)))
+             (with-check-info (['calls calls])
+               (for ([call (in-list calls)])
+                 (check-true (string-contains? call " threads pytorch-threads --mix grain ") call))
+               (check-equal? (settings-where dir grain?) '("1/1" "4/4" "8/8"))))))
 
         (test-case "a single stage appends to the JSONL"
           (in-fresh-dir

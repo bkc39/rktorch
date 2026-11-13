@@ -1,8 +1,11 @@
+import os
+import tempfile
 import time
 import unittest
 
 from op_cost import stack_inputs, thread_loop
 from pipelines import peak_rss_mb
+from threads import MIXES, PeakSampler, os_thread_count, scaling_run
 
 
 class ThreadLoop(unittest.TestCase):
@@ -50,6 +53,52 @@ class PeakRss(unittest.TestCase):
     def test_reads_ru_maxrss_in_the_platforms_unit(self):
         self.assertEqual(peak_rss_mb(3 * 2**30, "darwin"), 3072)
         self.assertEqual(peak_rss_mb(3 * 2**20, "linux"), 3072)
+
+
+def touch(directory, names):
+    for name in names:
+        open(os.path.join(directory, name), "w").close()
+
+
+ABSENT = "/nonexistent/task"
+
+
+class PeakOsThreads(unittest.TestCase):
+    def test_counts_the_task_directorys_entries_and_none_without_one(self):
+        with tempfile.TemporaryDirectory() as tasks:
+            touch(tasks, ["1", "2", "3"])
+            self.assertEqual(os_thread_count(tasks), 3)
+        self.assertIsNone(os_thread_count(ABSENT))
+        if os.path.isdir("/proc/self/task"):
+            self.assertGreater(os_thread_count(), 0)
+
+    def test_the_sampler_keeps_the_most_entries_it_saw(self):
+        with tempfile.TemporaryDirectory() as tasks:
+            touch(tasks, ["1"])
+            sampler = PeakSampler(tasks, interval=0.01)
+            touch(tasks, ["2", "3", "4"])
+            time.sleep(0.2)
+            for name in ["2", "3", "4"]:
+                os.remove(os.path.join(tasks, name))
+            time.sleep(0.2)
+            self.assertEqual(sampler.stop(), 4)
+        self.assertIsNone(PeakSampler(ABSENT, interval=0.01).stop())
+
+    def test_a_run_records_a_thread_per_worker_and_none_without_proc(self):
+        run = scaling_run(2, "idle", 0.3)
+        if os.path.isdir("/proc/self/task"):
+            self.assertGreater(run["peak_os_threads"], 2)
+        self.assertIsNone(scaling_run(1, "idle", 0.1, tasks=ABSENT)["peak_os_threads"])
+
+
+class Mixes(unittest.TestCase):
+    def test_each_mix_counts_its_own_ops(self):
+        self.assertEqual(sorted(MIXES), ["grain", "small"])
+        for name, ops in [("small", 4), ("grain", 2)]:
+            make_mix, per_mix = MIXES[name]
+            self.assertEqual(per_mix, ops)
+            run = scaling_run(1, "idle", 0.1, make_mix, per_mix)
+            self.assertGreater(run["ops_per_s"], 0, name)
 
 
 if __name__ == "__main__":
