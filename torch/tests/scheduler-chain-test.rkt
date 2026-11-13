@@ -6,13 +6,13 @@
            (only-in "../main.rkt" zeros)
            (only-in "../nn.rkt"
                     Parameter chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
-                    exponential-lr lambda-lr learning-rate linear-lr param-group
-                    param-group-ref param-group-set! scheduler-rate scheduler-step-count
-                    sequential-lr set-learning-rate! sgd step! step-lr)
+                    exponential-lr lambda-lr learning-rate linear-lr param-group-ref
+                    param-group-set! scheduler-rate scheduler-step-count sequential-lr
+                    set-learning-rate! sgd step! step-lr)
            (only-in (submod "../foreign/raw/cas.rkt" private) site-cas)
            (only-in "../foreign/raw/regions.rkt" with-cleanup)
            (only-in "private/blame.rkt" blames-caller?)
-           (only-in "private/scheduler-steps.rkt" stepped-reads)
+           (only-in "private/scheduler-steps.rkt" stepped-reads two-group-opt)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "scheduler-chain-test"))
@@ -83,12 +83,7 @@
     (check-not-false (memv (learning-rate opt) '(5.0 10.0)))
     (check-equal? (scheduler-rate s) (learning-rate opt)))
 
-  (define (two-group-opt)
-    (sgd (list (param-group (list (Parameter (zeros 1))))
-               (param-group (list (Parameter (zeros 1)))))
-         #:lr 1.0))
-
-  (bounded-test "G2-M1: a lambda-lr factor that writes the optimizer runs once per group and step"
+  (bounded-test "a lambda-lr factor that writes the optimizer runs once per group and step"
     (define opt (two-group-opt))
     (define calls (box 0))
     (define (factor t)
@@ -96,8 +91,10 @@
       (when (= t 1) (param-group-set! opt 0 'weight-decay 0.1))
       1.0)
     (define s (lambda-lr opt factor))
-    (for ([_ (in-range 3)]) (step! s))
-    (check-equal? (unbox calls) (* 2 4))
+    (define groups 2)
+    (define steps 3)
+    (for ([_ (in-range steps)]) (step! s))
+    (check-equal? (unbox calls) (* groups (add1 steps)))
     (check-equal? (learning-rate opt) 1.0)
     (check-equal? (param-group-ref opt 0 'weight-decay) 0.1))
 

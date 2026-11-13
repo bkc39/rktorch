@@ -61,7 +61,7 @@
          (regexp-match? (pregexp (format "^~a: an hparam must hold a real.*hparam: 'lr" who))
                         (exn-message e))))
 
-  (bounded-test "G2-U1: a field a step set to a non-real is reported naming it, not as blame"
+  (bounded-test "a field a step set to a non-real is reported naming it, not as blame"
     (define tr (Retyped))
     (void (fit tr (toy-loader 2) #:max-epochs 1 #:logger #f))
     (check-exn (names-the-field? 'hparam) (lambda () (hparam tr 'lr)))

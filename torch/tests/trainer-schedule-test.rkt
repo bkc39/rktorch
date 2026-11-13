@@ -203,7 +203,7 @@
       (match-define (list _ _ estimated) (unbox seen))
       (check-equal? estimated (hash-ref row 'estimated) (format "~s" row))))
 
-  (bounded-test "G2-C1: with neither limit fit refuses before define-optimizers reads an estimate"
+  (bounded-test "with neither limit fit refuses before define-optimizers reads an estimate"
     (define seen (box #f))
     (check-exn (blames-caller? "trainer-schedule-test")
                (lambda () (fit (Scheduled seen) (toy-loader 4) #:logger #f
