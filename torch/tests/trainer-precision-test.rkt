@@ -6,7 +6,7 @@
            (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
            (only-in "../main.rkt"
-                    autocast-enabled? backward! cat cpu-device cuda-available? cuda-device item
+                    * autocast-enabled? backward! cat cpu-device cuda-available? cuda-device item
                     manual-seed! randn reshape sum tensor->list with-autocast
                     with-default-device)
            (only-in "../nn.rkt"
@@ -17,7 +17,8 @@
            (only-in "../train/private/precision.rkt" manual-optimizer-step! window-step!)
            (only-in "../train/private/state.rkt" fresh-run set-run-grad-scaler!)
            (only-in "private/python-env.rkt"
-                    check-training-twin python-cuda-available? python-torch-available?)
+                    call-with-python-env check-training-twin python-cuda-available?
+                    python-torch-available?)
            (only-in "private/trainer-kit.rkt" toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
@@ -82,30 +83,47 @@
                          #:device (cuda-device) #:precision '16-mixed
                          #:gradient-clip-val 1.0)))]))
 
-  (define-trainer Amp (net losses)
-    (define-init (model sink) (set! net model) (set! losses sink))
+  (define-trainer Amp (net losses inf-at)
+    (define-init (model sink [at #f]) (set! net model) (set! losses sink) (set! inf-at at))
     (define-optimizers (sgd (parameters net) #:lr 0.05 #:momentum 0.9))
     (define-training-step (x y)
       (define loss (mse-loss (net x) y))
       (set-box! losses (cons (item loss) (unbox losses)))
-      loss))
+      (if (eqv? inf-at (run-global-step run)) (* loss +inf.0) loss)))
 
-  (define (fit-on _device)
+  (define ((fit-on scales [inf-at #f]) _device)
     (with-default-device (cuda-device)
       (manual-seed! 0)
       (define net (Linear 8 4))
       (define losses (box '()))
-      (fit (Amp net losses) (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8)
-           #:max-epochs 2 #:logger #f #:device (cuda-device) #:precision '16-mixed
-           #:gradient-clip-val 1.0)
+      (define r
+        (fit (Amp net losses inf-at)
+             (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8)
+             #:max-epochs 2 #:logger #f #:device (cuda-device) #:precision '16-mixed
+             #:gradient-clip-val 1.0))
+      (set-box! scales (grad-scaler-scale (run-grad-scaler r)))
       (values (reverse (unbox losses))
               (cat (for/list ([p (in-list (parameters net))]) (reshape p -1))))))
 
+  (define (amp-twin-ready?)
+    (and (cuda-available?) (python-torch-available?) (python-cuda-available?)))
+
   (bounded-test "G3-L15: CUDA 16-mixed against autocast, GradScaler and clip_grad_norm_"
     (cond
-      [(not (and (cuda-available?) (python-torch-available?) (python-cuda-available?)))
+      [(not (amp-twin-ready?))
        (displayln "[trainer-precision-test] G3-L15 skipped: no CUDA twin")]
-      [else (check-training-twin "amp" amp-twin fit-on 'cuda 5e-3)]))
+      [else (check-training-twin "amp" amp-twin (fit-on (box #f)) 'cuda 5e-3)]))
+
+  (bounded-test "G3 M3: CUDA 16-mixed skips an inf step and halves the scale, as the twin"
+    (cond
+      [(not (amp-twin-ready?))
+       (displayln "[trainer-precision-test] G3 M3 skipped: no CUDA twin")]
+      [else
+       (define scales (box #f))
+       (call-with-python-env
+        #:env '(("RKTORCH_AMP_INF_AT" . "2"))
+        (lambda () (check-training-twin "amp-inf" amp-twin (fit-on scales 2) 'cuda 5e-3)))
+       (check-equal? (unbox scales) 32768.0)]))
 
   (define (flat t)
     (~> t (reshape -1) tensor->list))
