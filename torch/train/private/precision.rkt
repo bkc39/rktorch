@@ -56,16 +56,15 @@
      (call-with-autocast thunk #:device (run-device r)
                          #:dtype (if (eq? precision 'bf16-mixed) 'bfloat16 'float16))]))
 
+(define fused-clip-message
+  (string-append "the current optimizer does not allow for gradient clipping because it"
+                 " performs unscaling of gradients internally; HINT: are you using a"
+                 " 'fused' optimizer?"))
+
 (define (check-clippable! r clip)
-  (when (and clip (run-grad-scaler r))
-    (for ([opt (in-list (run-optimizers r))]
-          #:when (optimizer-fused? opt))
-      (raise-arguments-error
-       'fit
-       (string-append "the current optimizer does not allow for gradient clipping because it"
-                      " performs unscaling of gradients internally; HINT: are you using a"
-                      " 'fused' optimizer?")
-       "optimizer" opt))))
+  (match (and clip (run-grad-scaler r) (findf optimizer-fused? (run-optimizers r)))
+    [#f (void)]
+    [opt (raise-arguments-error 'fit fused-clip-message "optimizer" opt)]))
 
 (define (armed-scaler r)
   (define s (run-grad-scaler r))
@@ -79,21 +78,6 @@
   (call-hooks r 'on-after-backward)
   (void))
 
-(define (unscale-for-hooks! r opt)
-  (define s (armed-scaler r))
-  (when (and s (not (optimizer-fused? opt)))
-    (grad-scaler-unscale! s opt)))
-
-(define (scaled-step! r opt)
-  (match (armed-scaler r)
-    [#f (step! opt)]
-    [s (grad-scaler-step! s opt)]))
-
-(define (update-scale! r)
-  (define s (armed-scaler r))
-  (when (and s (grad-scaler-checked? s))
-    (grad-scaler-update! s)))
-
 (define (clip! clip opt)
   (match clip
     [#f (void)]
@@ -104,28 +88,33 @@
   (set-run-global-step! r (add1 (run-global-step r)))
   (set-run-stepped?! r #t))
 
-(define (window-step! r clip)
-  (define opts (run-optimizers r))
-  (for ([opt (in-list opts)])
-    (unscale-for-hooks! r opt))
+(define (settle-scale! s opts)
+  (cond
+    [(not s) (void)]
+    [(grad-scaler-checked? s) (grad-scaler-update! s)]
+    [else (for ([opt (in-list opts)]) (grad-scaler-forget! s opt))]))
+
+(define (step-optimizers! r opts clip)
+  (define s (armed-scaler r))
+  (for ([opt (in-list opts)]
+        #:when (and s (not (optimizer-fused? opt))))
+    (grad-scaler-unscale! s opt))
   (for ([opt (in-list opts)])
     (call-hooks r 'on-before-optimizer-step opt))
-  (define s (armed-scaler r))
   (cond
     [(run-skip-window? r)
-     (when s
-       (for ([opt (in-list opts)])
-         (grad-scaler-forget! s opt)))]
+     (for ([opt (in-list opts)]
+           #:when s)
+       (grad-scaler-forget! s opt))]
     [else
      (for ([opt (in-list opts)])
        (clip! clip opt)
-       (scaled-step! r opt))
-     (update-scale! r)]))
+       (if s (grad-scaler-step! s opt) (step! opt)))
+     (settle-scale! s opts)]))
+
+(define (window-step! r clip)
+  (step-optimizers! r (run-optimizers r) clip))
 
 (define (manual-optimizer-step! r opt)
-  (unscale-for-hooks! r opt)
-  (call-hooks r 'on-before-optimizer-step opt)
-  (scaled-step! r opt)
-  (update-scale! r)
-  (count-step! r)
-  (void))
+  (step-optimizers! r (list opt) #f)
+  (count-step! r))

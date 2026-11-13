@@ -3,12 +3,19 @@
 (module+ test
   (require (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "../data/loader.rkt" dataloader tensor-dataset)
+           (only-in threading ~>)
+           (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
            (only-in "../main.rkt"
-                    autocast-enabled? cat cuda-available? cuda-device item manual-seed! randn
-                    reshape with-default-device)
-           (only-in "../nn.rkt" Linear mse-loss parameters sgd)
+                    autocast-enabled? backward! cat cpu-device cuda-available? cuda-device item
+                    manual-seed! randn reshape sum tensor->list with-autocast
+                    with-default-device)
+           (only-in "../nn.rkt"
+                    Linear grad-scaler grad-scaler-scale grad-scaler-scale-loss grad-scaler-step!
+                    grad-scaler-unscale! grad-scaler-update! layer-copy mse-loss parameters sgd
+                    zero-grads!)
            "../train.rkt"
+           (only-in "../train/private/precision.rkt" manual-optimizer-step! window-step!)
+           (only-in "../train/private/state.rkt" fresh-run set-run-grad-scaler!)
            (only-in "private/python-env.rkt"
                     check-training-twin python-cuda-available? python-torch-available?)
            (only-in "private/trainer-kit.rkt" toy-loader)
@@ -98,4 +105,73 @@
     (cond
       [(not (and (cuda-available?) (python-torch-available?) (python-cuda-available?)))
        (displayln "[trainer-precision-test] G3-L15 skipped: no CUDA twin")]
-      [else (check-training-twin "amp" amp-twin fit-on 'cuda 5e-3)])))
+      [else (check-training-twin "amp" amp-twin fit-on 'cuda 5e-3)]))
+
+  (define (flat t)
+    (~> t (reshape -1) tensor->list))
+
+  (define (hand-scaled-step! s opt loss)
+    (zero-grads! opt)
+    (backward! (grad-scaler-scale-loss s loss))
+    (grad-scaler-unscale! s opt)
+    (grad-scaler-step! s opt)
+    (grad-scaler-update! s))
+
+  (define (gradless-steps step-once!)
+    (manual-seed! 0)
+    (define net (Linear 2 1))
+    (define twin (layer-copy net))
+    (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
+    (define twin-opt (sgd (parameters twin) #:lr 0.1 #:momentum 0.9))
+    (define r (fresh-run (Watched (box '())) 'fit (cpu-device) #:optimizers (list opt)))
+    (define s (grad-scaler #:device 'cpu))
+    (define twin-s (grad-scaler #:device 'cpu))
+    (set-run-grad-scaler! r s)
+    (define x (randn 4 2))
+    (grad-scaler-scale-loss s (sum (net x)))
+    (step-once! r opt)
+    (step-once! r opt)
+    (zero-grads! opt)
+    (backward! (grad-scaler-scale-loss s (sum (net x))))
+    (step-once! r opt)
+    (hand-scaled-step! twin-s twin-opt (sum (twin x)))
+    (check-equal? (map flat (parameters net)) (map flat (parameters twin)))
+    (check-equal? (grad-scaler-scale s) (grad-scaler-scale twin-s)))
+
+  (bounded-test "G3 H1: a window with no gradients leaves the scaler ready for the next"
+    (gradless-steps (lambda (r _opt) (window-step! r #f))))
+
+  (bounded-test "G3 H1: a manual step with no gradients leaves the scaler ready for the next"
+    (gradless-steps manual-optimizer-step!))
+
+  (define-trainer Gappy (net)
+    (define-init (model) (set! net model))
+    (define-optimizers (sgd (parameters net) #:lr 0.05 #:momentum 0.9))
+    (define-training-step (x y)
+      (and (not (= (run-batch-index run) 1)) (mse-loss (net x) y))))
+
+  (define (gappy-loader)
+    (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8))
+
+  (bounded-test "G3 H1: under CUDA 16-mixed, a batch returning #f skips its step and update"
+    (cond
+      [(not (cuda-available?)) (displayln "[trainer-precision-test] G3 H1 fit skipped: no CUDA")]
+      [else
+       (with-default-device (cuda-device)
+         (manual-seed! 0)
+         (define net (Linear 8 4))
+         (define twin (layer-copy net))
+         (define loader (gappy-loader))
+         (define r (fit (Gappy net) loader #:max-epochs 1 #:logger #f #:device (cuda-device)
+                        #:precision '16-mixed))
+         (define opt (sgd (parameters twin) #:lr 0.05 #:momentum 0.9))
+         (define s (grad-scaler))
+         (for ([(x y) (in-dataloader loader)]
+               [i (in-naturals)]
+               #:unless (= i 1))
+           (hand-scaled-step!
+            s opt (with-autocast #:device 'cuda #:dtype 'float16 (mse-loss (twin x) y))))
+         (check-equal? (run-global-step r) 4)
+         (check-equal? (map flat (parameters net)) (map flat (parameters twin)))
+         (check-equal? (grad-scaler-scale (run-grad-scaler r)) (grad-scaler-scale s)))])))
+
