@@ -16,7 +16,9 @@ racket scripts/bench/summary.rkt results.jsonl > results.md
 
 `micro` is `crossings layers ops contracts`; `pytorch-ops`, `threads`,
 `pytorch-threads`, `calls` and `host-gpu` are the L0 suites (#254), and
-`scripts/bench/l0-baseline.sh` runs them all (see [L0 tables](#l0-tables)).
+`scripts/bench/l0-baseline.sh` runs them all (see [L0 tables](#l0-tables));
+`runtime` is `runtime-scaling runtime-native runtime-places runtime-ops`
+(see [Table R](#table-r)).
 Options go before or after
 the suite names, and an unknown suite stops the run before anything is
 measured. Records go to `--out` (appended) or standard output; a readable
@@ -24,9 +26,11 @@ line per case goes to standard error.
 
 | option | |
 |---|---|
-| `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
-| `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
+| `--rounds N` | timed rounds; 5 by default for the micro suites, 3 for `runtime`, 1 for `e2e` |
+| `--warmup N` | untimed rounds first, 1 by default, 2 for `calls` and 0 for `runtime`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
+| `--workers 1,4,7` | the `runtime` suites' worker counts; by default 1, 4 and 7, less those above one short of the CPUs the process may run on |
+| `--trip default,64` | the `runtime` suites' collect trip settings, in MB (`collect-trip-bytes`), `default` leaving Racket's own; one row per setting |
 | `--mix grain` | the op mix of `threads` and `pytorch-threads`: `small` (the default) or `grain` |
 | `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU. For `e2e`, the device every child must report: a child on another fails its variant with an `error` record naming both |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
@@ -282,6 +286,41 @@ median, quartiles and IQR, and the load average before and after.
   untimed; with `--warmup 0`, as in a smoke run, none runs, so the first
   round's first mode pays the first-call costs (cuDNN, the caching
   allocator's growth).
+- **runtime-scaling** — pure Racket, no rktorch: k `#:pool 'own` threads
+  each run a fixed amount of one workload, and the row times them from
+  release to the last finishing (`wall_ms`). The workloads: `cpu`, a
+  fixnum loop that allocates nothing (the CPU floor); `alloc`, short-lived
+  8-element vectors; `alloc-retain`, the same vectors kept in a 20,000-slot
+  ring, as prefetched batches are; `alloc-guarded`, each vector registered
+  with a Chez guardian, drained every 1024; `sema`, a Racket semaphore's
+  post and wait; `os-sema`, an OS semaphore's; `cas`, a `box-cas!`
+  increment. Main is `idle` (waiting on the workers) or `alloc`ates
+  vectors until they finish, keeping its rate and its pauses. `--scale`
+  multiplies each workload's units.
+- **runtime-native** — k threads loop on libc `usleep` (2000 or 200 µs)
+  while main allocates for `--scale` × 3 s (at least 0.5 s). A `plain`
+  call is an ordinary foreign call, `collect-safe` is the same call bound
+  `#:blocking? #t`, and `poll` follows the plain call with
+  `disable-interrupts` and `enable-interrupts` (`ffi/unsafe/vm`), which
+  joins a pending collection at once; `between` is `alloc` when the worker
+  allocates a vector after each call. A `none` row runs no worker. Main
+  reads the clock every 4096 allocations; the gaps between reads are its
+  pauses (p50, p99, max). Workers are released and stopped as `threads`'s
+  are.
+- **runtime-places** — `alloc-retain` in k places against k threads, main
+  idle, timing the work phase only: every place is started and has its
+  units before the clock starts. The place worker is `place-worker` in
+  `scripts/bench/runtime-work.rkt`, found by its path, not the working
+  directory; a place that fails reports its error rather than leaving main
+  waiting.
+- **runtime-ops** — the real shim ops at the raw layer (`tr-add/raw` on
+  32×32, `tr-matmul/raw` on 256×256 and 1024×1024, through
+  `tensor-allocator`) in k workers, `plain`, `poll`, or `collect-safe`
+  (the same C symbol rebound `#:blocking? #t` with `define-torch`), while
+  main allocates or trains `threads`'s MLP; a `none` row per main runs no
+  worker. Rows keep main's rate (M allocs/s or steps/s), its pauses (for a
+  training main, its step times), the workers' ops per second and µs per
+  op per worker.
 
 | example | short | full | timed |
 |---|---|---|---|
@@ -422,6 +461,66 @@ a pair read: the loader on the MNIST fixture, 05 and 09 on the cached datasets a
 H on the fixture's PNG tree at `WORKERS` 0 and 2, `cifar-resnet` at
 `BASE=4`.
 
+## Table R
+
+Table R isolates the Racket runtime from rktorch: what k parallel threads
+cost each other through the collector, and what a foreign call in one
+thread costs a thread that allocates. Table B mixes native ops, the
+ledger and GC; R1-R3 have no native op at all, and R4 has the shim op and
+nothing above the raw layer.
+
+- **R1. Pure-Racket scaling** — each workload's wall time at k over its
+  time at the lowest k (`÷ k=1`; 1.00 is perfect scaling, since each
+  worker does a fixed amount), beside the `cpu` workload's at the same k,
+  main mode and trip: the CPU floor, what the host's cores give a loop
+  that never allocates. A workload's excess over its floor is the
+  runtime's share. `GC ms` is the collector's time over the run, and
+  `main M allocs/s` main's rate when it allocates.
+- **R2. Native calls beside an allocating main** — main's allocation rate,
+  over the `none` row's, and its pauses, per call, `between` and mode.
+- **R3. Places against threads** — the same rows side by side, each over
+  its own lowest k, with the GC time of the main place.
+- **R4. Real ops in workers** — main's rate over its `none` row's, its
+  pauses, and the workers' throughput, per op, mode and main.
+
+Every row names its trip setting, and the heading the host, its CPU list,
+`OMP_NUM_THREADS`, how many CPUs the process may use (`affinity_cpus`) of
+the host's, and the run. `spread` is the IQR over the median of the
+row's rounds, and needs 3; identical cells on the lab host vary by ±15%,
+so read ratios, not absolutes, and repeat a run before trusting a gap
+inside its spread. A row whose 1-minute load reached `--max-load` before
+or after any round is noted `load L ≥ M`.
+
+On a hyperthreaded host, two threads on one core's siblings share its
+execution units, and the CPU floor itself stops scaling past the
+physical cores. Run under `taskset` over one hyperthread per physical
+core (`/sys/devices/system/cpu/cpuN/topology/thread_siblings_list` names
+each CPU's siblings; on the lab's i9-9900K, CPUs 0-7 are one per core), with
+k at most cores − 1, so main has a core of its own; the default
+`--workers` stops one short of the CPUs `taskset` leaves. Under
+`OMP_NUM_THREADS=1`, as R4 needs, no op starts a team.
+
+```bash
+OMP_NUM_THREADS=1 taskset -c 0-7 racket scripts/bench/run.rkt runtime \
+  --max-load 4 --rounds 3 --out runtime.jsonl
+```
+
+What it reproduces:
+
+- retained allocation gets no parallel speedup: `alloc-retain` runs
+  7-9× slower at k = 7 than at k = 1, against a CPU floor of about 2×,
+  and summed GC time grows from 0.1-0.2 s to 8-13 s (#532, E1);
+- one worker in a plain 2 ms foreign call stalls an allocating main for
+  hundreds of milliseconds at a time, about 150 calls, and a
+  collect-safe call removes the stall (#532, E2; the mechanism in #538);
+- places share the collector, so `alloc-retain` slows in k places about
+  as it does in k threads (#532, E5);
+- on real ops, long native calls hurt: 1024² matmuls in plain calls cut a
+  training main's rate several-fold at k = 7, collect-safe calls do not,
+  and the poll only bounds the pause to one call; small ops lose the same
+  in every mode, so that loss is allocation and GC, not the FFI (#538,
+  and the recommendation in #263).
+
 ## Records
 
 One JSON object per line: `suite` (`micro`, `e2e`, `scaling`, `calls`,
@@ -434,7 +533,8 @@ and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 `CUDA_DEVICE_ORDER=PCI_BUS_ID` or on a host whose GPUs are all one model), `threads`
 and where that came from (`at::get_num_threads`, else `MKL_NUM_THREADS`,
 `OMP_NUM_THREADS` or the core count), `omp_num_threads` and
-`mkl_num_threads` as set, `cores`, `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
+`mkl_num_threads` as set, `cores`, `cpu`, `affinity` and its count
+`affinity_cpus` (null without `/proc`), `host`, `os`; `run_id` is shared by every record one
 `scripts/bench/run.rkt` invocation writes, and the summary pairs A/B ratios only within
 one. The summary gives each micro invocation its own section, headed by its
 commit, host, execution (device, threads and their source, GPU) and run id,
@@ -457,7 +557,14 @@ rktorch records of its device. `scaling` records add `threads_run`,
 `main_steps_per_s` and `stopped` (one per round), `settings` (`seconds`
 per round, `warmup` rounds), `mix` (`small` or `grain`) and
 `peak_os_threads` and `baseline_os_threads` (the most over its rounds,
-null without `/proc`); `host-gpu` step records add `gc_ms` per step,
+null without `/proc`); `runtime` records (`group` `scaling`, `native`,
+`places` or `ops`) add the row's `workload`, `k`, `main`, `trip_mb`
+(`default` or MB), `ffi` (`none`, `plain`, `poll` or `collect-safe`),
+`between`, `runner` (`threads` or `places`), `units` or `seconds`,
+`max_load`, and per round `wall_ms`, `work_gc_ms`, `main_rate`,
+`pause_p50_ms`, `pause_p99_ms`, `pause_max_ms`, `worker_ops_per_s`,
+`us_per_op`, `stopped`, `load_start` and `load_end` (the 1-minute load
+around the run); `host-gpu` step records add `gc_ms` per step,
 one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and

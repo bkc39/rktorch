@@ -1,12 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/match match-define)
+(require (only-in racket/match match match-define)
          (only-in racket/port open-output-nowhere port->string)
-         (only-in racket/string string-trim)
+         (only-in racket/string string-split string-trim)
          (only-in racket/system process*/ports))
 
 (provide system-tool-directories
-         command-output)
+         command-output
+         affinity-count)
 
 ;; A Nix shell's PATH leaves out /usr/sbin, where macOS keeps sysctl.
 (define system-tool-directories
@@ -36,3 +37,24 @@
      (close-input-port out)
      (control 'wait)
      (and (zero? (control 'exit-code)) (string-trim text))]))
+
+(define (affinity-count text)
+  (define ranges
+    (for/list ([part (in-list (string-split (or text "") ","))])
+      (match (regexp-match #px"^\\s*(\\d+)(?:-(\\d+))?\\s*$" part)
+        [(list _ _ #f) 1]
+        [(list _ lo hi) (add1 (- (string->number hi) (string->number lo)))]
+        [#f #f])))
+  (and (pair? ranges) (andmap exact-positive-integer? ranges) (apply + ranges)))
+
+(module+ test
+  (require rackunit)
+
+  (test-case "the affinity count adds up a CPU list's ranges"
+    (check-equal? (affinity-count "0-15") 16)
+    (check-equal? (affinity-count "0,2,4,6") 4)
+    (check-equal? (affinity-count "0-3, 8-11,14") 9)
+    (check-false (affinity-count "3-1"))
+    (check-false (affinity-count "a-b"))
+    (check-false (affinity-count ""))
+    (check-false (affinity-count #f))))
