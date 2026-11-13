@@ -18,11 +18,11 @@
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
                   run-book run-callbacks run-device run-epoch run-global-step run-loggers
-                  run-optimizers run-schedulers run-skip-epoch? run-skip-window? run-stop?
+                  run-optimizers run-scheduler-configs run-skip-epoch? run-skip-window? run-stop?
                   run-trainer set-run-batch-index! set-run-current-stage! set-run-epoch!
                   set-run-global-step! set-run-loggers! set-run-optimizers!
-                  set-run-schedulers! set-run-skip-epoch?! set-run-skip-window?!
-                  set-run-step-pending?! set-run-stepped?!)
+                  set-run-scheduler-configs! set-run-skip-epoch?! set-run-skip-window?!
+                  set-run-step-pending?! set-run-stepped?! set-run-stepping-batches!)
          (only-in "types.rkt"
                   scheduler-config-frequency scheduler-config-interval
                   scheduler-config-scheduler trainer-hook))
@@ -39,7 +39,15 @@
     [share (exact-floor (* n share))]))
 
 (struct plan (device train val callbacks loggers max-epochs max-steps accumulate
-              val-every val-interval sanity train-count val-count log-every fast?))
+              val-every val-interval sanity train-count val-count log-every fast?
+              stepping-batches))
+
+(define (stepping-batches max-epochs max-steps accumulate train-count)
+  (cond
+    [(not max-epochs) max-steps]
+    [else
+     (define estimated (* (ceiling (/ train-count accumulate)) max-epochs))
+     (if max-steps (min estimated max-steps) estimated)]))
 
 (define (fit-plan train
                   #:val val
@@ -58,18 +66,22 @@
                   #:fast-dev-run fast-dev-run)
   (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
   (define (unless-fast v fast-v) (if fast fast-v v))
+  (define epochs (unless-fast max-epochs 1))
+  (define steps (or fast max-steps))
+  (define train-count (limited-batches train (or fast limit-train)))
   (plan device train val callbacks
         (unless-fast loggers '())
-        (unless-fast max-epochs 1)
-        (or fast max-steps)
+        epochs
+        steps
         accumulate
         (unless-fast val-every 1)
         (unless-fast val-interval #f)
         (unless-fast sanity 0)
-        (limited-batches train (or fast limit-train))
+        train-count
         (and val (limited-batches val (or fast limit-val)))
         log-every
-        (and fast #t)))
+        (and fast #t)
+        (stepping-batches epochs steps accumulate train-count)))
 
 (define (start-entry! r who callbacks loggers move-to #:fast? [fast? #f])
   (set-run-loggers! r loggers)
@@ -81,7 +93,7 @@
       (to layer move-to))))
 
 (define (step-schedulers! r interval index)
-  (for ([c (in-list (run-schedulers r))]
+  (for ([c (in-list (run-scheduler-configs r))]
         #:when (and (eq? (scheduler-config-interval c) interval)
                     (zero? (modulo (add1 index) (scheduler-config-frequency c)))))
     (step! (scheduler-config-scheduler c))))
@@ -201,7 +213,7 @@
       [#f (values '() '())]
       [(list optimizers schedulers) (values optimizers schedulers)]))
   (set-run-optimizers! r optimizers)
-  (set-run-schedulers! r schedulers))
+  (set-run-scheduler-configs! r schedulers))
 
 (define (log-hyperparameters! r)
   (define tr (run-trainer r))
@@ -210,6 +222,7 @@
     (logger-log-hyperparams! l params)))
 
 (define (run-fit r p)
+  (set-run-stepping-batches! r (plan-stepping-batches p))
   (with-failure-protocol r 'fit
     (set-run-current-stage! r 'train)
     (start-entry! r 'fit (plan-callbacks p) (plan-loggers p) (plan-device p)

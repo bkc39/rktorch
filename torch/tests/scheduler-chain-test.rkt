@@ -6,9 +6,13 @@
            (only-in "../main.rkt" zeros)
            (only-in "../nn.rkt"
                     Parameter chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
-                    exponential-lr learning-rate linear-lr scheduler-rate sequential-lr sgd step!
-                    step-lr)
+                    exponential-lr lambda-lr learning-rate linear-lr param-group-ref
+                    param-group-set! scheduler-rate scheduler-step-count sequential-lr
+                    set-learning-rate! sgd step! step-lr)
+           (only-in (submod "../foreign/raw/cas.rkt" private) site-cas)
+           (only-in "../foreign/raw/regions.rkt" with-cleanup)
            (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/scheduler-steps.rkt" stepped-reads two-group-opt)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "scheduler-chain-test"))
@@ -29,14 +33,70 @@
       (check-true (relatively-close? (learning-rate opt) want) (format "step ~a" t))
       (check-true (relatively-close? (scheduler-rate chain) want) (format "step ~a" t))))
 
-  (bounded-test "G2-L3: a sequence restarts its second schedule from step 0 at the milestone"
+  (bounded-test "a sequence switches to its second schedule's step 0 at the milestone"
     (define opt (fresh-opt 1.0))
     (define warm (linear-lr opt #:start-factor 0.25 #:total-iters 4))
     (define cool (cosine-annealing-lr opt #:t-max 8 #:eta-min 0.01))
     (define s (sequential-lr opt (list warm cool) #:milestones '(4)))
-    (check-= (learning-rate opt) 0.25 1e-15)
-    (for ([_ (in-range 4)]) (step! s))
-    (check-= (learning-rate opt) 1.0 1e-15))
+    (check-equal? (stepped-reads s scheduler-rate 6)
+                  '(0.25 0.4375 0.625 0.8125 1.0 0.9623203685930869 0.855017856687341)))
+
+  (bounded-test "unsorted milestones pick the schedule as torch's bisect_right does"
+    (define opt (fresh-opt 1.0))
+    (define s (sequential-lr opt (list (exponential-lr opt #:gamma 0.5)
+                                       (step-lr opt #:step-size 100)
+                                       (linear-lr opt #:start-factor 0.5 #:total-iters 2))
+                             #:milestones '(4 2)))
+    (check-equal? (stepped-reads s scheduler-rate 6) '(1.0 0.5 0.5 0.75 1.0 1.0 1.0)))
+
+  (bounded-test "a chain a sequence starts with is at step index 0, as its schedules are"
+    (define opt (fresh-opt 1.0))
+    (define exp-decay (exponential-lr opt #:gamma 0.9))
+    (define chain (chained-scheduler (list exp-decay (step-lr opt #:step-size 3))))
+    (define s (sequential-lr opt (list chain (step-lr opt #:step-size 2)) #:milestones '(3)))
+    (check-equal? (map scheduler-step-count (list chain exp-decay s)) '(0 0 0))
+    (step! s)
+    (check-equal? (map scheduler-step-count (list chain exp-decay s)) '(1 1 1)))
+
+  (bounded-test "a chain counts its own steps from 0, whatever its schedules had reached"
+    (define opt (fresh-opt 1.0))
+    (define exp-decay (exponential-lr opt #:gamma 0.9))
+    (for ([_ (in-range 3)]) (step! exp-decay))
+    (define chain (chained-scheduler (list exp-decay (step-lr opt #:step-size 2))))
+    (check-equal? (map scheduler-step-count (list chain exp-decay)) '(0 3)))
+
+  (define (with-write-at-first-update write thunk)
+    (define primitive (unbox site-cas))
+    (define pending? (box #t))
+    (define (racing site target old new)
+      (when (and (eq? site 'update) (unbox pending?))
+        (set-box! pending? #f)
+        (write))
+      (primitive site target old new))
+    (set-box! site-cas racing)
+    (with-cleanup (thunk) #:finally (set-box! site-cas primitive)))
+
+  (bounded-test "a rate written while a schedule steps is scaled by the step, not lost"
+    (define opt (fresh-opt 1.0))
+    (define s (exponential-lr opt #:gamma 0.5))
+    (with-write-at-first-update (lambda () (set-learning-rate! opt 10.0)) (lambda () (step! s)))
+    (check-not-false (memv (learning-rate opt) '(5.0 10.0)))
+    (check-equal? (scheduler-rate s) (learning-rate opt)))
+
+  (bounded-test "a lambda-lr factor that writes the optimizer runs once per group and step"
+    (define opt (two-group-opt))
+    (define calls (box 0))
+    (define (factor t)
+      (set-box! calls (add1 (unbox calls)))
+      (when (= t 1) (param-group-set! opt 0 'weight-decay 0.1))
+      1.0)
+    (define s (lambda-lr opt factor))
+    (define groups 2)
+    (define steps 3)
+    (for ([_ (in-range steps)]) (step! s))
+    (check-equal? (unbox calls) (* groups (add1 steps)))
+    (check-equal? (learning-rate opt) 1.0)
+    (check-equal? (param-group-ref opt 0 'weight-decay) 0.1))
 
   (bounded-test "G2-L3: warm restarts return to the base rate at each period's start"
     (define opt (fresh-opt 0.1))

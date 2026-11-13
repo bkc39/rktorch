@@ -3,17 +3,13 @@
 (module+ test
   (require (only-in racket/match match-define)
            rackunit
-           (only-in "../main.rkt" zeros)
            (only-in "../nn.rkt"
-                    Parameter chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
-                    exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr param-group
-                    scheduler-rate sequential-lr sgd step! step-lr)
-           (only-in "private/python-env.rkt" python-check python-torch-available?))
-
-  (define (two-group-opt)
-    (sgd (list (param-group (list (Parameter (zeros 1))) #:lr 0.1)
-               (param-group (list (Parameter (zeros 1))) #:lr 0.02))
-         #:lr 0.1))
+                    chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
+                    exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr scheduler-rate
+                    sequential-lr step-lr)
+           (only-in (submod "../nn/scheduler.rkt" private) closed-form-rates)
+           (only-in "private/python-env.rkt" python-check python-torch-available?)
+           (only-in "private/scheduler-steps.rkt" stepped-reads two-group-opt))
 
   (define cases
     `((step ,(lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
@@ -39,15 +35,41 @@
        ,(lambda (o) (sequential-lr o (list (exponential-lr o #:gamma 0.9)
                                            (step-lr o #:step-size 2 #:gamma 0.5))
                                    #:milestones '(3))))
+      (sequential_exponential_warm_restarts
+       ,(lambda (o) (sequential-lr
+                     o (list (exponential-lr o #:gamma 0.9)
+                             (cosine-annealing-warm-restarts o #:t-0 2 #:eta-min 0.01))
+                     #:milestones '(3))))
+      (sequential_chained_linear
+       ,(lambda (o) (sequential-lr
+                     o (list (chained-scheduler (list (exponential-lr o #:gamma 0.9)
+                                                      (step-lr o #:step-size 3 #:gamma 0.5)))
+                             (linear-lr o #:start-factor 0.5 #:end-factor 1.0 #:total-iters 3))
+                     #:milestones '(5))))
+      (sequential_step_lambda
+       ,(lambda (o) (sequential-lr o (list (step-lr o #:step-size 2 #:gamma 0.5)
+                                           (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))
+                                   #:milestones '(4))))
+      (sequential_nested
+       ,(lambda (o) (sequential-lr o (list (sequential-lr o (list (exponential-lr o #:gamma 0.9))
+                                                          #:milestones '())
+                                           (step-lr o #:step-size 2 #:gamma 0.5))
+                                   #:milestones '(3))))
+      (sequential_unsorted_milestones
+       ,(lambda (o) (sequential-lr o (list (exponential-lr o #:gamma 0.5)
+                                           (step-lr o #:step-size 100)
+                                           (linear-lr o #:start-factor 0.5 #:total-iters 2))
+                                   #:milestones '(4 2))))
       (warm_restarts_3_2
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 3 #:t-mult 2 #:eta-min 0.01)))
       (warm_restarts_4_1
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 4 #:t-mult 1 #:eta-min 0)))))
 
+  (define (stepped make read)
+    (stepped-reads (make (two-group-opt #:lr '(0.1 0.02))) read 12))
+
   (define (rates make)
-    (define s (make (two-group-opt)))
-    (define (now) (list (scheduler-rate s #:group 0) (scheduler-rate s #:group 1)))
-    (cons (now) (for/list ([_ (in-range 12)]) (step! s) (now))))
+    (stepped make (lambda (s) (list (scheduler-rate s #:group 0) (scheduler-rate s #:group 1)))))
 
   (cond
     [(not (python-torch-available?))
@@ -60,4 +82,8 @@
        (define got (rates make))
        (check-equal? (length got) (length want) (format "G2-L1: ~a: step count" name))
        (for ([g (in-list got)] [w (in-list want)] [t (in-naturals)])
-         (check-equal? g w (format "G2-L1: ~a: get_last_lr() at step ~a" name t))))]))
+         (check-equal? g w (format "G2-L1: ~a: get_last_lr() at step ~a" name t))))
+     (for ([(name want) (in-hash (hash-ref j 'groups))])
+       (match-define (list _ make) (assq name cases))
+       (for ([g (in-list (stepped make closed-form-rates))] [w (in-list want)] [t (in-naturals)])
+         (check-equal? g w (format "G1-L10: ~a: _get_closed_form_lr() at step ~a" name t))))]))

@@ -891,10 +891,10 @@ A schedule wraps an optimizer and answers to @racket[step!] like one: the
 rate for step 0 is written at construction, and each @racket[step!] on the
 schedule advances its count and writes the rate for it, so a training loop
 steps the optimizer and then the schedule as in PyTorch. The rates are the
-closed forms of @tt{torch.optim.lr_scheduler}'s constructors of the same
-names, pinned against them step for step. @racket[chained-scheduler],
-@racket[sequential-lr] and @racket[cosine-annealing-warm-restarts] are not
-implemented yet.
+step-by-step forms of @tt{torch.optim.lr_scheduler}'s constructors of the
+same names, each step scaling the rate the group holds, so chained and
+sequential schedules compose as there; they are pinned against
+@tt{get_last_lr()} step for step.
 
 @racketblock[
 (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9 #:weight-decay 5e-4))
@@ -976,13 +976,19 @@ optimizer.
                         [#:milestones milestones (listof exact-nonnegative-integer?)])
          scheduler?]{
 @tt{SequentialLR}: the i-th schedule runs from milestone i−1; at a milestone
-the next starts from its own step 0. Every schedule wraps @racket[opt], which
-is not itself a schedule, and there is one milestone fewer than schedules.
+the next starts from its own step 0. The milestones are searched as
+@tt{bisect_right} searches them, unsorted ones included. Every schedule wraps
+@racket[opt], which is not itself a schedule, and there is one milestone fewer
+than schedules. A chained or sequential schedule has no step 0 to restart
+at, so one placed after the first raises at its milestone, as @tt{step(0)}
+does in PyTorch.
 
-@racketblock[
+@torch-examples[
+(define opt (sgd (list (Parameter (zeros 1))) #:lr 0.1))
 (define warm (linear-lr opt #:start-factor 0.1 #:total-iters 3))
 (define cool (cosine-annealing-lr opt #:t-max 3))
 (define s (sequential-lr opt (list warm cool) #:milestones '(3)))
+(cons (learning-rate opt) (for/list ([_ (in-range 6)]) (step! s) (learning-rate opt)))
 ]
 }
 
@@ -1002,8 +1008,9 @@ last.
                                        [#:group group exact-nonnegative-integer? 0])
                        real?]
               @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
-A schedule, the number of times it has been stepped, the rate it last
-wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
+A schedule, its step index (@tt{last_epoch}, never below 0; a chain counts
+its own steps from 0, where PyTorch's has none), the rate it last wrote to its optimizer, and that
+optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
 last @racket[step!], and does not call a @racket[lambda-lr] factor again;
 @racket[#:group] is @tt{get_last_lr()[group]}.
