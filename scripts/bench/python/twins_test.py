@@ -1,11 +1,18 @@
+import json
 import os
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
+from common import meta
 from op_cost import stack_inputs, thread_loop
 from pipelines import peak_rss_mb
-from threads import MIXES, PeakSampler, os_thread_count, scaling_run
+from threads import MIXES, PeakSampler, os_thread_count, peak_of, scaling_run
+
+import torch
 
 
 class ThreadLoop(unittest.TestCase):
@@ -83,12 +90,48 @@ class PeakOsThreads(unittest.TestCase):
             time.sleep(0.2)
             self.assertEqual(sampler.stop(), 4)
         self.assertIsNone(PeakSampler(ABSENT, interval=0.01).stop())
+        self.assertIsNone(peak_of([3, None]))
+        self.assertEqual(peak_of([3, 5, 4]), 5)
 
-    def test_a_run_records_a_thread_per_worker_and_none_without_proc(self):
+    def test_a_run_counts_a_thread_per_worker_over_the_tasks_before_it(self):
         run = scaling_run(2, "idle", 0.3)
         if os.path.isdir("/proc/self/task"):
-            self.assertGreater(run["peak_os_threads"], 2)
-        self.assertIsNone(scaling_run(1, "idle", 0.1, tasks=ABSENT)["peak_os_threads"])
+            self.assertGreater(run["baseline_os_threads"], 0)
+            self.assertGreaterEqual(run["peak_os_threads"], run["baseline_os_threads"] + 2, run)
+        elsewhere = scaling_run(1, "idle", 0.1, tasks=ABSENT)
+        self.assertIsNone(elsewhere["peak_os_threads"])
+        self.assertIsNone(elsewhere["baseline_os_threads"])
+
+
+def print_counts(mixes, rounds):
+    runs = [[scaling_run(2, "idle", 0.5, *MIXES[mix]) for _ in range(int(rounds))]
+            for mix in mixes.split(",")]
+    print(json.dumps([[[r["baseline_os_threads"], r["peak_os_threads"]] for r in rs]
+                      for rs in runs]))
+
+
+def counts_under(omp, mixes, rounds):
+    env = {**os.environ, "OMP_NUM_THREADS": str(omp)}
+    env.pop("MKL_NUM_THREADS", None)
+    out = subprocess.run(
+        [sys.executable, "-c", "import sys, twins_test; twins_test.print_counts(*sys.argv[1:])",
+         mixes, str(rounds)],
+        cwd=os.path.dirname(os.path.abspath(__file__)), env=env, check=True,
+        capture_output=True, text=True, timeout=300)
+    return json.loads(out.stdout)
+
+
+@unittest.skipUnless(os.path.isdir("/proc/self/task"), "no /proc/self/task")
+class IntraOpTeams(unittest.TestCase):
+    def test_a_runs_peak_counts_each_workers_intra_op_team(self):
+        [[[_, one]]] = counts_under(1, "grain", 1)
+        [[[_, four]]] = counts_under(4, "grain", 1)
+        self.assertGreaterEqual(four, one + 3)
+
+    def test_back_to_back_runs_start_from_the_same_threads_and_peak_alike(self):
+        [[[base_1, peak_1], [base_2, peak_2]]] = counts_under(4, "grain", 2)
+        self.assertLessEqual(abs(base_2 - base_1), 1)
+        self.assertLessEqual(abs(peak_2 - peak_1), 1)
 
 
 class Mixes(unittest.TestCase):
@@ -98,7 +141,19 @@ class Mixes(unittest.TestCase):
             make_mix, per_mix = MIXES[name]
             self.assertEqual(per_mix, ops)
             run = scaling_run(1, "idle", 0.1, make_mix, per_mix)
-            self.assertGreater(run["ops_per_s"], 0, name)
+            self.assertGreater(run["mixes"], 0, name)
+            self.assertAlmostEqual(run["ops_per_s"] * run["elapsed_s"] / run["mixes"], ops,
+                                   places=9, msg=name)
+
+
+class Meta(unittest.TestCase):
+    def test_reports_the_thread_settings_the_twin_ran_under(self):
+        with mock.patch.dict(os.environ, {"OMP_NUM_THREADS": "2", "MKL_NUM_THREADS": "3"}):
+            m = meta(torch.device("cpu"))
+        self.assertEqual((m["omp_num_threads"], m["mkl_num_threads"]), ("2", "3"))
+        with mock.patch.dict(os.environ, {}, clear=True):
+            m = meta(torch.device("cpu"))
+        self.assertEqual((m["omp_num_threads"], m["mkl_num_threads"]), (None, None))
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@
          (only-in "host-gpu.rkt" host-gpu-records)
          (only-in "pytorch.rkt" require-pytorch twin-record twin-records)
          (only-in "shim.rkt" aten-threads)
-         (only-in "threads.rkt" main-states scaling-cases thread-counts)
+         (only-in "threads.rkt" main-states peak-of scaling-cases thread-counts)
          (only-in "workloads/phases.rkt" mnist-phases resnet-phases))
 
 (provide l0-suites
@@ -35,10 +35,8 @@
                                     'threads_run n 'main_steps_per_s (of 'main_steps_per_s)
                                     'stopped (of 'stopped) 'settings settings
                                     'mix (~a mix)
-                                    'peak_os_threads (peak-of (of 'peak_os_threads))))))
-
-(define (peak-of counts)
-  (and (andmap values counts) (apply max counts)))
+                                    'peak_os_threads (peak-of (of 'peak_os_threads))
+                                    'baseline_os_threads (peak-of (of 'baseline_os_threads))))))
 
 (define (name->case name)
   (match (regexp-match #rx"^([^/]*)/([0-9]+)$" (symbol->string name))
@@ -136,9 +134,16 @@
 
   (define (check-peak r)
     (define peak (hash-ref r 'peak_os_threads))
-    (if (directory-exists? "/proc/self/task")
-        (check-true (and (exact-integer? peak) (> peak (hash-ref r 'threads_run))) (format "~a" peak))
-        (check-not-false (memq peak '(#f null)) (format "~a" peak))))
+    (define baseline (hash-ref r 'baseline_os_threads))
+    (define counts (format "peak ~a, baseline ~a" peak baseline))
+    (cond
+      [(directory-exists? "/proc/self/task")
+       (check-pred exact-positive-integer? baseline counts)
+       (check-true (and (exact-integer? peak) (>= peak (+ baseline (hash-ref r 'threads_run))))
+                   counts)]
+      [else
+       (check-not-false (memq peak '(#f null)) counts)
+       (check-not-false (memq baseline '(#f null)) counts)]))
 
   (test-case "threads records ops per second per main state and thread count"
     (define records (records-of 'threads))

@@ -1,8 +1,11 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/custodian make-custodian-at-root)
-         (only-in torch + @ backward! randn relu sum tensor)
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe/custodian make-custodian-at-root)
          (only-in racket/match match match-define)
+         (only-in racket/promise delay force)
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in torch + @ backward! randn relu sum tensor)
          (only-in torch/nn Linear Sequential cross-entropy parameters sgd step! zero-grads!)
          (only-in "harness.rkt" bench-case clock-ms))
 
@@ -10,6 +13,7 @@
          main-states
          mix-names
          ops-per-iteration
+         peak-of
          scaling-run
          scaling-cases)
 
@@ -19,7 +23,7 @@
 (define task-dir "/proc/self/task")
 (define sample-interval 0.1)
 
-(define (op-mix)
+(define (small-mix)
   (define a8 (randn 8 8))
   (define b8 (randn 8 8))
   (define a64 (randn 64 64))
@@ -31,37 +35,56 @@
     (sum b64)))
 
 (define (grain-mix)
-  (define a (randn 256 256))
-  (define b (randn 256 256))
+  (define inputs (delay (list (randn 256 256) (randn 256 256))))
   (lambda ()
+    (match-define (list a b) (force inputs))
     (@ a b)
     (+ a b)))
 
-(define mixes
-  (list (list 'small op-mix ops-per-iteration)
-        (list 'grain grain-mix 2)))
+(struct op-mix (name make ops))
 
-(define mix-names (map car mixes))
+(define mixes
+  (list (op-mix 'small small-mix ops-per-iteration)
+        (op-mix 'grain grain-mix 2)))
+
+(define mix-names (map op-mix-name mixes))
+
+(define (mix-named name)
+  (findf (lambda (m) (eq? (op-mix-name m) name)) mixes))
 
 (define (os-thread-count [tasks task-dir])
   (and (directory-exists? tasks) (length (directory-list tasks))))
 
-(define (peak-count a b)
-  (and a b (max a b)))
+(define (settled-thread-count tasks #:interval [interval sample-interval] #:within [limit 2.0])
+  (define deadline (+ (clock-ms) (* 1000.0 limit)))
+  (let loop ([last (os-thread-count tasks)])
+    (sleep interval)
+    (define now (os-thread-count tasks))
+    (if (or (equal? now last) (>= (clock-ms) deadline)) now (loop now))))
 
-(define (start-peak-sampler #:tasks [tasks task-dir] #:interval [interval sample-interval])
+(define (peak-of counts)
+  (and (andmap values counts) (apply max counts)))
+
+(define (call-with-peak-sampler proc #:tasks [tasks task-dir] #:interval [interval sample-interval])
   (define peak (box (os-thread-count tasks)))
-  (define (sample!) (set-box! peak (peak-count (unbox peak) (os-thread-count tasks))))
+  (define (sample!) (set-box! peak (peak-of (list (unbox peak) (os-thread-count tasks)))))
   (define sampler
     (thread (lambda ()
               (let loop ()
                 (sleep interval)
                 (sample!)
                 (loop)))))
-  (lambda ()
-    (kill-thread sampler)
-    (sample!)
-    (unbox peak)))
+  (define result (dynamic-wind void proc (lambda () (kill-thread sampler))))
+  (sample!)
+  (values result (unbox peak)))
+
+(define-syntax-parse-rule (with-peak-sampler ((~alt (~optional (~seq #:tasks tasks:expr))
+                                                    (~optional (~seq #:interval interval:expr)))
+                                              ...)
+                            body:expr ...+)
+  (call-with-peak-sampler (lambda () body ...)
+                          (~? (~@ #:tasks tasks))
+                          (~? (~@ #:interval interval))))
 
 (define (training-step)
   (define net (Sequential (Linear 784 256) relu (Linear 256 10)))
@@ -96,7 +119,7 @@
                         (with-handlers ([(lambda (_e) #t) fail!])
                           (let loop ([k 0])
                             (cond
-                              [(not (unbox go?)) (loop k)]
+                              [(not (unbox go?)) (unless (unbox stop?) (loop k))]
                               [(and (positive? k) (unbox stop?)) (void)]
                               [else
                                (mix)
@@ -110,54 +133,62 @@
       [(sync/timeout grace w) 1]
       [else (parameterize ([current-custodian custodian]) (kill-thread w)) 0])))
 
-(define (scaling-run n state
-                     #:seconds seconds
-                     #:grace [grace 30]
-                     #:mix [make-mix op-mix]
-                     #:ops-per-mix [ops-per-mix ops-per-iteration]
-                     #:probe [probe void]
-                     #:tasks [tasks task-dir])
+(define (call-with-workers n make-mix grace proc)
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
   (define failure (box #f))
   (define-values (custodian workers) (start-workers n go? stop? counts failure make-mix))
-  (define stop-sampler (start-peak-sampler #:tasks tasks))
-  (define stopped #f)
-  (define peak #f)
-  (define probe-start (probe))
-  (define t0 (clock-ms))
-  (set-box! go? #t)
-  (define-values (main-steps elapsed-s ops probe-stop)
-    (dynamic-wind
-     void
-     (lambda ()
-       (define steps (run-main state (+ t0 (* 1000.0 seconds))))
-       (define elapsed (/ (- (clock-ms) t0) 1000.0))
-       (define ops (for/sum ([k (in-vector counts)]) k))
-       (values steps elapsed ops (probe)))
-     (lambda ()
-       (set! peak (stop-sampler))
-       (set-box! stop? #t)
-       (set! stopped (reap! custodian workers grace)))))
+  (define (stop!)
+    (set-box! stop? #t)
+    (reap! custodian workers grace))
+  (define result
+    (with-handlers ([(lambda (_e) #t) (lambda (e) (stop!) (raise e))])
+      (proc (lambda () (set-box! go? #t))
+            (lambda () (for/sum ([k (in-vector counts)]) k)))))
+  (define stopped (stop!))
   (match (unbox failure)
-    [#f (hasheq 'ops_per_s (/ (* ops-per-mix ops) elapsed-s)
-                'mixes ops
-                'elapsed_s elapsed-s
-                'main_steps_per_s (/ main-steps elapsed-s)
-                'started_ms t0
-                'stopped stopped
-                'peak_os_threads peak
-                'probe_start probe-start
-                'probe_stop probe-stop)]
+    [#f (values result stopped)]
     [e (raise e)]))
+
+(define (scaling-run n state
+                     #:seconds seconds
+                     #:grace [grace 30]
+                     #:mix [make-mix small-mix]
+                     #:ops-per-mix [ops-per-mix ops-per-iteration]
+                     #:probe [probe void]
+                     #:tasks [tasks task-dir])
+  (define baseline (settled-thread-count tasks))
+  (define-values (run stopped)
+    (call-with-workers
+     n make-mix grace
+     (lambda (go! mixes-done)
+       (define-values (timed peak)
+         (with-peak-sampler (#:tasks tasks)
+           (define probe-start (probe))
+           (define t0 (clock-ms))
+           (go!)
+           (define main-steps (run-main state (+ t0 (* 1000.0 seconds))))
+           (define elapsed-s (/ (- (clock-ms) t0) 1000.0))
+           (define ops (mixes-done))
+           (hasheq 'ops_per_s (/ (* ops-per-mix ops) elapsed-s)
+                   'mixes ops
+                   'elapsed_s elapsed-s
+                   'main_steps_per_s (/ main-steps elapsed-s)
+                   'started_ms t0
+                   'probe_start probe-start
+                   'probe_stop (probe))))
+       (hash-set* timed 'peak_os_threads peak 'baseline_os_threads baseline))))
+  (hash-set run 'stopped stopped))
 
 (define (scaling-cases #:seconds seconds
                        #:threads [threads thread-counts]
                        #:states [states main-states]
                        #:mix [mix 'small]
                        #:on-run [on-run void])
-  (match-define (list _ make-mix ops-per-mix) (assq mix mixes))
+  (define chosen (mix-named mix))
+  (define make-mix (op-mix-make chosen))
+  (define ops-per-mix (op-mix-ops chosen))
   (for*/list ([state (in-list states)] [n (in-list threads)])
     (bench-case (string->symbol (format "~a/~a" state n))
                 (lambda (_reps)
@@ -170,6 +201,9 @@
 (module+ test
   (require (only-in racket/file make-temporary-directory)
            (only-in racket/match exn:misc:match?)
+           (only-in racket/port with-output-to-string)
+           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/system system*)
            rackunit
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "harness.rkt" measure result-name result-per-call with-temporary-path))
@@ -192,26 +226,56 @@
   (test-case "the sampler keeps the most entries it saw, and #f without a directory"
     (with-temporary-path (dir (make-temporary-directory "tasks-~a"))
       (touch! dir '("1"))
-      (define stop! (start-peak-sampler #:tasks dir #:interval 0.01))
-      (touch! dir '("2" "3" "4"))
-      (sleep 0.2)
-      (for ([name (in-list '("2" "3" "4"))]) (delete-file (build-path dir name)))
-      (sleep 0.2)
-      (check-equal? (stop!) 4))
-    (check-false ((start-peak-sampler #:tasks absent #:interval 0.01)))
-    (check-false (peak-count 3 #f))
-    (check-equal? (peak-count 3 5) 5))
+      (define-values (result peak)
+        (with-peak-sampler (#:tasks dir #:interval 0.01)
+          (touch! dir '("2" "3" "4"))
+          (sleep 0.2)
+          (for ([name (in-list '("2" "3" "4"))]) (delete-file (build-path dir name)))
+          (sleep 0.2)
+          'done))
+      (check-equal? (list result peak) '(done 4)))
+    (define-values (result peak) (with-peak-sampler (#:interval 0.01 #:tasks absent) 'done))
+    (check-equal? (list result peak) '(done #f))
+    (check-false (peak-of '(3 #f)))
+    (check-equal? (peak-of '(3 5 4)) 5))
 
-  (test-case "a run records its peak OS threads: a thread per worker beside main, #f without /proc"
+  (define (live-threads custodian)
+    (for/list ([v (in-list (custodian-managed-list custodian (current-custodian)))]
+               #:when (and (thread? v) (not (thread-dead? v))))
+      v))
+
+  (test-case "a raising probe stops the sampler and the workers"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (for ([failing-call (in-list '(1 2))])
+         (define calls 0)
+         (define (probe)
+           (set! calls (add1 calls))
+           (when (= calls failing-call) (raise-user-error 'probe "failed")))
+         (define custodian (make-custodian))
+         (define t0 (clock-ms))
+         (parameterize ([current-custodian custodian])
+           (check-exn #rx"probe: failed"
+                      (lambda () (scaling-run 2 'idle #:seconds 0.2 #:grace 20 #:probe probe))))
+         (check-equal? (live-threads custodian) '() (format "call ~a" failing-call))
+         (check-true (< (- (clock-ms) t0) 10000.0) "no worker waited out the grace period")))))
+
+  (test-case "a run's peak OS threads count a thread per worker over the tasks before it"
     (call-with-process-deadline
      120
      (lambda ()
        (define run (scaling-run 2 'idle #:seconds 0.3))
-       (if (directory-exists? "/proc/self/task")
-           (check-true (> (hash-ref run 'peak_os_threads) 2) (format "~a" run))
-           (check-false (hash-ref run 'peak_os_threads)))
-       (check-false (hash-ref (scaling-run 1 'idle #:seconds 0.1 #:tasks absent)
-                              'peak_os_threads)))))
+       (define peak (hash-ref run 'peak_os_threads))
+       (define baseline (hash-ref run 'baseline_os_threads))
+       (cond
+         [(directory-exists? "/proc/self/task")
+          (check-pred exact-positive-integer? baseline)
+          (check-true (>= peak (+ baseline 2)) (format "~a" run))]
+         [else (check-false peak) (check-false baseline)])
+       (define elsewhere (scaling-run 1 'idle #:seconds 0.1 #:tasks absent))
+       (check-false (hash-ref elsewhere 'peak_os_threads))
+       (check-false (hash-ref elsewhere 'baseline_os_threads)))))
 
   (test-case "a mix counts its own ops: four for the small mix, two for the grain-crossing one"
     (call-with-process-deadline
@@ -247,6 +311,54 @@
          (check-equal? (hash-ref run 'stopped) n)
          (check-equal? (zero? (hash-ref run 'main_steps_per_s)) (eq? state 'idle)))
        (check-equal? (length runs) 4))))
+
+  (define-runtime-path harness-module "harness.rkt")
+  (define-runtime-path threads-module "threads.rkt")
+
+  (define (counts-under omp mixes rounds)
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"OMP_NUM_THREADS" (string->bytes/utf-8 (number->string omp)))
+    (environment-variables-set! env #"MKL_NUM_THREADS" #f)
+    (define program
+      `(begin
+         (require (only-in (file ,(path->string harness-module)) measure)
+                  (only-in (file ,(path->string threads-module)) scaling-cases))
+         (define (counts mix)
+           (define runs '())
+           (measure (scaling-cases #:seconds 0.5 #:threads '(2) #:states '(idle) #:mix mix
+                                   #:on-run (lambda (_state _n run) (set! runs (cons run runs))))
+                    #:warmup 0 #:rounds ,rounds #:load void)
+           (for/list ([run (in-list (reverse runs))])
+             (list (hash-ref run 'baseline_os_threads) (hash-ref run 'peak_os_threads))))
+         (write (map counts ',mixes))))
+    (define ok? #f)
+    (define out
+      (parameterize ([current-environment-variables env])
+        (with-output-to-string
+          (lambda ()
+            (set! ok? (system* (find-executable-path (find-system-path 'exec-file))
+                               "-l" "racket/base" "-e" (format "~s" program)))))))
+    (check-true ok? out)
+    (read (open-input-string out)))
+
+  (when (directory-exists? "/proc/self/task")
+    (test-case "a run's peak counts each worker's intra-op team"
+      (call-with-process-deadline
+       300
+       (lambda ()
+         (match-define (list (list (list _ one))) (counts-under 1 '(grain) 1))
+         (match-define (list (list (list _ four))) (counts-under 4 '(grain) 1))
+         (check-true (>= four (+ one 3)) (format "OMP 1: ~a, OMP 4: ~a" one four)))))
+
+    (test-case "back-to-back runs start from the same threads and peak alike"
+      (call-with-process-deadline
+       300
+       (lambda ()
+         (match-define (list (list (list base₁ peak₁) (list base₂ peak₂)))
+           (counts-under 4 '(grain) 2))
+         (define seen (format "~a then ~a" (list base₁ peak₁) (list base₂ peak₂)))
+         (check-true (<= (abs (- base₂ base₁)) 1) seen)
+         (check-true (<= (abs (- peak₂ peak₁)) 1) seen)))))
 
   (define (stalling)
     (define calls (box 0))

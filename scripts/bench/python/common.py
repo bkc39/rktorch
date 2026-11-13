@@ -65,6 +65,8 @@ def meta(device):
                 if device.type == "cuda" else None),
         "threads": torch.get_num_threads(),
         "threads_source": "torch.get_num_threads",
+        "omp_num_threads": os.environ.get("OMP_NUM_THREADS"),
+        "mkl_num_threads": os.environ.get("MKL_NUM_THREADS"),
     }
 
 

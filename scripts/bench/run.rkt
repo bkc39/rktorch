@@ -50,9 +50,6 @@
 (define (ops-device? d)
   (and (memq d '(cpu cuda mps)) #t))
 
-(define (op-mix? m)
-  (and (memq m mix-names) #t))
-
 (define (run-suites suites
                     #:rounds [rounds #f]
                     #:warmup [warmup #f]
@@ -143,7 +140,9 @@
                               (flag-value "--device" string->symbol ops-device? "cpu, cuda or mps"
                                           d))]
        [("--mix") m "Op mix for threads and pytorch-threads: small (default) or grain"
-                  (option! 'mix (flag-value "--mix" string->symbol op-mix? "small or grain" m))]
+                  (option! 'mix (flag-value "--mix" string->symbol
+                                           (lambda (name) (memq name mix-names))
+                                           "small or grain" m))]
        [("--full") "Run examples at their full settings" (option! 'full? #t)]
        [("--only") names "Comma-separated example numbers"
                    (option! 'only (string-split names ","))]

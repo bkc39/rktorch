@@ -3,6 +3,7 @@ op mix (torch releases the GIL inside each op) while the main thread sleeps
 or trains the same MLP; throughput is the workers' ops per second."""
 
 import argparse
+import functools
 import itertools
 import os
 import threading
@@ -33,9 +34,12 @@ def op_mix():
 
 
 def grain_mix():
-    a, b = torch.randn(256, 256), torch.randn(256, 256)
+    @functools.cache
+    def inputs():
+        return torch.randn(256, 256), torch.randn(256, 256)
 
     def run():
+        a, b = inputs()
         a @ b
         a + b
 
@@ -52,13 +56,22 @@ def os_thread_count(tasks=TASK_DIR):
         return None
 
 
-def peak_count(a, b):
-    return None if a is None or b is None else max(a, b)
+def settled_thread_count(tasks=TASK_DIR, interval=SAMPLE_INTERVAL, within=2.0):
+    deadline = time.perf_counter() + within
+    last = os_thread_count(tasks)
+    while True:
+        time.sleep(interval)
+        now = os_thread_count(tasks)
+        if now == last or time.perf_counter() >= deadline:
+            return now
+        last = now
+
+
+def peak_of(counts):
+    return None if None in counts else max(counts)
 
 
 class PeakSampler:
-    """The most OS threads seen while it runs, or None without the task directory."""
-
     def __init__(self, tasks=TASK_DIR, interval=SAMPLE_INTERVAL):
         self.tasks = tasks
         self.interval = interval
@@ -68,7 +81,7 @@ class PeakSampler:
         self.thread.start()
 
     def sample(self):
-        self.peak = peak_count(self.peak, os_thread_count(self.tasks))
+        self.peak = peak_of([self.peak, os_thread_count(self.tasks)])
 
     def run(self):
         while not self.done.wait(self.interval):
@@ -126,6 +139,7 @@ def scaling_run(n, state, seconds, make_mix=op_mix, ops_per_mix=OPS_PER_ITERATIO
             failures.append(e)
             stop.set()
 
+    baseline = settled_thread_count(tasks)
     workers = [threading.Thread(target=work, args=(i, make_mix()), daemon=True)
                for i in range(n)]
     for w in workers:
@@ -145,14 +159,14 @@ def scaling_run(n, state, seconds, make_mix=op_mix, ops_per_mix=OPS_PER_ITERATIO
     if failures:
         raise failures[0]
     return {"ops_per_s": ops_per_mix * ops / elapsed,
+            "mixes": ops,
+            "elapsed_s": elapsed,
             "main_steps_per_s": main_steps / elapsed,
             "started_s": t0,
             "stopped": sum(not w.is_alive() for w in workers),
-            "peak_os_threads": peak}
+            "peak_os_threads": peak,
+            "baseline_os_threads": baseline}
 
-
-def peak_of(counts):
-    return None if None in counts else max(counts)
 
 
 def main():
@@ -189,6 +203,7 @@ def main():
               "stopped": [r["stopped"] for r, _ in runs],
               "mix": args.mix,
               "peak_os_threads": peak_of([r["peak_os_threads"] for r, _ in runs]),
+              "baseline_os_threads": peak_of([r["baseline_os_threads"] for r, _ in runs]),
               "gc_ms": [ms for _, ms in runs], "meta": meta(device)})
 
 

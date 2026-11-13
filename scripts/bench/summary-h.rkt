@@ -2,7 +2,7 @@
 
 (require (only-in racket/format ~a)
          (only-in racket/list filter-map remove-duplicates)
-         (only-in racket/match match-define)
+         (only-in racket/match match match-define)
          (only-in racket/string string-join)
          (only-in "markdown.rkt"
                   find-record host iqr median median-at median-of num percent ratio ref share
@@ -22,9 +22,13 @@
 (define (h-case? c)
   (and (member (base-case c) h-cases) #t))
 
+(define (omp-setting r)
+  (match (ref r 'meta 'omp_num_threads)
+    [(or #f 'null) "unset"]
+    [v v]))
+
 (define (h-context r)
-  (format "~a; OMP_NUM_THREADS=~a; run ~a" (host r) (or (ref r 'meta 'omp_num_threads) "unset")
-          (ref r 'run_id)))
+  (format "~a; OMP_NUM_THREADS=~a; run ~a" (host r) (omp-setting r) (ref r 'run_id)))
 
 (define (setting r key)
   (define v (ref r 'settings key))
@@ -197,6 +201,13 @@
     (define py (at-one (h "py-cifar-loader" "pytorch" "batched-2" 2.0 78.0 12.0 3.0 50.0)))
     (check-equal? (h-context rk) (h-context py))
     (check-regexp-match #rx"; OMP_NUM_THREADS=1; run r1$" (h-context py)))
+
+  (test-case "H reads a twin's JSON null and rktorch's false alike as unset"
+    (define (unset-as v r) (hash-set r 'meta (hash-set (ref r 'meta) 'omp_num_threads v)))
+    (define rk (unset-as #f (h "cifar-loader" "rktorch" "batched-2" 10.0 39.0 25.0 5.0 100.0)))
+    (define py (unset-as 'null (h "py-cifar-loader" "pytorch" "batched-2" 2.0 78.0 12.0 3.0 50.0)))
+    (check-equal? (h-context py) (h-context rk))
+    (check-regexp-match #rx"; OMP_NUM_THREADS=unset; run r1$" (h-context py)))
 
   (test-case "H gives no spread or noise floor from fewer than 3 rounds"
     (define md

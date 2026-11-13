@@ -216,19 +216,26 @@ median, quartiles and IQR, and the load average before and after.
   runs are not kept. `--mix grain` runs a mix above ATen's grain size
   (`at::internal::GRAIN_SIZE`, 32768 elements) instead, a 256×256 matmul
   and a 256×256 add, so each worker's ops start an OpenMP team of
-  `OMP_NUM_THREADS` threads; the small mix stays below it and starts none.
-  A green thread on the main pool counts the entries of `/proc/self/task`
-  every 100 ms of a run, and the row keeps the most it saw over its rounds
-  as `peak_os_threads` (null without `/proc`, as on macOS): a team per
-  worker shows as a peak that grows with workers × intra-op threads. The
+  `OMP_NUM_THREADS` threads. The small mix's elementwise ops stay below
+  it, but its 64×64 matmul goes to MKL, which starts a team of its own, so
+  above one intra-op thread the small mix peaks with the grain mix. The
+  grain mix builds its tensors on its worker's first call, so the main
+  thread starts no team for it. A run first waits (up to 2 s) for the process's OS
+  thread count to stop falling, since the last run's workers and their
+  teams take a moment to exit, and records it as `baseline_os_threads`. A
+  green thread on the main pool then counts the entries of
+  `/proc/self/task` every 100 ms of the run, and the row keeps the most it
+  saw over its rounds as `peak_os_threads` (both null without `/proc`, as
+  on macOS): a team per worker shows as a peak that grows with workers ×
+  intra-op threads. The
   Racket process holds more OS threads of its own than Python's at one
   worker, so read a side's peak down its column, not across the two.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
   count, released and counted the same way, and failing the same way. Its
   main loop drops the gradients (`zero_grad()`), as `zero-grads!` does.
-  It takes the same `--mix`, and its `peak_os_threads` counts its sampler,
-  a Python thread, as one of them.
+  It takes the same `--mix` and records the same baseline, and its
+  `peak_os_threads` counts its sampler, a Python thread, as one of them.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -441,13 +448,16 @@ record adds each run's mean `epoch_gc_ms`, median `step_ms` and
 `host_ms`, its one-minute load (`run_loads`), the `--max-load` it ran
 under (`max_load`), and `reads`, the settings its runner reads. A twin's `meta` is the parent's
 with the child's `impl`, `python`, `libtorch` (the torch version),
-`device`, `threads` (`torch.get_num_threads`) and, for the e2e twins,
+`device`, `threads` (`torch.get_num_threads`), `omp_num_threads` and
+`mkl_num_threads` as the child saw them (null when unset, which H reads
+as rktorch's false) and, for the e2e twins,
 `optimizer` and `foreach` over it; torch's name for the GPU
 goes to `torch_gpu`, so `gpu` stays the parent's and a twin pairs with the
 rktorch records of its device. `scaling` records add `threads_run`,
 `main_steps_per_s` and `stopped` (one per round), `settings` (`seconds`
 per round, `warmup` rounds), `mix` (`small` or `grain`) and
-`peak_os_threads` (the most over its rounds, null without `/proc`); `host-gpu` step records add `gc_ms` per step,
+`peak_os_threads` and `baseline_os_threads` (the most over its rounds,
+null without `/proc`); `host-gpu` step records add `gc_ms` per step,
 one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and
