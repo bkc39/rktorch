@@ -63,12 +63,10 @@
                               (not/c hash-empty?))))
 
 (define (factor-at scheduling epoch)
-  (define-values (_start factor)
-    (for/fold ([start -1] [factor 1])
-              ([(e f) (in-hash scheduling)]
-               #:when (< start e (add1 epoch)))
-      (values e f)))
-  factor)
+  (for/fold ([start -1] [factor 1] #:result factor)
+            ([(e f) (in-hash scheduling)]
+             #:when (< start e (add1 epoch)))
+    (values e f)))
 
 (define manual-scheduling-message
   (string-append "automatic gradient accumulation and the gradient-accumulation-scheduler"
@@ -82,13 +80,11 @@
 
 (define (check-schedulable! r)
   (define accumulate (run-accumulate-grad-batches r))
-  (cond
-    [(not (trainer-automatic? (run-trainer r)))
-     (raise-arguments-error 'gradient-accumulation-scheduler manual-scheduling-message)]
-    [(not (= 1 accumulate))
-     (raise-arguments-error 'gradient-accumulation-scheduler fixed-accumulation-message
-                            "#:accumulate-grad-batches" accumulate)]
-    [else (void)]))
+  (unless (trainer-automatic? (run-trainer r))
+    (raise-arguments-error 'gradient-accumulation-scheduler manual-scheduling-message))
+  (unless (= 1 accumulate)
+    (raise-arguments-error 'gradient-accumulation-scheduler fixed-accumulation-message
+                           "#:accumulate-grad-batches" accumulate)))
 
 (define (accumulation-hook cb name)
   (match name

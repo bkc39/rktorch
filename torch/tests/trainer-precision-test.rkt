@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/runtime-path #%datum define-runtime-path)
+  (require (only-in racket/match match)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
@@ -166,7 +167,9 @@
     (define-init (model) (set! net model))
     (define-optimizers (sgd (parameters net) #:lr 0.05 #:momentum 0.9))
     (define-training-step (x y)
-      (and (not (= (run-batch-index run) 1)) (mse-loss (net x) y))))
+      (match (run-batch-index run)
+        [1 #f]
+        [_ (mse-loss (net x) y)])))
 
   (define (gappy-loader)
     (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8))
