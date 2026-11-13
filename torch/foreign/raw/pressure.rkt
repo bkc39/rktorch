@@ -9,7 +9,8 @@
                   devices-over-floor ledger-total live-bytes
                   live-bytes-by-device lower-floors! lower-shadow!
                   next-shadow-generation! note-adopted! note-checked! note-live!
-                  note-reclaimed! note-unaccounted! note-unadopted!
+                  note-mark! note-reclaimed! note-unaccounted! note-unadopted!
+                  own-checks staleness-bound unflushed-reading
                   pressure-diagnostics pressure-reading reset-accounts!
                   reset-checks! set-account-capacity! set-account-interval!
                   set-account-release-after! set-account-sample!
@@ -29,7 +30,8 @@
                   native-collect-at-troughs native-collect-budget
                   native-collect-margin native-memory-fraction
                   native-memory-limit release-spacing)
-         (only-in "race-points.rkt" race-point))
+         (only-in "race-points.rkt" race-point)
+         (only-in "tallies.rkt" flush-tallies!))
 
 (provide call-with-ledger
          with-ledger
@@ -107,6 +109,7 @@
 ;; for the next sample.
 (define (sample-allocator! dev)
   (define a (account-of dev))
+  (flush-tallies!)
   (with-ledger
     (define seen (take-since-sample! a))
     (define trial (account-trial a))
@@ -149,6 +152,7 @@
 ;; it was; with charging off every charge goes to zero.
 (define (refresh-shadows!)
   (define charging? (shadow-refresh))
+  (flush-tallies!)
   (for ([dev (in-list (devices))])
     (define reading (and charging? ((allocator-reading) dev)))
     (when (or reading (not charging?))
@@ -159,26 +163,36 @@
 ;; --- the backstop, from every accounting ---
 
 (define (collect-under-pressure! dev)
-  (define mark (and (not (in-atomic-mode?)) (device-high-water dev)))
+  (define atomic? (in-atomic-mode?))
+  (define mark (and (not atomic?) (device-high-water dev)))
   (define base (and mark (quotient mark interval-divisor)))
+  (define a (and (not atomic?) (account-of dev)))
+  (when a
+    (note-mark! a mark))
   (define-values (gate-open? sample-due?)
-    (if mark (gate-state dev mark base) (values #f #f)))
+    (if mark (gate-state a mark base) (values #f #f)))
   (race-point gate-read dev)
+  (define measured? (and gate-open? (or sample-due? (could-cross? a mark))))
+  (when measured?
+    (flush-tallies!))
   (when (and gate-open? sample-due?)
     (sample-allocator! dev))
   (cond
-    [(and gate-open? (> (pressure-reading dev) mark))
+    [(and measured? (> (pressure-reading dev) mark))
      (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
     [(and gate-open? sample-due?)
-     (with-ledger (end-trial! (account-of dev) base))]
+     (with-ledger (end-trial! a base))]
     [else (void)])
   (wake-after-collection!))
 
+(define (could-cross? a mark)
+  (> (+ (unflushed-reading a) (staleness-bound a)) mark))
+
 ;; whether the backstop looks at all, and whether that look samples
-(define (gate-state dev mark base)
-  (define a (account-of dev))
-  (values (>= (since-check-bytes a) (or (account-interval a) base))
-          (>= (since-sample-bytes a) (quotient mark sample-divisor))))
+(define (gate-state a mark base)
+  (define-values (checked sampled) (own-checks a))
+  (values (>= (+ (since-check-bytes a) checked) (or (account-interval a) base))
+          (>= (+ (since-sample-bytes a) sampled) (quotient mark sample-divisor))))
 
 ;; A release empties the cache, and below the working set the next steps take
 ;; those bytes straight back. So it earns the reset a collection earns only

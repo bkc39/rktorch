@@ -37,7 +37,7 @@
     (lambda (v) (not (or (fixnum? v) (char? v) (boolean? v) (null? v)
                          (void? v) (eof-object? v))))))
 
-(struct reaped (name release guardian register) ;; noqa
+(struct reaped (name release after-batch guardian register) ;; noqa
   #:constructor-name make-reaped
   #:omit-define-syntaxes)
 
@@ -74,17 +74,18 @@
     (uninterruptible-lock-acquire take-lock)
     (with-cleanup body ... #:finally (uninterruptible-lock-release take-lock))))
 
-(define/contract-out (reaped name release) ;; noqa
-  (-> symbol? (-> any/c any) reaped?)
+(define/contract-out (reaped name release #:after-batch [after-batch void]) ;; noqa
+  (->* [symbol? (-> any/c any)] [#:after-batch (-> any)] reaped?)
   (cond
     [(main-place?)
      (define guardian (vm-eval '(make-guardian #t)))
-     (define kind (make-reaped name release guardian guardian))
+     (define kind (make-reaped name release after-batch guardian guardian))
      (cas-update! kinds (lambda (known) (append known (list kind))))
      kind]
     [else
-     (define finalize (finalizing release))
-     (make-reaped name release #f (lambda (v) (register-finalizer v finalize)))]))
+     (define finalize (finalizing release after-batch))
+     (make-reaped name release after-batch #f
+                  (lambda (v) (register-finalizer v finalize)))]))
 
 (define (reap-when-dead! kind v)
   ((reaped-register kind) v))
@@ -122,17 +123,26 @@
        ((reaped-release kind) v))
      1]))
 
-(define ((finalizing release) v)
+(define ((finalizing release after-batch) v)
   (with-uninterruptible
     (with-handlers ([(lambda (_) #t) note-escape!])
-      (release v)))
+      (release v))
+    (with-handlers ([(lambda (_) #t) note-escape!])
+      (after-batch)))
   (cas-add! taken 1)
   (cas-add! released 1))
 
 (define (release-batch! s n)
+  (define afters
+    (for/fold ([afters '()]) ([kind (in-vector (slots-kinds s) 0 n)])
+      (define after (reaped-after-batch kind))
+      (if (memq after afters) afters (cons after afters))))
   (define objects
     (for/sum ([i (in-range n)])
       (release-slot! s i)))
+  (for ([after (in-list afters)])
+    (with-handlers ([(lambda (_) #t) note-escape!])
+      (after)))
   (cas-add! taken objects)
   (cas-add! released objects))
 

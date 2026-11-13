@@ -17,7 +17,7 @@
 
 (begin-for-syntax
   (define known-sites
-    '(update claim collector lifetime probe gate lock tensor-state reaper))
+    '(update claim collector lifetime probe gate lock tensor-state reaper tally))
 
   (define-syntax-class site
     #:description "a CAS site named in raw/cas.rkt"
@@ -76,12 +76,16 @@
                                                   #:defaults ([s #''update])))
   (update-loop s b f))
 
-(define-syntax-parse-rule (cas-add! b:expr n:expr)
+(define-syntax-parse-rule (cas-add! b:expr n:expr
+                                   (~optional (~seq #:site s:site)
+                                              #:defaults ([s #''update])))
   (let ([by n])
-    (update-loop 'update b (lambda (old) (+ old by)))))
+    (update-loop s b (lambda (old) (+ old by)))))
 
-(define-syntax-parse-rule (cas-take! b:expr)
-  (take-loop 'update b))
+(define-syntax-parse-rule (cas-take! b:expr
+                                    (~optional (~seq #:site s:site)
+                                               #:defaults ([s #''update])))
+  (take-loop s b))
 
 (define-syntax-parse-rule (cas-claim! b:expr from:expr to:expr
                                       (~optional (~seq #:site s:site)
