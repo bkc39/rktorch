@@ -149,7 +149,7 @@
   (initial-step! s)
   s)
 
-(define (shaped opt next #:closed [closed #f])
+(define (shaped-by opt next #:closed [closed #f])
   (build opt (lambda (bases) (shape bases next closed))))
 
 (define (rated-by opt rate #:initial [initial #f])
@@ -179,10 +179,10 @@
   (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
        scheduler?)
   (let ([gamma (real->double-flonum gamma)])
-    (shaped opt
-            (lambda (_base lr t _initial?)
-              (if (or (zero? t) (positive? (modulo t step-size))) lr (* lr gamma)))
-            #:closed (lambda (base t) (* base (flexpt gamma (->fl (quotient t step-size))))))))
+    (shaped-by opt
+               (lambda (_base lr t _initial?)
+                 (if (or (zero? t) (positive? (modulo t step-size))) lr (* lr gamma)))
+               #:closed (lambda (base t) (* base (flexpt gamma (->fl (quotient t step-size))))))))
 
 (define/contract-out (multi-step-lr opt ;; noqa
                                     #:milestones milestones
@@ -191,20 +191,20 @@
        [#:gamma real?]
        scheduler?)
   (let ([gamma (real->double-flonum gamma)])
-    (shaped opt
-            (lambda (_base lr t _initial?)
-              (match (count (lambda (m) (= m t)) milestones)
-                [0 lr]
-                [n (* lr (flexpt gamma (->fl n)))]))
-            #:closed (lambda (base t)
-                       (* base (flexpt gamma (->fl (milestones-reached milestones t))))))))
+    (shaped-by opt
+               (lambda (_base lr t _initial?)
+                 (match (count (lambda (m) (= m t)) milestones)
+                   [0 lr]
+                   [n (* lr (flexpt gamma (->fl n)))]))
+               #:closed (lambda (base t)
+                          (* base (flexpt gamma (->fl (milestones-reached milestones t))))))))
 
 (define/contract-out (exponential-lr opt #:gamma gamma) ;; noqa
   (-> optimizer? #:gamma real? scheduler?)
   (let ([gamma (real->double-flonum gamma)])
-    (shaped opt
-            (lambda (_base lr _t initial?) (if initial? lr (* lr gamma)))
-            #:closed (lambda (base t) (* base (flexpt gamma (->fl t)))))))
+    (shaped-by opt
+               (lambda (_base lr _t initial?) (if initial? lr (* lr gamma)))
+               #:closed (lambda (base t) (* base (flexpt gamma (->fl t)))))))
 
 (define/contract-out (cosine-annealing-lr opt ;; noqa
                                           #:t-max t-max
@@ -213,14 +213,16 @@
        scheduler?)
   (define (one-plus-cos t) (+ 1.0 (cos (/ (* pi (->fl t)) (->fl t-max)))))
   (let ([eta-min (real->double-flonum eta-min)])
-    (shaped opt
-            (lambda (base lr t initial?)
-              (cond
-                [initial? lr]
-                [(zero? (modulo (- t 1 t-max) (* 2 t-max)))
-                 (+ lr (/ (* (- base eta-min) (- 1.0 (cos (/ pi (->fl t-max))))) 2.0))]
-                [else (+ (* (/ (one-plus-cos t) (one-plus-cos (sub1 t))) (- lr eta-min)) eta-min)]))
-            #:closed (lambda (base t) (+ eta-min (/ (* (- base eta-min) (one-plus-cos t)) 2.0))))))
+    (shaped-by opt
+               (lambda (base lr t initial?)
+                 (cond
+                   [initial? lr]
+                   [(zero? (modulo (- t 1 t-max) (* 2 t-max)))
+                    (+ lr (/ (* (- base eta-min) (- 1.0 (cos (/ pi (->fl t-max))))) 2.0))]
+                   [else
+                    (+ (* (/ (one-plus-cos t) (one-plus-cos (sub1 t))) (- lr eta-min)) eta-min)]))
+               #:closed (lambda (base t)
+                          (+ eta-min (/ (* (- base eta-min) (one-plus-cos t)) 2.0))))))
 
 (define/contract-out (linear-lr opt ;; noqa
                                 #:start-factor [start-factor (/ 1.0 3.0)]
@@ -233,14 +235,14 @@
   (define start (real->double-flonum start-factor))
   (define rise (- (real->double-flonum end-factor) start))
   (define total (->fl total-iters))
-  (shaped opt
-         (lambda (_base lr t initial?)
-           (cond
-             [(zero? t) (* lr start)]
-             [(or initial? (> t total-iters)) lr]
-             [else (* lr (+ 1.0 (/ rise (+ (* total start) (* (->fl (sub1 t)) rise)))))]))
-         #:closed (lambda (base t)
-                    (* base (+ start (/ (* rise (->fl (min total-iters t))) total))))))
+  (shaped-by opt
+            (lambda (_base lr t initial?)
+              (cond
+                [(zero? t) (* lr start)]
+                [(or initial? (> t total-iters)) lr]
+                [else (* lr (+ 1.0 (/ rise (+ (* total start) (* (->fl (sub1 t)) rise)))))]))
+            #:closed (lambda (base t)
+                       (* base (+ start (/ (* rise (->fl (min total-iters t))) total))))))
 
 ;; the two cosine phases of torch's OneCycleLR (anneal_strategy "cos",
 ;; three_phase False); momentum is left alone, cycle_momentum=False there
