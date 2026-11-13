@@ -295,7 +295,11 @@ per entry; the pair runs the per-entry count (331).
   epoch has ended tags it with the entry's epoch, not the current one, so a
   release whose epoch ended after it read it as live stays tagged with that
   epoch. Once the tag's epoch has ended, a later charge or the flush carries
-  only what is above 0 into the next one. A negative count reaches the
+  only what is above 0 into the next one. A negative gathered into a tally
+  whose tag is another, live epoch counts as 0: no caller gathers one, since
+  a release reads its epoch and gathers in one uninterruptible section on
+  the tally's own thread, the only writer of its tag, and an epoch it reads
+  as live is the newest. A negative count reaches the
   shared count only when its tag is the shared count's epoch
   (`note-young!`); otherwise it counts as 0. So a collection that lands
   between a release reading its epoch as live and its bytes reaching the
@@ -850,6 +854,10 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
 | `tallies-flushing` | `flush-tallies!` entered, before it walks the registry | whether it may ask `thread-dead?` |
 | `tally-judged` | `flush-tallies!` has judged a tally prunable or not, before it flushes it | the tally |
+| `young-clamped` | a gather into a tally whose tag has ended, the pending young count clamped at 0, before the new tag is published | the pending slot |
+| `young-retagged` | the same gather, the new tag published, before the young bytes are added | the pending slot |
+| `young-taken` | a flush has taken a slot's pending counts, before it counts the young bytes | the pending slot |
+| `phantoms-applied` | the sync claim held, the pair set to its targets, before the claim is let go | the account's phantoms |
 | `unaccount-entry-read` | a charge read, before the CAS that takes it | handle |
 | `entry-unaccounted` | inside the unaccounting region, the CAS won | handle |
 | `free-taken` | an explicit free has taken the handle, before it unaccounts | handle |

@@ -1,14 +1,13 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/dict dict-ref)
-           (only-in racket/list append-map shuffle)
+  (require (only-in racket/list append-map shuffle)
            rackunit
            (only-in "../foreign/raw/accounts.rkt"
                     account-of note-live! note-unadopted! with-ledger)
            (only-in (submod "../foreign/raw/accounts.rkt" private) account-counters)
            (only-in "../foreign/raw/memory.rkt"
-                    adopt-gradient! native-memory-use/fold record-allocation! unaccount!)
+                    adopt-gradient! record-allocation! unaccount!)
            (only-in "../foreign/raw/phantoms.rkt" charge-epoch young-epoch?)
            (only-in (submod "../foreign/raw/phantoms.rkt" private) rounds young-count-of)
            (only-in "../foreign/raw/tallies.rkt"
@@ -20,32 +19,9 @@
                     charged kib mib phantoms-of shared-live with-batched-device
                     with-unmarked-device young-charged)
            (only-in "private/within.rkt" bounded-test)
-           (only-in "private/within-memory.rkt" memory-after-majors minors-during))
-
-  (define (fold-of dev) (dict-ref (native-memory-use/fold) dev 0))
-
-  (define (unaccount-all! keys)
-    (for-each unaccount! keys)
-    (flush-tallies!))
-
-  (define (check-conserved dev what)
-    (define live (shared-live dev))
-    (check-equal? live (fold-of dev) (format "~a: shared live against the fold" what))
-    (check-equal? (charged dev) (max 0 live) (format "~a: the phantoms against live" what)))
-
-  (define (call-with-other-thread proc)
-    (define asks (make-channel))
-    (define answers (make-channel))
-    (define other
-      (thread (lambda ()
-                (let loop ()
-                  (channel-put answers ((channel-get asks)))
-                  (loop)))))
-    (define (on-other thunk)
-      (channel-put asks thunk)
-      (channel-get answers))
-    (begin0 (proc on-other)
-            (kill-thread other)))
+           (only-in "private/within-memory.rkt" memory-after-majors minors-during)
+           (only-in "private/young-epochs.rkt"
+                    check-conserved unaccount-all! within-one-epoch))
 
   (bounded-test "L14: churners killed at random leave the phantoms at the ledger"
     (with-batched-device (dev 60)
@@ -298,11 +274,6 @@
       (check-equal? (young-charged dev) (* 8 kib) "the charge after the pending release")
       (unaccount-all! (list charged-after))
       (check-conserved dev "after the releases")))
-
-  (define (within-one-epoch first scenario)
-    (for/or ([index (in-range first (+ first 10))])
-      (with-batched-device (dev index)
-        (call-with-other-thread (lambda (on-other) (scenario dev on-other))))))
 
   (define (other-release-across-a-collection dev on-other)
     (define released (box 'released))

@@ -153,11 +153,17 @@
 
 (define (gather-young! p young epoch)
   (define held (pending-young-epoch p))
-  (unless (or (eq? epoch (unbox held)) (young-epoch? (unbox held)))
-    (tally-update! (pending-young p) clamp)
-    (memory-order-release)
-    (set-box! held epoch))
-  (tally-add! (pending-young p) young))
+  (define tag (unbox held))
+  (cond
+    [(eq? epoch tag) (tally-add! (pending-young p) young)]
+    [(young-epoch? tag) (tally-add! (pending-young p) (clamp young))]
+    [else
+     (tally-update! (pending-young p) clamp)
+     (race-point young-clamped p)
+     (memory-order-release)
+     (set-box! held epoch)
+     (race-point young-retagged p)
+     (tally-add! (pending-young p) young)]))
 
 (define (tally-checked! p nbytes)
   (tally-add! (pending-since-check p) nbytes)
