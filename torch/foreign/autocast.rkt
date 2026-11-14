@@ -62,7 +62,7 @@
 (define/contract-out (call-with-autocast thunk ;; noqa
                                          #:device [device (default-device)]
                                          #:dtype [dtype (default-autocast-dtype device)]
-                                         #:cache-enabled? [cache? #t])
+                                         #:cache-enabled? [cache? (autocast-cache-enabled?)])
   (->* [(-> any)] [#:device device-spec/c #:dtype half-dtype/c #:cache-enabled? boolean?] any)
   ;; the with-autocast form expands inside this module, past the boundary
   ;; contract, so the arguments are judged here as well

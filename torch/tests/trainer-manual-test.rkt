@@ -28,9 +28,13 @@
     (manual-seed! 1)
     (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 2))
 
-  (define-trainer Gan (gen disc opts)
+  (define-trainer Gan (gen disc opts wrap)
     #:automatic-optimization? #f
-    (define-init (g d sink) (set! gen g) (set! disc d) (set! opts sink))
+    (define-init (g d sink [w (lambda (thunk) (thunk))])
+      (set! gen g)
+      (set! disc d)
+      (set! opts sink)
+      (set! wrap w))
     (define-optimizers
       (define g-opt (sgd (parameters gen) #:lr 0.1))
       (define d-opt (sgd (parameters disc) #:lr 0.05))
@@ -39,10 +43,10 @@
     (define-training-step (x y)
       (match-define (list g-opt d-opt) (unbox opts))
       (manual-zero-grads! run d-opt)
-      (manual-backward! run (~> (gen x) disc (mse-loss y)))
+      (manual-backward! run (wrap (lambda () (~> (gen x) disc (mse-loss y)))))
       (manual-step! run d-opt)
       (manual-zero-grads! run g-opt)
-      (define g-loss (mse-loss (disc (gen x)) (- y)))
+      (define g-loss (wrap (lambda () (mse-loss (disc (gen x)) (- y)))))
       (manual-backward! run g-loss)
       (manual-step! run g-opt)
       g-loss))
@@ -84,6 +88,17 @@
     (check-equal? (map flat (append (parameters gen) (parameters disc)))
                   (hand-gan gen* disc* #:forward bf16-forward))
     (check-true (autocast-cache-enabled?)))
+
+  (bounded-test "G3 round 3 M1: a with-autocast inside a bf16-mixed step keeps fit's cache off"
+    (manual-seed! 0)
+    (define gen (Linear 2 2))
+    (define disc (Linear 2 1))
+    (define gen* (layer-copy gen))
+    (define disc* (layer-copy disc))
+    (fit (Gan gen disc (box #f) bf16-forward) (loader)
+         #:max-epochs 2 #:logger #f #:precision 'bf16-mixed)
+    (check-equal? (map flat (append (parameters gen) (parameters disc)))
+                  (hand-gan gen* disc* #:forward bf16-forward)))
 
   (define-trainer Stray (net stray)
     #:automatic-optimization? #f

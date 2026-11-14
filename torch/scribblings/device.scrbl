@@ -127,19 +127,21 @@ thread running them. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
 
-With @racket[cache?], @racket[#t] by default as in torch, each float32 leaf
-weight that requires grad is cast once and the cast reused for the rest of
-the extent, so a weight updated in place inside the body, by
-@racket[step!] say, reaches later ops at its old value; pass @racket[#f] to
-cast it afresh each time. The flag is the thread's for every device type,
-and leaving the body restores it.
+While @racket[cache?] is true, each float32 leaf weight that requires grad is
+cast once and the cast reused for the rest of the extent, so a weight updated
+in place inside the body, by @racket[step!] say, reaches later ops at its old
+value; pass @racket[#f] to cast it afresh each time. It defaults to the
+current flag, as torch's @tt{cache_enabled=None}: @racket[#t] outside every
+extent, and an enclosing form's @racket[#f] inside one. The flag is the
+thread's for every device type, and leaving the body restores it.
 }
 
 @defproc[(call-with-autocast [thunk (-> any)]
                              [#:device device (or/c 'cpu 'cuda 'mps device?)
                               (default-device)]
                              [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16]
-                             [#:cache-enabled? cache? boolean? #t])
+                             [#:cache-enabled? cache? boolean?
+                              (autocast-cache-enabled?)])
          any]{
 The procedure form of @racket[with-autocast], with its default dtype: the
 @racket['bfloat16] shown becomes @racket['float16] on a CUDA device

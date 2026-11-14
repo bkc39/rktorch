@@ -69,6 +69,8 @@
     (with-autocast #:device 'cpu #:cache-enabled? #f
       (check-false (autocast-cache-enabled?))
       (with-autocast #:device 'cpu
+        (check-false (autocast-cache-enabled?) "the default keeps the current flag, as torch"))
+      (with-autocast #:device 'cpu #:cache-enabled? #t
         (check-true (autocast-cache-enabled?)))
       (check-false (autocast-cache-enabled?) "the outer flag is back"))
     (check-exn #rx"escaped"
