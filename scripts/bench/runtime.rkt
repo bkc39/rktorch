@@ -381,7 +381,7 @@
            (check-true (positive? (only r 'worker_ops_per_s)) (format "~a" (row r)))
            (check-pred real? (only r 'us_per_op)))))))
 
-  (test-case "main's p99 pause beside a 2 ms collect-safe call is below the plain call's"
+  (test-case "main's p99 pause beside a 2 ms collect-safe call is a tenth of the plain call's"
     (call-with-process-deadline
      120
      (lambda ()
@@ -391,7 +391,7 @@
          (hash-ref (run-cell c) 'pause_p99_ms))
        (define plain (p99 'plain))
        (define safe (p99 'collect-safe))
-       (check-true (< safe plain) (format "collect-safe ~a ms, plain ~a ms" safe plain)))))
+       (check-true (< (* 10 safe) plain) (format "collect-safe ~a ms, plain ~a ms" safe plain)))))
 
   (test-case "places and threads time the work phase, the place module found from any directory"
     (call-with-process-deadline
