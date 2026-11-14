@@ -149,7 +149,7 @@
   (call-with-gradient-buckets
    opt
    (lambda (buckets)
-     (when (and who (for/or ([b (in-list buckets)]) (eq? (gradient-bucket-dtype b) 'float16)))
+     (when (and who (ormap (lambda (b) (eq? (gradient-bucket-dtype b) 'float16)) buckets))
        (raise-arguments-error who "attempting to unscale FP16 gradients" "optimizer" opt))
      (reverse (for/fold ([found-infs '()]) ([b (in-list buckets)])
                 (check! found-infs b))))))
