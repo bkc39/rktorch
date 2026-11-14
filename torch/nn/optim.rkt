@@ -116,8 +116,8 @@
     (match-define (cons q _) qg)
     (hash-ref! keys q (lambda () (placement q))))
   (define (bucket-of qgs)
-    (match-define (list (and first (cons _ g)) (cons _ more) ...) qgs)
-    (match-define (cons dev dt) (key-of first))
+    (match-define (list (and head (cons _ g)) (cons _ more) ...) qgs)
+    (match-define (cons dev dt) (key-of head))
     (gradient-bucket dev dt (cons g more)))
   (with-no-grad
     (follow-moves! root)

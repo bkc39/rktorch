@@ -138,9 +138,6 @@
 (define (on-device t home dev)
   (if (equal? dev home) t (to t dev)))
 
-(define (half-bucket? b)
-  (eq? (gradient-bucket-dtype b) 'float16))
-
 (define (check-and-unscale! st opt inv #:who [who #f])
   (define home (device-state-home st))
   (define (check! found-infs b)
@@ -152,7 +149,7 @@
   (call-with-gradient-buckets
    opt
    (lambda (buckets)
-     (when (and who (ormap half-bucket? buckets))
+     (when (and who (for/or ([b (in-list buckets)]) (eq? (gradient-bucket-dtype b) 'float16)))
        (raise-arguments-error who "attempting to unscale FP16 gradients" "optimizer" opt))
      (reverse (for/fold ([found-infs '()]) ([b (in-list buckets)])
                 (check! found-infs b))))))
