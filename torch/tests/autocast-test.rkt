@@ -65,6 +65,10 @@
     (check-equal? (cast-after-update #f) '(2.0 4.0))
     (check-true (autocast-cache-enabled?)))
 
+  (test-case "with no #:cache-enabled? at top level, with-autocast caches casts, as torch"
+    (with-autocast #:device 'cpu
+      (check-true (autocast-cache-enabled?))))
+
   (test-case "with-autocast restores the cache flag, even on escape"
     (with-autocast #:device 'cpu #:cache-enabled? #f
       (check-false (autocast-cache-enabled?))
