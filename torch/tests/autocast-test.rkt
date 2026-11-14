@@ -59,13 +59,13 @@
       (with-no-grad (copy! w (tensor '((2.0 0.0) (0.0 2.0)))))
       (tensor->list (@ x w))))
 
-  (test-case "G3 H1: the cast cache serves a stale weight unless #:cache-enabled? is #f"
+  (test-case "the cast cache serves a stale weight unless #:cache-enabled? is #f"
     (check-true (autocast-cache-enabled?))
     (check-equal? (cast-after-update #t) '(1.0 2.0) "torch's cache keys by tensor")
     (check-equal? (cast-after-update #f) '(2.0 4.0))
     (check-true (autocast-cache-enabled?)))
 
-  (test-case "G3 H1: with-autocast restores the cache flag, even on escape"
+  (test-case "with-autocast restores the cache flag, even on escape"
     (with-autocast #:device 'cpu #:cache-enabled? #f
       (check-false (autocast-cache-enabled?))
       (with-autocast #:device 'cpu

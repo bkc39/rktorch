@@ -69,12 +69,12 @@
     (define before (map flat (parameters (Linear 3 2))))
     (check-equal? (fused-run 'unscaled #t) before))
 
-  (bounded-test "G3 M3: a fused step with no explicit unscale equals the plain fused step"
+  (bounded-test "a fused step with no explicit unscale equals the plain fused step"
     (check-equal? (fused-run 'ready #f) (fused-run 'plain #f))
     (check-equal? (fused-run 'ready #f #:optimizer fused-sgd)
                   (fused-run 'plain #f #:optimizer fused-sgd)))
 
-  (bounded-test "G3 M3: a fused step with no explicit unscale leaves its state on an inf step"
+  (bounded-test "a fused step with no explicit unscale leaves its state on an inf step"
     (manual-seed! 0)
     (define net (Linear 3 2))
     (define x (randn 4 3))
@@ -94,17 +94,17 @@
     (check-equal? (map flat (optimizer-state opt)) state-before)
     (check-equal? (grad-scaler-scale s) 32768.0))
 
-  (bounded-test "G3 L4: an update to a given scale needs no step"
+  (bounded-test "an update to a given scale needs no step"
     (define p (Parameter (tensor '(0.5 -0.25))))
     (define s (cpu-scaler))
     (grad-scaler-scale-loss s (sum (* p p)))
     (grad-scaler-update! s 8.0)
     (check-equal? (grad-scaler-scale s) 8.0))
 
-  (bounded-test "G3 L4: an update before any loss is scaled blames the caller"
+  (bounded-test "an update before any loss is scaled blames the caller"
     (check-exn blames-this-test? (lambda () (grad-scaler-update! (cpu-scaler) 8.0))))
 
-  (bounded-test "G3 L5: unscaling float16 gradients raises, as torch's unscale_ does"
+  (bounded-test "unscaling float16 gradients raises, as torch's unscale_ does"
     (define p (Parameter (tensor '(0.5 -0.25) #:dtype 'float16)))
     (define opt (sgd (list p) #:lr 0.1))
     (define s (cpu-scaler))
@@ -114,7 +114,7 @@
     (check-exn #rx"grad-scaler-step!: attempting to unscale FP16 gradients"
                (lambda () (grad-scaler-step! s opt))))
 
-  (bounded-test "G3 L2: a float16 gradient raises before any other gradient is unscaled"
+  (bounded-test "a float16 gradient raises before any other gradient is unscaled"
     (define p32 (Parameter (tensor '(0.5 -0.25))))
     (define p16 (Parameter (tensor '(0.5 -0.25) #:dtype 'float16)))
     (define opt (sgd (list p32 p16) #:lr 0.1))

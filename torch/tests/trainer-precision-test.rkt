@@ -57,7 +57,7 @@
       (match-define (list where on? cache?) e)
       (define step? (and (memq where '(training-step validation-step)) #t))
       (check-equal? on? step? (format "~a autocasts" where))
-      (check-equal? cache? (not step?) (format "G3 round 3 L1: ~a caches casts" where)))
+      (check-equal? cache? (not step?) (format "~a caches casts" where)))
     (check-false (autocast-enabled? 'cpu))
     (check-equal? (run-precision r) 'bf16-mixed)
     (check-false (run-grad-scaler r)))
@@ -120,10 +120,10 @@
        (displayln "[trainer-precision-test] G3-L15 skipped: no CUDA twin")]
       [else (check-training-twin "amp" amp-twin (fit-on (box #f)) 'cuda 5e-3)]))
 
-  (bounded-test "G3 M3: CUDA 16-mixed skips an inf step and halves the scale, as the twin"
+  (bounded-test "CUDA 16-mixed skips an inf step and halves the scale, as the twin"
     (cond
       [(not (amp-twin-ready?))
-       (displayln "[trainer-precision-test] G3 M3 skipped: no CUDA twin")]
+       (displayln "[trainer-precision-test] inf-step twin skipped: no CUDA twin")]
       [else
        (define scales (box #f))
        (call-with-python-env
@@ -159,10 +159,10 @@
     (check-equal? (map flat (parameters net)) (map flat (parameters twin)))
     (check-equal? (grad-scaler-scale s) (grad-scaler-scale twin-s)))
 
-  (bounded-test "G3 H1: a window with no gradients leaves the scaler ready for the next"
+  (bounded-test "a window with no gradients leaves the scaler ready for the next"
     (gradless-steps (lambda (r _opt) (window-step! r #f #:backward? #t))))
 
-  (bounded-test "G3 H1: a manual step with no gradients leaves the scaler ready for the next"
+  (bounded-test "a manual step with no gradients leaves the scaler ready for the next"
     (gradless-steps manual-optimizer-step!))
 
   (define-trainer Gappy (net)
@@ -176,9 +176,9 @@
   (define (gappy-loader)
     (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8))
 
-  (bounded-test "G3 H1: under CUDA 16-mixed, a batch returning #f skips its step and update"
+  (bounded-test "under CUDA 16-mixed, a batch returning #f skips its step and update"
     (cond
-      [(not (cuda-available?)) (displayln "[trainer-precision-test] G3 H1 fit skipped: no CUDA")]
+      [(not (cuda-available?)) (displayln "[trainer-precision-test] #f-batch fit skipped: no CUDA")]
       [else
        (with-default-device (cuda-device)
          (manual-seed! 0)
@@ -226,11 +226,11 @@
     (backward! (sum (twin x)))
     (windowed r net opt s x before (gradients twin) (reverse (unbox seen))))
 
-  (bounded-test "G3 M2: on-before-optimizer-step sees unscaled gradients under a scaler"
+  (bounded-test "on-before-optimizer-step sees unscaled gradients under a scaler"
     (match-define (struct* windowed ([unscaled unscaled] [seen seen])) (scaled-window #t))
     (check-equal? seen (list unscaled)))
 
-  (bounded-test "G3 M1: a scaler window ending in #f runs the hook, clips, never steps"
+  (bounded-test "a scaler window ending in #f runs the hook, clips, never steps"
     (match-define (windowed r net opt s x before unscaled seen)
       (scaled-window #f #:clip (clipping 1.0 'value)))
     (check-equal? (map flat (parameters net)) before "no step")
@@ -276,10 +276,10 @@
       (values (reverse (unbox losses))
               (cat (for/list ([p (in-list (parameters net))]) (reshape p -1))))))
 
-  (bounded-test "G3 M1: CUDA 16-mixed drops a window whose last batch returns #f, as Lightning"
+  (bounded-test "CUDA 16-mixed drops a window whose last batch returns #f, as Lightning"
     (cond
       [(not (amp-twin-ready?))
-       (displayln "[trainer-precision-test] G3 M1 twin skipped: no CUDA twin")]
+       (displayln "[trainer-precision-test] #f-window twin skipped: no CUDA twin")]
       [else
        (define steps (box #f))
        (call-with-python-env

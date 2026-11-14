@@ -78,7 +78,7 @@
     (check-equal? (learning-rate (car (unbox opts))) 0.1)
     (check-equal? (run-global-step r) 16 "G3-L19: two optimizer steps per batch"))
 
-  (bounded-test "G3 H1: a bf16-mixed manual GAN casts each forward afresh, as Lightning"
+  (bounded-test "a bf16-mixed manual GAN casts each forward afresh, as Lightning"
     (manual-seed! 0)
     (define gen (Linear 2 2))
     (define disc (Linear 2 1))
@@ -89,7 +89,7 @@
                   (hand-gan gen* disc* #:forward bf16-forward))
     (check-true (autocast-cache-enabled?)))
 
-  (bounded-test "G3 round 3 M1: a with-autocast inside a bf16-mixed step keeps fit's cache off"
+  (bounded-test "a with-autocast inside a bf16-mixed step keeps fit's cache off"
     (manual-seed! 0)
     (define gen (Linear 2 2))
     (define disc (Linear 2 1))
@@ -149,7 +149,7 @@
          #:num-sanity-val-steps 1 #:log-every-n-steps log-every #:logger l)
     (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name)))
 
-  (bounded-test "G3 M2: manual rows are labelled and paced by batches, as Lightning's"
+  (bounded-test "manual rows are labelled and paced by batches, as Lightning's"
     (check-manual-rows 'manual 2)
     (check-manual-rows 'manual-log-every-4 2 #:log-every-n-steps 4)
     (check-manual-rows 'manual-no-steps 0)))
