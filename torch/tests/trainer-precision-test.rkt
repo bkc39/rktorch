@@ -4,22 +4,23 @@
   (require (only-in racket/match match)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
            (only-in "../main.rkt"
-                    * autocast-enabled? backward! cat cpu-device cuda-available? cuda-device item
-                    manual-seed! randn reshape sum tensor->list with-autocast
+                    * autocast-enabled? backward! cat cpu-device cuda-available? cuda-device grad
+                    item manual-seed! randn reshape sum with-autocast
                     with-default-device)
            (only-in "../nn.rkt"
                     Linear grad-scaler grad-scaler-scale grad-scaler-scale-loss grad-scaler-step!
                     grad-scaler-unscale! grad-scaler-update! layer-copy mse-loss parameters sgd
                     zero-grads!)
            "../train.rkt"
-           (only-in "../train/private/precision.rkt" manual-optimizer-step! window-step!)
+           (only-in "../train/private/precision.rkt"
+                    clipping manual-optimizer-step! window-step!)
            (only-in "../train/private/state.rkt" fresh-run set-run-grad-scaler!)
            (only-in "private/python-env.rkt"
                     call-with-python-env check-training-twin python-cuda-available?
                     python-torch-available?)
+           (only-in "private/flat.rkt" flat)
            (only-in "private/trainer-kit.rkt" toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
@@ -126,9 +127,6 @@
         (lambda () (check-training-twin "amp-inf" amp-twin (fit-on scales 2) 'cuda 5e-3)))
        (check-equal? (unbox scales) 32768.0)]))
 
-  (define (flat t)
-    (~> t (reshape -1) tensor->list))
-
   (define (hand-scaled-step! s opt loss)
     (zero-grads! opt)
     (backward! (grad-scaler-scale-loss s loss))
@@ -158,7 +156,7 @@
     (check-equal? (grad-scaler-scale s) (grad-scaler-scale twin-s)))
 
   (bounded-test "G3 H1: a window with no gradients leaves the scaler ready for the next"
-    (gradless-steps (lambda (r _opt) (window-step! r #f))))
+    (gradless-steps (lambda (r _opt) (window-step! r #f #t))))
 
   (bounded-test "G3 H1: a manual step with no gradients leaves the scaler ready for the next"
     (gradless-steps manual-optimizer-step!))
@@ -194,5 +192,91 @@
             s opt (with-autocast #:device 'cuda #:dtype 'float16 (mse-loss (twin x) y))))
          (check-equal? (run-global-step r) 4)
          (check-equal? (map flat (parameters net)) (map flat (parameters twin)))
-         (check-equal? (grad-scaler-scale (run-grad-scaler r)) (grad-scaler-scale s)))])))
+         (check-equal? (grad-scaler-scale (run-grad-scaler r)) (grad-scaler-scale s)))]))
 
+  (define (gradients net)
+    (for/list ([p (in-list (parameters net))]) (flat (grad p))))
+
+  (define-trainer GradWatch (net seen)
+    (define-init (model sink) (set! net model) (set! seen sink))
+    (define-optimizers (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
+    (define-training-step (x y) (mse-loss (net x) y))
+    (define-hook (on-before-optimizer-step optimizer)
+      (set-box! seen (cons (gradients net) (unbox seen)))))
+
+  (define (scaled-window backward? #:clip [clip #f])
+    (manual-seed! 0)
+    (define net (Linear 2 2))
+    (define twin (layer-copy net))
+    (define x (randn 4 2))
+    (define seen (box '()))
+    (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
+    (define r (fresh-run (GradWatch net seen) 'fit (cpu-device) #:optimizers (list opt)))
+    (define s (grad-scaler #:device 'cpu))
+    (set-run-grad-scaler! r s)
+    (backward! (grad-scaler-scale-loss s (sum (net x))))
+    (define before (map flat (parameters net)))
+    (window-step! r clip backward?)
+    (backward! (sum (twin x)))
+    (values r net opt s x before (gradients twin) (reverse (unbox seen))))
+
+  (bounded-test "G3 M2: on-before-optimizer-step sees unscaled gradients under a scaler"
+    (define-values (_r _net _opt _s _x _before unscaled seen) (scaled-window #t))
+    (check-equal? seen (list unscaled)))
+
+  (bounded-test "G3 M1: a scaler window ending in #f runs the hook, clips, never steps"
+    (define-values (r net opt s x before unscaled seen)
+      (scaled-window #f #:clip (clipping 1.0 'value)))
+    (check-equal? (map flat (parameters net)) before "no step")
+    (check-equal? (length seen) 1 "the hook still runs")
+    (check-equal? (car seen)
+                  (for/list ([g (in-list unscaled)]) (map (lambda (v) (* 65536.0 v)) g))
+                  "the gradients stay scaled")
+    (for ([v (in-list (apply append (gradients net)))])
+      (check-true (<= (abs v) 1.0) "the scaled gradients are clipped, as Lightning's"))
+    (check-equal? (grad-scaler-scale s) 65536.0)
+    (zero-grads! opt)
+    (backward! (grad-scaler-scale-loss s (sum (net x))))
+    (window-step! r #f #t)
+    (manual-seed! 0)
+    (define twin (Linear 2 2))
+    (define twin-s (grad-scaler #:device 'cpu))
+    (hand-scaled-step! twin-s (sgd (parameters twin) #:lr 0.1 #:momentum 0.9) (sum (twin x)))
+    (check-equal? (map flat (parameters net)) (map flat (parameters twin))
+                  "the next window steps as the first"))
+
+  (define-trainer GapAmp (net losses)
+    (define-init (model sink) (set! net model) (set! losses sink))
+    (define-optimizers (sgd (parameters net) #:lr 0.05 #:momentum 0.9))
+    (define-training-step (x y)
+      (match (run-batch-index run)
+        [1 #f]
+        [_
+         (define loss (mse-loss (net x) y))
+         (set-box! losses (cons (item loss) (unbox losses)))
+         loss])))
+
+  (define ((fit-gap steps) _device)
+    (with-default-device (cuda-device)
+      (manual-seed! 0)
+      (define net (Linear 8 4))
+      (define losses (box '()))
+      (define r
+        (fit (GapAmp net losses)
+             (dataloader (tensor-dataset (randn 32 8) (randn 32 4)) #:batch-size 8)
+             #:max-epochs 2 #:logger #f #:device (cuda-device) #:precision '16-mixed
+             #:accumulate-grad-batches 2 #:gradient-clip-val 1.0))
+      (set-box! steps (run-global-step r))
+      (values (reverse (unbox losses))
+              (cat (for/list ([p (in-list (parameters net))]) (reshape p -1))))))
+
+  (bounded-test "G3 M1: CUDA 16-mixed drops a window whose last batch returns #f, as Lightning"
+    (cond
+      [(not (amp-twin-ready?))
+       (displayln "[trainer-precision-test] G3 M1 twin skipped: no CUDA twin")]
+      [else
+       (define steps (box #f))
+       (call-with-python-env
+        #:env '(("RKTORCH_AMP_GAP" . "1"))
+        (lambda () (check-training-twin "amp-gap" amp-twin (fit-gap steps) 'cuda 5e-3)))
+       (check-equal? (unbox steps) 4 "Lightning counts the dropped windows' steps")])))

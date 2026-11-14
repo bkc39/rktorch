@@ -8,9 +8,6 @@
          (only-in "../../foreign/autograd-ops.rkt" reset-grads!)
          (only-in "../../nn/layer.rkt" layer? parameters)
          (only-in "../../nn/optim.rkt" step! zero-grads!)
-         (only-in "precision.rkt"
-                  backward-pass! call-in-precision check-clippable! configure-precision!
-                  count-step! window-step!)
          (only-in "../../private/contract.rkt" supplied-or)
          (only-in "../logging.rkt" logger-log-hyperparams!)
          (only-in "book.rkt" epoch-end-reached!)
@@ -19,6 +16,9 @@
                   note-batch-size! publish-epoch! publish-steps! set-up! tear-down! transfer
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
+         (only-in "precision.rkt"
+                  backward-pass! call-in-precision check-clippable! configure-precision!
+                  count-step! window-step!)
          (only-in "state.rkt"
                   run-accumulate run-batches-stepped run-book run-callbacks run-device
                   run-epoch run-global-step run-loggers run-optimizers run-scheduler-configs
@@ -104,8 +104,9 @@
   (trainer-automatic? (run-trainer r)))
 
 (define (step-schedulers! r interval index)
-  (for ([c (in-list (if (automatic? r) (run-scheduler-configs r) '()))]
-        #:when (and (eq? (scheduler-config-interval c) interval)
+  (for ([c (in-list (run-scheduler-configs r))]
+        #:when (and (automatic? r)
+                    (eq? (scheduler-config-interval c) interval)
                     (zero? (modulo (add1 index) (scheduler-config-frequency c)))))
     (step! (scheduler-config-scheduler c))))
 
@@ -143,27 +144,30 @@
 (define (validate! r p stage count)
   (evaluate r (plan-val p) count stage))
 
-(define (optimizer-step! r p i)
+(define (optimizer-step! r p i backward?)
   (unless (run-skip-window? r)
-    (window-step! r (plan-clip p)))
+    (window-step! r (plan-clip p) backward?))
   (count-step! r)
   (step-schedulers! r 'step i))
+
+(define (automatic-step! r p i loss)
+  (when (window-start? r i)
+    (for ([opt (in-list (run-optimizers r))])
+      (call-hooks r 'on-before-zero-grad opt)
+      (zero-grads! opt)))
+  (when loss
+    (backward-pass! r loss))
+  (when (ends-window? r p i)
+    (optimizer-step! r p i (and loss #t))))
 
 (define (train-step! r p i batch)
   (match-define (list loss extra)
     (call-in-precision r (lambda () (call-trainer/values r 'training-step batch))))
-  (define auto? (automatic? r))
-  (when (and auto? (window-start? r i))
-    (for ([opt (in-list (run-optimizers r))])
-      (call-hooks r 'on-before-zero-grad opt)
-      (zero-grads! opt)))
   (define a (run-accumulate r))
   (define scaled (and loss (if (= a 1) loss (/ loss a))))
-  (when (and auto? scaled)
-    (backward-pass! r scaled))
+  (when (automatic? r)
+    (automatic-step! r p i scaled))
   (define window-end? (ends-window? r p i))
-  (when (and auto? window-end?)
-    (optimizer-step! r p i))
   (set-run-step-pending?! r #f)
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))

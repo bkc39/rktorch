@@ -6,7 +6,9 @@
            rackunit
            (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
-           (only-in "../main.rkt" - backward! manual-seed! randn reshape tensor->list)
+           (only-in "../main.rkt"
+                    - autocast-cache-enabled? backward! manual-seed! randn reshape tensor->list
+                    with-autocast)
            (only-in "../nn.rkt"
                     Linear layer-copy learning-rate mse-loss parameters sgd step! step-lr
                     zero-grads!)
@@ -45,17 +47,20 @@
       (manual-step! run g-opt)
       g-loss))
 
-  (define (hand-gan gen disc)
+  (define (hand-gan gen disc #:forward [forward (lambda (thunk) (thunk))])
     (define g-opt (sgd (parameters gen) #:lr 0.1))
     (define d-opt (sgd (parameters disc) #:lr 0.05))
     (for* ([_ (in-range 2)] [(x y) (in-dataloader (loader))])
       (zero-grads! d-opt)
-      (~> (gen x) disc (mse-loss y) backward!)
+      (backward! (forward (lambda () (~> (gen x) disc (mse-loss y)))))
       (step! d-opt)
       (zero-grads! g-opt)
-      (backward! (mse-loss (disc (gen x)) (- y)))
+      (backward! (forward (lambda () (mse-loss (disc (gen x)) (- y)))))
       (step! g-opt))
     (map flat (append (parameters gen) (parameters disc))))
+
+  (define (bf16-forward thunk)
+    (with-autocast #:device 'cpu #:dtype 'bfloat16 (thunk)))
 
   (bounded-test "G3-L20: a manual GAN steps as a hand loop, and the loop steps no schedule"
     (manual-seed! 0)
@@ -68,6 +73,17 @@
     (check-equal? (map flat (append (parameters gen) (parameters disc))) (hand-gan gen* disc*))
     (check-equal? (learning-rate (car (unbox opts))) 0.1)
     (check-equal? (run-global-step r) 16 "G3-L19: two optimizer steps per batch"))
+
+  (bounded-test "G3 H1: a bf16-mixed manual GAN casts each forward afresh, as Lightning"
+    (manual-seed! 0)
+    (define gen (Linear 2 2))
+    (define disc (Linear 2 1))
+    (define gen* (layer-copy gen))
+    (define disc* (layer-copy disc))
+    (fit (Gan gen disc (box #f)) (loader) #:max-epochs 2 #:logger #f #:precision 'bf16-mixed)
+    (check-equal? (map flat (append (parameters gen) (parameters disc)))
+                  (hand-gan gen* disc* #:forward bf16-forward))
+    (check-true (autocast-cache-enabled?)))
 
   (define-trainer Stray (net stray)
     #:automatic-optimization? #f
@@ -122,4 +138,3 @@
     (check-manual-rows 'manual 2)
     (check-manual-rows 'manual-log-every-4 2 #:log-every-n-steps 4)
     (check-manual-rows 'manual-no-steps 0)))
-

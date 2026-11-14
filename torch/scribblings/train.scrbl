@@ -195,11 +195,16 @@ device supports it and @racket['16-mixed] otherwise; @racket['16-mixed] scales
 the loss with a @racket[grad-scaler], unscales before
 @racket[on-before-optimizer-step], and on the CPU runs as
 @racket['bf16-mixed], as Lightning does. A mixed precision runs the training
-and validation steps under @racket[call-with-autocast] and no other hook. @racket[#:gradient-clip-val]
-clips each optimizer's parameters after @racket[on-before-optimizer-step], by
+and validation steps under @racket[call-with-autocast] and no other hook, with
+@racket[#:cache-enabled? #f] as Lightning, so a @racket[manual-step!] reaches
+the step's later forwards. Under a scaler, a window whose last batch returns
+@racket[#f] runs @racket[on-before-optimizer-step] and the clip on the still
+scaled gradients, then neither steps nor updates the scale, and counts as a
+step, as Lightning does. @racket[#:gradient-clip-val] clips each optimizer's
+parameters after @racket[on-before-optimizer-step], by
 @racket[clip-grad-norm!] or, for @racket['value], @racket[clip-grad-value!];
-under a scaler, clipping with a fused optimizer raises at
-@racket[configure-optimizers], as Lightning raises at the clip.
+under a scaler, clipping with a fused optimizer raises before the first batch,
+where Lightning raises at the clip.
 
 @examples[#:eval train-eval
 (define-trainer Mixed (net)

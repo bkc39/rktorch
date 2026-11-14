@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/match match match*)
+(require (only-in racket/match match match* struct*)
          (only-in "../../foreign.rkt"
                   backward! call-with-autocast cuda-bfloat16-supported? device-index
                   device-type)
@@ -21,6 +21,7 @@
 (provide backward-pass!
          call-in-precision
          check-clippable!
+         (struct-out clipping)
          configure-precision!
          count-step!
          manual-optimizer-step!
@@ -53,7 +54,7 @@
   (match (run-precision r)
     ['32-true (thunk)]
     [precision
-     (call-with-autocast thunk #:device (run-device r)
+     (call-with-autocast thunk #:device (run-device r) #:cache-enabled? #f
                          #:dtype (if (eq? precision 'bf16-mixed) 'bfloat16 'float16))]))
 
 (define fused-clip-message
@@ -78,11 +79,15 @@
   (call-hooks r 'on-after-backward)
   (void))
 
+(struct clipping (value algorithm))
+
 (define (clip! clip opt)
   (match clip
     [#f (void)]
-    [(cons c 'norm) (clip-grad-norm! (optimizer-parameters opt) c)]
-    [(cons c 'value) (clip-grad-value! (optimizer-parameters opt) c)]))
+    [(struct* clipping ([value c] [algorithm 'norm]))
+     (clip-grad-norm! (optimizer-parameters opt) c)]
+    [(struct* clipping ([value c] [algorithm 'value]))
+     (clip-grad-value! (optimizer-parameters opt) c)]))
 
 (define (count-step! r)
   (set-run-global-step! r (add1 (run-global-step r)))
@@ -94,8 +99,8 @@
     [(grad-scaler-checked? s) (grad-scaler-update! s)]
     [else (for ([opt (in-list opts)]) (grad-scaler-forget! s opt))]))
 
-(define (step-optimizers! r opts clip)
-  (define s (armed-scaler r))
+(define (step-optimizers! r opts clip #:backward? [backward? #t])
+  (define s (and backward? (armed-scaler r)))
   (for ([opt (in-list opts)]
         #:when (and s (not (optimizer-fused? opt))))
     (grad-scaler-unscale! s opt))
@@ -106,14 +111,17 @@
      (for ([opt (in-list opts)]
            #:when s)
        (grad-scaler-forget! s opt))]
+    [(and (run-grad-scaler r) (not backward?))
+     (for ([opt (in-list opts)])
+       (clip! clip opt))]
     [else
      (for ([opt (in-list opts)])
        (clip! clip opt)
        (if s (grad-scaler-step! s opt) (step! opt)))
      (settle-scale! s opts)]))
 
-(define (window-step! r clip)
-  (step-optimizers! r (run-optimizers r) clip))
+(define (window-step! r clip backward?)
+  (step-optimizers! r (run-optimizers r) clip #:backward? backward?))
 
 (define (manual-optimizer-step! r opt)
   (step-optimizers! r (list opt) #f)

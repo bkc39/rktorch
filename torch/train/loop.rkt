@@ -9,6 +9,7 @@
          (only-in "private/dispatch.rkt" finish! tear-down! trainer-device with-failure-protocol)
          (only-in "private/evaluate.rkt" evaluate)
          (only-in "private/fit.rkt" fit-plan limited-batches run-fit start-entry!)
+         (only-in "private/precision.rkt" clipping)
          (only-in "private/state.rkt" fresh-run set-run-current-stage!)
          (only-in "private/types.rkt"
                   callback? not-implemented trainer-automatic?
@@ -123,7 +124,7 @@
                      #:limit-val limit-val
                      #:log-every log-every
                      #:fast-dev-run fast-dev-run
-                     #:clip (and clip-val (cons clip-val clip-algorithm))
+                     #:clip (and clip-val (clipping clip-val clip-algorithm))
                      #:precision precision)))
 
 (define/contract-out (test trainer loader
