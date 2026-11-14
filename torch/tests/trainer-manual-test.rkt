@@ -28,9 +28,15 @@
     (manual-seed! 1)
     (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 2))
 
+  (define (plain-forward thunk)
+    (thunk))
+
+  (define (bf16-forward thunk)
+    (with-autocast #:device 'cpu #:dtype 'bfloat16 (thunk)))
+
   (define-trainer Gan (gen disc opts wrap)
     #:automatic-optimization? #f
-    (define-init (g d sink [w (lambda (thunk) (thunk))])
+    (define-init (g d sink [w plain-forward])
       (set! gen g)
       (set! disc d)
       (set! opts sink)
@@ -51,7 +57,7 @@
       (manual-step! run g-opt)
       g-loss))
 
-  (define (hand-gan gen disc #:forward [forward (lambda (thunk) (thunk))])
+  (define (hand-gan gen disc #:forward [forward plain-forward])
     (define g-opt (sgd (parameters gen) #:lr 0.1))
     (define d-opt (sgd (parameters disc) #:lr 0.05))
     (for* ([_ (in-range 2)] [(x y) (in-dataloader (loader))])
@@ -62,9 +68,6 @@
       (backward! (forward (lambda () (mse-loss (disc (gen x)) (- y)))))
       (step! g-opt))
     (map flat (append (parameters gen) (parameters disc))))
-
-  (define (bf16-forward thunk)
-    (with-autocast #:device 'cpu #:dtype 'bfloat16 (thunk)))
 
   (bounded-test "G3-L20: a manual GAN steps as a hand loop, and the loop steps no schedule"
     (manual-seed! 0)
