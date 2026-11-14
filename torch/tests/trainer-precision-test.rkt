@@ -1,14 +1,14 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match)
+  (require (only-in racket/match match match-define struct*)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
            (only-in "../main.rkt"
-                    * autocast-enabled? backward! cat cpu-device cuda-available? cuda-device grad
-                    item manual-seed! randn reshape sum with-autocast
-                    with-default-device)
+                    * autocast-cache-enabled? autocast-enabled? backward! cat cpu-device
+                    cuda-available? cuda-device grad item manual-seed! randn reshape sum
+                    with-autocast with-default-device)
            (only-in "../nn.rkt"
                     Linear grad-scaler grad-scaler-scale grad-scaler-scale-loss grad-scaler-step!
                     grad-scaler-unscale! grad-scaler-update! layer-copy mse-loss parameters sgd
@@ -27,7 +27,8 @@
   (define-runtime-path amp-twin "python/trainer_amp_twin.py")
 
   (define (record! sink where)
-    (set-box! sink (cons (cons where (autocast-enabled? 'cpu)) (unbox sink))))
+    (set-box! sink (cons (list where (autocast-enabled? 'cpu) (autocast-cache-enabled?))
+                         (unbox sink))))
 
   (define-trainer Watched (net sink)
     (define-init (s) (set! net (Linear 2 1)) (set! sink s))
@@ -51,9 +52,12 @@
 
   (bounded-test "G3-L10: bf16-mixed autocasts the steps and nothing else, then restores"
     (define-values (r events) (fit-watched 'bf16-mixed))
+    (check-not-false (assq 'validation-step events))
     (for ([e (in-list events)])
-      (check-equal? (cdr e) (and (memq (car e) '(training-step validation-step)) #t)
-                    (format "~a" (car e))))
+      (match-define (list where on? cache?) e)
+      (define step? (and (memq where '(training-step validation-step)) #t))
+      (check-equal? on? step? (format "~a autocasts" where))
+      (check-equal? cache? (not step?) (format "G3 round 3 L1: ~a caches casts" where)))
     (check-false (autocast-enabled? 'cpu))
     (check-equal? (run-precision r) 'bf16-mixed)
     (check-false (run-grad-scaler r)))
@@ -156,7 +160,7 @@
     (check-equal? (grad-scaler-scale s) (grad-scaler-scale twin-s)))
 
   (bounded-test "G3 H1: a window with no gradients leaves the scaler ready for the next"
-    (gradless-steps (lambda (r _opt) (window-step! r #f #t))))
+    (gradless-steps (lambda (r _opt) (window-step! r #f #:backward? #t))))
 
   (bounded-test "G3 H1: a manual step with no gradients leaves the scaler ready for the next"
     (gradless-steps manual-optimizer-step!))
@@ -204,6 +208,8 @@
     (define-hook (on-before-optimizer-step optimizer)
       (set-box! seen (cons (gradients net) (unbox seen)))))
 
+  (struct windowed (run net opt scaler x before unscaled seen))
+
   (define (scaled-window backward? #:clip [clip #f])
     (manual-seed! 0)
     (define net (Linear 2 2))
@@ -216,16 +222,16 @@
     (set-run-grad-scaler! r s)
     (backward! (grad-scaler-scale-loss s (sum (net x))))
     (define before (map flat (parameters net)))
-    (window-step! r clip backward?)
+    (window-step! r clip #:backward? backward?)
     (backward! (sum (twin x)))
-    (values r net opt s x before (gradients twin) (reverse (unbox seen))))
+    (windowed r net opt s x before (gradients twin) (reverse (unbox seen))))
 
   (bounded-test "G3 M2: on-before-optimizer-step sees unscaled gradients under a scaler"
-    (define-values (_r _net _opt _s _x _before unscaled seen) (scaled-window #t))
+    (match-define (struct* windowed ([unscaled unscaled] [seen seen])) (scaled-window #t))
     (check-equal? seen (list unscaled)))
 
   (bounded-test "G3 M1: a scaler window ending in #f runs the hook, clips, never steps"
-    (define-values (r net opt s x before unscaled seen)
+    (match-define (windowed r net opt s x before unscaled seen)
       (scaled-window #f #:clip (clipping 1.0 'value)))
     (check-equal? (map flat (parameters net)) before "no step")
     (check-equal? (length seen) 1 "the hook still runs")
@@ -237,7 +243,7 @@
     (check-equal? (grad-scaler-scale s) 65536.0)
     (zero-grads! opt)
     (backward! (grad-scaler-scale-loss s (sum (net x))))
-    (window-step! r #f #t)
+    (window-step! r #f #:backward? #t)
     (manual-seed! 0)
     (define twin (Linear 2 2))
     (define twin-s (grad-scaler #:device 'cpu))

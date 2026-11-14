@@ -84,10 +84,9 @@
 (define (clip! clip opt)
   (match clip
     [#f (void)]
-    [(struct* clipping ([value c] [algorithm 'norm]))
-     (clip-grad-norm! (optimizer-parameters opt) c)]
-    [(struct* clipping ([value c] [algorithm 'value]))
-     (clip-grad-value! (optimizer-parameters opt) c)]))
+    [(struct* clipping ([value c] [algorithm algorithm]))
+     (define clip-grads! (if (eq? algorithm 'norm) clip-grad-norm! clip-grad-value!))
+     (clip-grads! (optimizer-parameters opt) c)]))
 
 (define (count-step! r)
   (set-run-global-step! r (add1 (run-global-step r)))
@@ -111,16 +110,15 @@
      (for ([opt (in-list opts)]
            #:when s)
        (grad-scaler-forget! s opt))]
-    [(and (run-grad-scaler r) (not backward?))
-     (for ([opt (in-list opts)])
-       (clip! clip opt))]
     [else
+     (define step? (or backward? (not (run-grad-scaler r))))
      (for ([opt (in-list opts)])
        (clip! clip opt)
-       (if s (grad-scaler-step! s opt) (step! opt)))
+       (when step?
+         (if s (grad-scaler-step! s opt) (step! opt))))
      (settle-scale! s opts)]))
 
-(define (window-step! r clip backward?)
+(define (window-step! r clip #:backward? backward?)
   (step-optimizers! r (run-optimizers r) clip #:backward? backward?))
 
 (define (manual-optimizer-step! r opt)

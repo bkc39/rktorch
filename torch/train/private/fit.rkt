@@ -144,9 +144,9 @@
 (define (validate! r p stage count)
   (evaluate r (plan-val p) count stage))
 
-(define (optimizer-step! r p i backward?)
+(define (optimizer-step! r p i #:backward? backward?)
   (unless (run-skip-window? r)
-    (window-step! r (plan-clip p) backward?))
+    (window-step! r (plan-clip p) #:backward? backward?))
   (count-step! r)
   (step-schedulers! r 'step i))
 
@@ -158,7 +158,7 @@
   (when loss
     (backward-pass! r loss))
   (when (ends-window? r p i)
-    (optimizer-step! r p i (and loss #t))))
+    (optimizer-step! r p i #:backward? (and loss #t))))
 
 (define (train-step! r p i batch)
   (match-define (list loss extra)
