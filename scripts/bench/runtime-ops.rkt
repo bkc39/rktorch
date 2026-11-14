@@ -46,7 +46,11 @@
   (findf (lambda (o) (eq? (op-name o) name)) ops))
 
 (define (make-op name ffi)
-  (match-define (op _ size (calls plain collect-safe)) (op-named name))
+  (match-define (op _ size fns) (op-named name))
+  (square-call fns size ffi))
+
+(define (square-call fns size ffi)
+  (match-define (calls plain collect-safe) fns)
   (define a (randn size size))
   (define b (randn size size))
   (match ffi
@@ -130,14 +134,46 @@
          (check-equal? (positive? (only 'worker_ops_per_s)) (positive? (hash-ref r 'k)) where)
          (check-equal? (real? (only 'us_per_op)) (positive? (hash-ref r 'k)) where)))))
 
-  (test-case "main's p99 pause beside a 1024² matmul worker falls tenfold in collect-safe calls"
+  (define target-ms 50.0)
+  (define max-size 4096)
+
+  (define (worker-call-ms size)
+    (define go (square-call matmul size 'plain))
+    (define ms #f)
+    (thread-wait (thread (lambda ()
+                           (go)
+                           (define t0 (clock-ms))
+                           (go)
+                           (set! ms (- (clock-ms) t0)))
+                         #:pool 'own))
+    ms)
+
+  (define (long-matmul-size)
+    (let loop ([size 1024])
+      (define ms (worker-call-ms size))
+      (cond
+        [(>= ms target-ms) (values size ms)]
+        [(>= size max-size) (values #f ms)]
+        [else (loop (* 2 size))])))
+
+  (test-case "main's p99 pause beside a long matmul worker falls tenfold in collect-safe calls"
     (call-with-process-deadline
-     120
+     180
      (lambda ()
-       (define (p99 ffi)
-         (define c (cell #:group 'ops #:workload 'mm1024 #:main 'alloc #:k 1 #:ffi ffi
-                         #:seconds 1.0))
-         (hash-ref (run-op-cell c) 'pause_p99_ms))
-       (define plain (p99 'plain))
-       (define safe (p99 'collect-safe))
-       (check-true (< (* 10 safe) plain) (format "collect-safe ~a ms, plain ~a ms" safe plain))))))
+       (define-values (size ms) (long-matmul-size))
+       (cond
+         [(not size)
+          (printf "[runtime] collect-safe pause check skipped: a ~a² matmul takes ~a ms, under ~a\n"
+                  max-size ms target-ms)]
+         [else
+          (define (p99 ffi)
+            (define c (cell #:group 'ops #:workload 'matmul #:main 'alloc #:k 1 #:ffi ffi
+                            #:seconds 1.0))
+            (hash-ref (duration-run c (lambda () (square-call matmul size ffi))
+                                    allocate-until-deadline)
+                      'pause_p99_ms))
+          (define plain (p99 'plain))
+          (define safe (p99 'collect-safe))
+          (check-true (< (* 10 safe) plain)
+                      (format "~a² matmul ~a ms a call: collect-safe ~a ms, plain ~a ms"
+                              size ms safe plain))])))))
