@@ -11,7 +11,8 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optim.rkt" optimizer-root optimizer?)
          (only-in (submod "optim.rkt" private)
-                  fold-gradient-buckets optimizer-fused? scaled-step!))
+                  call-with-gradient-buckets gradient-bucket gradient-bucket-dtype
+                  optimizer-fused? scaled-step!))
 
 (provide (contract-out [grad-scaler? (-> any/c boolean?)]))
 
@@ -19,7 +20,7 @@
   (provide grad-scaler-armed?
            grad-scaler-checked?
            grad-scaler-forget!
-           host-reads))
+           host-read-hook))
 
 (define-logger rktorch-amp)
 
@@ -35,12 +36,11 @@
   #:constructor-name make-grad-scaler ;; noqa
   #:name grad-scaler-struct) ;; noqa
 
-(define reads (box 0))
+(define host-read-hook (make-parameter void))
 
-(define (host-reads) (unbox reads))
-
-(define (scaled? s)
-  (or (not (grad-scaler-active? s)) (and (grad-scaler-state s) #t)))
+(define (host-read t)
+  ((host-read-hook))
+  (item t))
 
 (define (stages-of s)
   (match (grad-scaler-state s)
@@ -58,16 +58,21 @@
 (define not-unscaled? (not-at 'unscaled))
 (define not-stepped? (not-at 'stepped))
 
+(define (infs-recorded? s)
+  (for/or ([st (in-hash-values (stages-of s))])
+    (pair? (stage-found-infs st))))
+
 (define (inf-checks-recorded? s)
-  (or (not (grad-scaler-active? s))
-      (for/or ([st (in-hash-values (stages-of s))])
-        (pair? (stage-found-infs st)))))
+  (or (not (grad-scaler-active? s)) (infs-recorded? s)))
 
 (define (grad-scaler-armed? s)
   (and (grad-scaler-active? s) (grad-scaler-state s) #t))
 
+(define (scaled? s)
+  (or (not (grad-scaler-active? s)) (grad-scaler-armed? s)))
+
 (define (grad-scaler-checked? s)
-  (and (grad-scaler-active? s) (inf-checks-recorded? s)))
+  (and (grad-scaler-active? s) (infs-recorded? s)))
 
 (define (grad-scaler-forget! s opt)
   (define st (grad-scaler-state s))
@@ -133,16 +138,24 @@
 (define (on-device t home dev)
   (if (equal? dev home) t (to t dev)))
 
+(define (half-bucket? b)
+  (eq? (gradient-bucket-dtype b) 'float16))
+
 (define (check-and-unscale! st opt inv #:who [who #f])
   (define home (device-state-home st))
-  (define (check! found-infs dev dt grads)
-    (when (and who (eq? dt 'float16))
-      (raise-arguments-error who "attempting to unscale FP16 gradients" "optimizer" opt))
+  (define (check! found-infs b)
+    (match-define (struct* gradient-bucket ([device dev] [grads grads])) b)
     (define held (findf (lambda (c) (equal? (inf-check-device c) dev)) found-infs))
     (define found (if held (inf-check-found held) (fresh-found! st dev)))
     (g:amp-foreach-non-finite-check-and-unscale! grads found (on-device inv home dev))
     (if held found-infs (cons (inf-check dev found) found-infs)))
-  (reverse (fold-gradient-buckets opt '() check!)))
+  (call-with-gradient-buckets
+   opt
+   (lambda (buckets)
+     (when (and who (ormap half-bucket? buckets))
+       (raise-arguments-error who "attempting to unscale FP16 gradients" "optimizer" opt))
+     (reverse (for/fold ([found-infs '()]) ([b (in-list buckets)])
+                (check! found-infs b))))))
 
 (define (inverse-scale st)
   (define inverse (device-state-inverse st))
@@ -173,22 +186,21 @@
     ['() #f]
     [(cons first rest) (for/fold ([acc first]) ([f (in-list rest)]) (+ acc f))]))
 
-(define (fused-step! st opt unscaled?)
+(define (fused-step! st opt ready?)
   (define found-infs
-    (if unscaled? (stage-infs st opt) (check-and-unscale! st opt (device-state-unit st))))
-  (scaled-step! opt (if unscaled? #f (device-state-factor st))
+    (if ready? (check-and-unscale! st opt (device-state-unit st)) (stage-infs st opt)))
+  (scaled-step! opt (and ready? (device-state-factor st))
                 (combined-inf (device-state-home st) found-infs))
   (set-stage! st opt 'stepped found-infs))
 
-(define (inf-count! found-infs)
-  (set-box! reads (add1 (unbox reads)))
-  (for/sum ([c (in-list found-infs)]) (item (inf-check-found c))))
+(define (inf-count found-infs)
+  (for/sum ([c (in-list found-infs)]) (host-read (inf-check-found c))))
 
 (define (checked-step! st opt ready?)
   (when ready?
     (unscale! st opt 'grad-scaler-step!))
   (define found-infs (stage-infs st opt))
-  (when (zero? (inf-count! found-infs))
+  (when (zero? (inf-count found-infs))
     (scaled-step! opt))
   (set-stage! st opt 'stepped found-infs))
 
@@ -204,7 +216,7 @@
   (define ready? (eq? (optimizer-stage s opt) 'ready))
   (cond
     [(not (grad-scaler-active? s)) (scaled-step! opt)]
-    [(optimizer-fused? opt) (fused-step! st opt (not ready?))]
+    [(optimizer-fused? opt) (fused-step! st opt ready?)]
     [else (checked-step! st opt ready?)]))
 
 (define (all-infs st)
@@ -241,7 +253,7 @@
   (match* ((grad-scaler-active? s) (grad-scaler-state s))
     [(#f _) 1.0]
     [(_ #f) (grad-scaler-init s)]
-    [(_ st) (item (device-state-factor st))]))
+    [(_ st) (host-read (device-state-factor st))]))
 
 (define/contract-out (grad-scaler-enabled? s)
   (-> grad-scaler? boolean?)

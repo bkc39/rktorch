@@ -49,7 +49,8 @@
   (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
 (module+ private
-  (provide fold-gradient-buckets
+  (provide call-with-gradient-buckets
+           (struct-out gradient-bucket)
            optimizer-fused?
            optimizer-state
            scaled-step!))
@@ -106,18 +107,22 @@
         (values q g)))
     (update! bqs bgs)))
 
-(define (fold-gradient-buckets opt init proc)
+(struct gradient-bucket (device dtype grads))
+
+(define (call-with-gradient-buckets opt proc)
   (define root (optimizer-root opt))
   (define keys (tracked-keys root))
   (define (key-of qg)
     (match-define (cons q _) qg)
     (hash-ref! keys q (lambda () (placement q))))
+  (define (bucket-of qgs)
+    (match-define (list (and first (cons _ g)) (cons _ more) ...) qgs)
+    (match-define (cons dev dt) (key-of first))
+    (gradient-bucket dev dt (cons g more)))
   (with-no-grad
     (follow-moves! root)
     (with-gradients ([qs gs] (optimizer-parameters opt))
-      (for/fold ([acc init]) ([bucket (in-list (group-by key-of (map cons qs gs)))])
-        (match-define (cons dev dt) (key-of (car bucket)))
-        (proc acc dev dt (map cdr bucket))))))
+      (proc (map bucket-of (group-by key-of (map cons qs gs)))))))
 
 (define (optimizer-fused? opt)
   (match (optimizer-root opt)

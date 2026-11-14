@@ -5,20 +5,17 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + backward! cuda-available? grad manual-seed! randn reshape sum tensor
-                    tensor->list)
+                    * + backward! cuda-available? grad manual-seed! randn sum tensor)
            (only-in "../nn.rkt"
                     Linear Parameter adam grad-scaler grad-scaler-enabled? grad-scaler-scale
                     grad-scaler-scale-loss grad-scaler-step! grad-scaler-unscale!
                     grad-scaler-update! parameters sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/flat.rkt" flat)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "grad-scaler-edge-test"))
-
-  (define (flat t)
-    (~> t (reshape -1) tensor->list))
 
   (define (cpu-scaler)
     (grad-scaler #:device 'cpu))
@@ -116,6 +113,18 @@
                (lambda () (grad-scaler-unscale! s opt)))
     (check-exn #rx"grad-scaler-step!: attempting to unscale FP16 gradients"
                (lambda () (grad-scaler-step! s opt))))
+
+  (bounded-test "G3 L2: a float16 gradient raises before any other gradient is unscaled"
+    (define p32 (Parameter (tensor '(0.5 -0.25))))
+    (define p16 (Parameter (tensor '(0.5 -0.25) #:dtype 'float16)))
+    (define opt (sgd (list p32 p16) #:lr 0.1))
+    (define s (cpu-scaler))
+    (backward! (grad-scaler-scale-loss s (+ (sum (* p32 p32)) (sum (* p16 p16)))))
+    (define scaled (flat (grad p32)))
+    (check-exn #rx"attempting to unscale FP16 gradients"
+               (lambda () (grad-scaler-unscale! s opt)))
+    (check-equal? (flat (grad p32)) scaled)
+    (check-equal? scaled '(65536.0 -32768.0)))
 
   (bounded-test "two dtypes on one device share one inf check"
     (define p32 (Parameter (tensor '(0.5 -0.25))))
