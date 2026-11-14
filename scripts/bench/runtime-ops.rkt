@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _fun)
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe _fun)
          (only-in racket/list append*)
          (only-in racket/match match match-define)
          (only-in torch randn)
@@ -12,28 +13,32 @@
          (only-in "runtime.rkt"
                   allocate-until-deadline cell cell-ffi cell-main cell-workload duration-run)
          (only-in "runtime-work.rkt" poll!)
-         (only-in "threads.rkt" training-step))
+         (only-in "threads.rkt" training-step)
+         (only-in syntax/parse/define define-syntax-parse-rule))
 
 (provide op-names
          ops-cells
          run-op-cell)
 
-(define-torch tr-add/collect-safe
-  (_fun #:blocking? #t (a : _Tensor) (b : _Tensor) -> _Tensor/null)
-  #:c-id tr_add
-  #:wrap tensor-allocator)
+(struct calls (plain collect-safe))
 
-(define-torch tr-matmul/collect-safe
-  (_fun #:blocking? #t (a : _Tensor) (b : _Tensor) -> _Tensor/null)
-  #:c-id tr_matmul
-  #:wrap tensor-allocator)
+(define-syntax-parse-rule (binary-calls plain:id c-id:id)
+  (let ()
+    (define-torch collect-safe
+      (_fun #:blocking? #t (a : _Tensor) (b : _Tensor) -> _Tensor/null)
+      #:c-id c-id
+      #:wrap tensor-allocator)
+    (calls plain collect-safe)))
 
-(struct op (name size plain collect-safe))
+(define add (binary-calls tr-add/raw tr_add))
+(define matmul (binary-calls tr-matmul/raw tr_matmul))
+
+(struct op (name size calls))
 
 (define ops
-  (list (op 'add32 32 tr-add/raw tr-add/collect-safe)
-        (op 'mm256 256 tr-matmul/raw tr-matmul/collect-safe)
-        (op 'mm1024 1024 tr-matmul/raw tr-matmul/collect-safe)))
+  (list (op 'add32 32 add)
+        (op 'mm256 256 matmul)
+        (op 'mm1024 1024 matmul)))
 
 (define op-names (map op-name ops))
 
@@ -41,7 +46,7 @@
   (findf (lambda (o) (eq? (op-name o) name)) ops))
 
 (define (make-op name ffi)
-  (match-define (op _ size plain collect-safe) (op-named name))
+  (match-define (op _ size (calls plain collect-safe)) (op-named name))
   (define a (randn size size))
   (define b (randn size size))
   (match ffi
@@ -99,13 +104,20 @@
        (check-equal? (for/list ([r (in-list records)])
                        (list (hash-ref r 'main) (hash-ref r 'workload) (hash-ref r 'ffi)
                              (hash-ref r 'k)))
-                     (for*/list ([main (in-list '("alloc" "train"))]
-                                 [arm (in-list (cons '("none" "none" 0)
-                                                     (for*/list ([op (in-list '("add32" "mm256"))]
-                                                                 [ffi (in-list '("plain" "poll"
-                                                                                 "collect-safe"))])
-                                                       (list op ffi 1))))])
-                       (cons main arm)))
+                     '(("alloc" "none" "none" 0)
+                       ("alloc" "add32" "plain" 1)
+                       ("alloc" "add32" "poll" 1)
+                       ("alloc" "add32" "collect-safe" 1)
+                       ("alloc" "mm256" "plain" 1)
+                       ("alloc" "mm256" "poll" 1)
+                       ("alloc" "mm256" "collect-safe" 1)
+                       ("train" "none" "none" 0)
+                       ("train" "add32" "plain" 1)
+                       ("train" "add32" "poll" 1)
+                       ("train" "add32" "collect-safe" 1)
+                       ("train" "mm256" "plain" 1)
+                       ("train" "mm256" "poll" 1)
+                       ("train" "mm256" "collect-safe" 1)))
        (for ([r (in-list records)])
          (define (only key) (car (hash-ref r key)))
          (define where (hash-ref r 'variant))
@@ -116,4 +128,16 @@
          (check-pred real? (only 'pause_p99_ms) where)
          (check-equal? (only 'stopped) (hash-ref r 'k) where)
          (check-equal? (positive? (only 'worker_ops_per_s)) (positive? (hash-ref r 'k)) where)
-         (check-equal? (real? (only 'us_per_op)) (positive? (hash-ref r 'k)) where))))))
+         (check-equal? (real? (only 'us_per_op)) (positive? (hash-ref r 'k)) where)))))
+
+  (test-case "main's p99 pause beside a 1024² matmul worker falls tenfold in collect-safe calls"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define (p99 ffi)
+         (define c (cell #:group 'ops #:workload 'mm1024 #:main 'alloc #:k 1 #:ffi ffi
+                         #:seconds 1.0))
+         (hash-ref (run-op-cell c) 'pause_p99_ms))
+       (define plain (p99 'plain))
+       (define safe (p99 'collect-safe))
+       (check-true (< (* 10 safe) plain) (format "collect-safe ~a ms, plain ~a ms" safe plain))))))

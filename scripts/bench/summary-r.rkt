@@ -45,7 +45,7 @@
 
 (define (load-note r)
   (define limit (ref r 'max_load))
-  (define loads (filter real? (append (or (ref r 'load_start) '()) (or (ref r 'load_end) '()))))
+  (define loads (filter real? (or (ref r 'load_outside) '())))
   (define peak (and (pair? loads) (apply max loads)))
   (if (and (real? limit) peak (>= peak limit)) (format "load ~a ≥ ~a" (num peak 1) limit) "-"))
 
@@ -56,32 +56,36 @@
           (or (ref r 'meta 'omp_num_threads) "unset") (or (ref r 'meta 'affinity_cpus) "?")
           (or (ref r 'meta 'cores) "?") (ref r 'run_id)))
 
+(define ((scaling-row records) r)
+  (list (ref r 'workload) (ref r 'main) (ref r 'trip_mb) (ref r 'k)
+        (whole (median r)) (spread-text r) (slowdown records r)
+        (slowdown records r #:workload "cpu") (whole (median-at r 'work_gc_ms))
+        (at r 'main_rate 1) (load-note r)))
+
 (define (scaling-section records)
   (table '("workload" "main" "trip MB" "k" "wall ms" "spread" "÷ k=1" "CPU floor ÷ k=1"
            "GC ms" "main M allocs/s" "notes")
-         (for/list ([r (in-list records)])
-           (list (ref r 'workload) (ref r 'main) (ref r 'trip_mb) (ref r 'k)
-                 (whole (median r)) (spread-text r) (slowdown records r)
-                 (slowdown records r #:workload "cpu") (whole (median-at r 'work_gc_ms))
-                 (at r 'main_rate 1) (load-note r)))))
+         (map (scaling-row records) records)))
+
+(define ((native-row records) r)
+  (define none (sibling records r (hasheq 'workload "none" 'ffi "none" 'between "none" 'k 0)))
+  (list (ref r 'workload) (ref r 'between) (ref r 'ffi) (ref r 'k) (num (median r) 2)
+        (spread-text r) (ratio (median-of r) (median-of none))
+        (at r 'pause_p50_ms) (at r 'pause_p99_ms) (at r 'pause_max_ms)
+        (whole (median-at r 'worker_ops_per_s)) (whole (median-at r 'work_gc_ms))
+        (ref r 'trip_mb) (load-note r)))
 
 (define (native-section records)
   (table '("worker call" "between calls" "call" "k" "main M allocs/s" "spread" "÷ none"
            "pause p50 ms" "pause p99 ms" "pause max ms" "worker calls/s" "GC ms" "trip MB"
            "notes")
-         (for/list ([r (in-list records)])
-           (define none (sibling records r (hasheq 'workload "none" 'ffi "none" 'between "none" 'k 0)))
-           (list (ref r 'workload) (ref r 'between) (ref r 'ffi) (ref r 'k) (num (median r) 2)
-                 (spread-text r) (ratio (median-of r) (median-of none))
-                 (at r 'pause_p50_ms) (at r 'pause_p99_ms) (at r 'pause_max_ms)
-                 (whole (median-at r 'worker_ops_per_s)) (whole (median-at r 'work_gc_ms))
-                 (ref r 'trip_mb) (load-note r)))))
+         (map (native-row records) records)))
 
 (define (places-section records)
   (define rows
     (remove-duplicates (map (lambda (r) (key-without 'runner r)) records)))
   (table '("workload" "trip MB" "k" "threads ms" "threads ÷ k=1" "places ms" "places ÷ k=1"
-           "threads GC ms" "places main-place GC ms" "notes")
+           "threads GC ms" "places GC ms (all places)" "notes")
          (for/list ([key (in-list rows)])
            (define (runner name)
              (for/last ([r (in-list records)]
@@ -97,16 +101,18 @@
                  (~> (list threads places) (filter values _) (map load-note _) remove-duplicates
                      (string-join " "))))))
 
+(define ((ops-row records) r)
+  (define none (sibling records r (hasheq 'workload "none" 'ffi "none" 'k 0)))
+  (list (ref r 'workload) (ref r 'main) (ref r 'ffi) (ref r 'k) (num (median r) 2)
+        (ref r 'unit) (spread-text r) (ratio (median-of r) (median-of none))
+        (at r 'pause_p50_ms) (at r 'pause_p99_ms) (at r 'pause_max_ms)
+        (whole (median-at r 'worker_ops_per_s)) (~> r (median-at 'us_per_op) (num 1))
+        (whole (median-at r 'work_gc_ms)) (ref r 'trip_mb) (load-note r)))
+
 (define (ops-section records)
   (table '("op" "main" "call" "k" "main rate" "unit" "spread" "÷ no workers" "pause p50 ms"
            "pause p99 ms" "pause max ms" "worker ops/s" "µs/op/worker" "GC ms" "trip MB" "notes")
-         (for/list ([r (in-list records)])
-           (define none (sibling records r (hasheq 'workload "none" 'ffi "none" 'k 0)))
-           (list (ref r 'workload) (ref r 'main) (ref r 'ffi) (ref r 'k) (num (median r) 2)
-                 (ref r 'unit) (spread-text r) (ratio (median-of r) (median-of none))
-                 (at r 'pause_p50_ms) (at r 'pause_p99_ms) (at r 'pause_max_ms)
-                 (whole (median-at r 'worker_ops_per_s)) (~> r (median-at 'us_per_op) (num 1))
-                 (whole (median-at r 'work_gc_ms)) (ref r 'trip_mb) (load-note r)))))
+         (map (ops-row records) records)))
 
 (define r-sections
   (list (make-section "runtime" "scaling" "R1. Pure-Racket scaling" scaling-section runtime-context)
@@ -131,7 +137,7 @@
     (for/fold ([h (hasheq 'suite "runtime" 'group group 'workload workload 'k k 'main main
                           'trip_mb "default" 'ffi ffi 'between between 'runner runner
                           'unit unit 'run_id "r1" 'meta meta 'max_load 4
-                          'load_start loads 'load_end loads
+                          'load_outside loads
                           'stats (hasheq 'median median 'iqr iqr 'n n))])
               ([(key value) (in-hash extra)])
       (hash-set h key value)))
@@ -181,7 +187,9 @@
                       (record "places" "alloc-retain" 7 960.0 #:runner "places"))))
     (check-true (row-of md "alloc-retain" "default" "1" "100" "1.00" "120" "1.00") md)
     (check-true (row-of md "alloc-retain" "default" "7" "1000" "10.00" "960" "8.00") md)
-    (check-equal? (length (regexp-match* #rx"\n\\| alloc-retain" md)) 2))
+    (check-equal? (length (regexp-match* #rx"\n\\| alloc-retain" md)) 2)
+    (check-regexp-match #rx"\\| places GC ms \\(all places\\) \\|" md)
+    (check-false (regexp-match? #rx"main-place" md)))
 
   (test-case "R4 sets each op arm's main rate against main with no workers"
     (define md

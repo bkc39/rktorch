@@ -63,7 +63,7 @@
 
 (define (comma-values text parse)
   (define parsed (map parse (string-split text ",")))
-  (and (pair? parsed) (andmap values parsed) parsed))
+  (and (pair? parsed) (andmap values parsed) (not (check-duplicates parsed)) parsed))
 
 (define (worker-counts text)
   (comma-values text (lambda (w)
@@ -196,11 +196,12 @@
        [("--workers") ks "Comma-separated worker counts for the runtime suites"
                       (option! 'workers
                                (flag-value "--workers" worker-counts values
-                                           "positive integers, comma-separated" ks))]
+                                           "distinct positive integers, comma-separated" ks))]
        [("--trip") mbs "Comma-separated collect-trip-bytes in MB, or default, for runtime"
                    (option! 'trips
                             (flag-value "--trip" trip-settings values
-                                        "default or positive integers, comma-separated" mbs))]
+                                        "default or distinct positive integers, comma-separated"
+                                        mbs))]
        [("--full") "Run examples at their full settings" (option! 'full? #t)]
        [("--only") names "Comma-separated example numbers"
                    (option! 'only (string-split names ","))]
@@ -331,10 +332,10 @@
     (fails "--device" "gpu" "cpu, cuda or mps")
     (fails "--device" "CUDA" "cpu, cuda or mps")
     (fails "--mix" "huge" "small or grain")
-    (for ([value (in-list '("" "0" "1,x" "1,,2" "1.5"))])
-      (fails "--workers" value "positive integers, comma-separated"))
-    (for ([value (in-list '("" "0" "auto" "default,-1"))])
-      (fails "--trip" value "default or positive integers, comma-separated"))
+    (for ([value (in-list '("" "0" "1,x" "1,,2" "1.5" "4,4" "1,4,1"))])
+      (fails "--workers" value "distinct positive integers, comma-separated"))
+    (for ([value (in-list '("" "0" "auto" "default,-1" "64,64" "default,8,default"))])
+      (fails "--trip" value "default or distinct positive integers, comma-separated"))
     (define-values (_suites options)
       (parse-arguments (vector "micro" "--warmup" "0" "--scale" "0.5" "--max-load" "2.5")))
     (check-equal? options (make-hasheq '((warmup . 0) (scale . 0.5) (max-load . 2.5))))

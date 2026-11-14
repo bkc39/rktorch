@@ -3,13 +3,16 @@
 (require (for-syntax racket/base syntax/parse)
          (only-in racket/format ~a ~r)
          (only-in racket/list append* take-right)
+         (only-in racket/future processor-count)
          (only-in racket/match match match*)
-         (only-in racket/place dynamic-place place-channel-put place-dead-evt place-kill)
+         (only-in racket/place dynamic-place place-channel-put place-dead-evt)
          (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/string string-split)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "harness.rkt"
-                  bench-case clock-ms load-average measure quantile result->record result-per-call)
+                  bench-case clock-ms load-average measure parse-cpu-times quantile result->record
+                  result-per-call)
          (only-in "runtime-work.rkt"
                   allocate-until native-call native-calls run-work with-trip-bytes work-units
                   workload-names)
@@ -71,14 +74,14 @@
 
 (define metric-keys
   '(wall_ms work_gc_ms main_rate pause_p50_ms pause_p99_ms pause_max_ms worker_ops_per_s
-            us_per_op stopped load_start load_end))
+            us_per_op stopped load_outside))
 
 (define (pause-stats gaps)
-  (match gaps
-    ['() (hasheq 'pause_p50_ms #f 'pause_p99_ms #f 'pause_max_ms #f)]
-    [_ (hasheq 'pause_p50_ms (quantile gaps 0.5)
-               'pause_p99_ms (quantile gaps 0.99)
-               'pause_max_ms (apply max gaps))]))
+  (if (null? gaps)
+      (hasheq 'pause_p50_ms #f 'pause_p99_ms #f 'pause_max_ms #f)
+      (hasheq 'pause_p50_ms (quantile gaps 0.5)
+              'pause_p99_ms (quantile gaps 0.99)
+              'pause_max_ms (apply max gaps))))
 
 (define (main-stats c n gaps elapsed-ms gc-ms)
   (hash-set* (pause-stats gaps)
@@ -86,28 +89,34 @@
              'work_gc_ms gc-ms
              'main_rate (and n (positive? elapsed-ms) (/ (* 1000.0 n) elapsed-ms (rate-scale c)))))
 
+(define (call-with-shutdown thunk)
+  (define custodian (make-custodian))
+  (dynamic-wind void
+                (lambda () (parameterize ([current-custodian custodian]) (thunk)))
+                (lambda () (custodian-shutdown-all custodian))))
+
+(define-syntax-parse-rule (with-shutdown body:expr ...+)
+  (call-with-shutdown (lambda () body ...)))
+
 (define (call-with-finishing-workers k work proc)
   (define go? (box #f))
   (define failure (box #f))
-  (define custodian (make-custodian))
   (define (fail! e) (box-cas! failure #f e))
-  (define workers
-    (parameterize ([current-custodian custodian])
-      (for/list ([_ (in-range k)])
-        (thread (lambda ()
-                  (with-handlers ([(lambda (_e) #t) fail!])
-                    (let wait () (unless (unbox go?) (wait)))
-                    (work)))
-                #:pool 'own))))
-  (define (join) (for-each thread-wait workers))
-  (define (done?) (andmap thread-dead? workers))
   (define result
-    (dynamic-wind void
-                  (lambda () (proc (lambda () (set-box! go? #t)) done? join))
-                  (lambda () (custodian-shutdown-all custodian))))
-  (match (unbox failure)
-    [#f result]
-    [e (raise e)]))
+    (with-shutdown
+      (define workers
+        (for/list ([_ (in-range k)])
+          (thread (lambda ()
+                    (with-handlers ([(lambda (_e) #t) fail!])
+                      (let wait () (unless (unbox go?) (wait)))
+                      (work)))
+                  #:pool 'own)))
+      (proc (lambda () (set-box! go? #t))
+            (lambda () (andmap thread-dead? workers))
+            (lambda () (for-each thread-wait workers)))))
+  (cond
+    [(unbox failure) => raise]
+    [else result]))
 
 (define (run-scaling c)
   (define name (cell-workload c))
@@ -121,32 +130,22 @@
      (define-values (n gaps)
        (match (cell-main c)
          ['idle (join) (values #f '())]
-         ['alloc (allocate-until (lambda (_now) (done?)))]))
+         ['alloc (allocate-until (lambda (_now) (done?)) #:start t0)]))
      (join)
      (main-stats c n gaps (- (clock-ms) t0) (- (current-gc-milliseconds) gc0)))))
 
-(define (call-with-places k proc)
-  (define started (box '()))
-  (dynamic-wind
-   void
-   (lambda ()
-     (for ([_ (in-range k)])
-       (set-box! started (cons (dynamic-place work-module 'place-worker) (unbox started))))
-     (~> started unbox reverse proc))
-   (lambda () (for-each place-kill (unbox started)))))
-
-(define-syntax-parse-rule (with-places (places:id k:expr) body:expr ...+)
-  (call-with-places k (lambda (places) body ...)))
-
-(define (expect p message)
+(define (expect-message p message)
   (define got (sync (handle-evt (place-dead-evt p) (lambda (_) 'dead)) p))
   (unless (equal? got message)
     (raise-user-error 'runtime "a place sent ~s, not ~s" got message)))
 
-(define (run-places c)
-  (with-places (places (cell-k c))
+(define (run-places c #:collect [collect collect-garbage] #:expect [expect expect-message])
+  (with-shutdown
+    (define places
+      (for/list ([_ (in-range (cell-k c))]) (dynamic-place work-module 'place-worker)))
     (for ([p (in-list places)]) (place-channel-put p (list (cell-workload c) (cell-units c))))
     (for ([p (in-list places)]) (expect p 'ready))
+    (collect)
     (define gc0 (current-gc-milliseconds))
     (define t0 (clock-ms))
     (for ([p (in-list places)]) (place-channel-put p 'go))
@@ -231,25 +230,53 @@
             ([key (in-list metric-keys)])
     (hash-set h key (map (lambda (run) (hash-ref run key #f)) timed))))
 
+(define (first-line path)
+  (and (file-exists? path) (call-with-input-file path read-line)))
+
+(define (parse-self-ticks text)
+  (match (and (string? text) (regexp-match #px"^.*\\)\\s+(.*)$" text))
+    [(list _ rest)
+     (match (map string->number (string-split rest))
+       [(list _ _ _ _ _ _ _ _ _ _ _ utime stime _ ...)
+        #:when (and (exact-nonnegative-integer? utime) (exact-nonnegative-integer? stime))
+        (+ utime stime)]
+       [_ #f])]
+    [_ #f]))
+
+(define (process-cpu-times)
+  (define system (parse-cpu-times (first-line "/proc/stat")))
+  (define self (parse-self-ticks (first-line "/proc/self/stat")))
+  (and system self (list (car system) (cdr system) self)))
+
+(define (outside-cores before after cpus)
+  (match* (before after)
+    [((list busy₀ total₀ self₀) (list busy₁ total₁ self₁))
+     #:when (> total₁ total₀)
+     (max 0.0 (/ (* cpus (- (- busy₁ busy₀) (- self₁ self₀))) (- total₁ total₀) 1.0))]
+    [(_ _) #f]))
+
 (define (cell-records cells run
                       #:rounds rounds
                       #:warmup warmup
                       #:meta meta
                       #:max-load max-load
                       #:load [load load-average]
+                      #:cpu-times [cpu-times process-cpu-times]
                       #:log [log (current-error-port)])
   (define runs (make-hash))
-  (define (one-minute) (match (load) [(cons l _) l] [_ #f]))
+  (define (load-less k)
+    (match (load)
+      [(cons one-minute _) (max 0.0 (- one-minute k 1))]
+      [_ #f]))
   (define (case-of c)
     (bench-case (cell-name c)
                 (lambda (_reps)
-                  (define start (one-minute))
+                  (define before (cpu-times))
                   (define result (with-trip-bytes (cell-trip c) (run c)))
+                  (define outside
+                    (or (outside-cores before (cpu-times) (processor-count)) (load-less (cell-k c))))
                   (define value (or (hash-ref result (primary c)) 0.0))
-                  (hash-update! runs c
-                                (lambda (rs)
-                                  (cons (hash-set* result 'load_start start 'load_end (one-minute))
-                                        rs))
+                  (hash-update! runs c (lambda (rs) (cons (hash-set result 'load_outside outside) rs))
                                 '())
                   (fprintf log "  ~a ~a ~a\n" (cell-name c) (~r value #:precision 2) (cell-unit c))
                   value)
@@ -264,17 +291,28 @@
 
 (module+ test
   (require (only-in racket/file make-temporary-directory)
-           (only-in racket/list last)
+           (only-in racket/list first last second third)
            (only-in racket/port open-output-nowhere)
            rackunit
            (only-in torch/tests/private/wedge call-with-process-deadline)
-           (only-in "harness.rkt" with-temporary-path))
+           (only-in "harness.rkt" with-temporary-path)
+           (only-in "markdown.rkt" section-render)
+           (only-in "summary-r.rkt" r-sections))
 
   (define quiet (open-output-nowhere))
 
-  (define (records-of cells #:rounds [rounds 1] #:warmup [warmup 0] #:run [run run-cell])
+  (define (records-of cells
+                      #:rounds [rounds 1]
+                      #:warmup [warmup 0]
+                      #:run [run run-cell]
+                      #:max-load [max-load 99]
+                      #:load [load (lambda () '(1.0 2.0 3.0))]
+                      #:cpu-times [cpu-times (lambda () #f)])
     (cell-records cells run #:rounds rounds #:warmup warmup #:meta (hasheq 'host "test")
-                  #:max-load 99 #:load (lambda () '(1.0 2.0 3.0)) #:log quiet))
+                  #:max-load max-load #:load load #:cpu-times cpu-times #:log quiet))
+
+  (define (fake-run _c)
+    (hasheq 'wall_ms 1.0 'main_rate #f))
 
   (define (only r key) (car (hash-ref r key)))
 
@@ -301,7 +339,7 @@
          (check-equal? (hash-ref r 'unit) "ms")
          (check-equal? (hash-ref r 'meta) (hasheq 'host "test"))
          (check-equal? (hash-ref r 'max_load) 99)
-         (check-equal? (hash-ref r 'load_start) '(1.0 1.0))
+         (check-equal? (hash-ref r 'load_outside) '(0.0 0.0))
          (check-equal? (length (hash-ref r 'wall_ms)) 2)
          (check-equal? (hash-ref r 'samples) (hash-ref r 'wall_ms))
          (check-true (andmap positive? (hash-ref r 'wall_ms)) (format "~a" (row r)))
@@ -372,6 +410,51 @@
                   (lambda ()
                     (run-cell (cell #:group 'places #:runner 'places #:workload 'nope #:k 1
                                     #:units 1)))))))
+
+  (test-case "the outside load is the busy cores less this process's own CPU time"
+    (check-equal? (parse-self-ticks
+                   "42 (a (b) c) R 1 2 3 0 -1 4194304 489 0 0 0 120 30 0 0 25 5 1 0 3 4 5")
+                  150)
+    (check-false (parse-self-ticks "42 (racket) R 1 2"))
+    (check-false (parse-self-ticks #f))
+    (check-equal? (outside-cores '(100 1000 40) '(400 2000 240) 8) 0.8)
+    (check-equal? (outside-cores '(100 1000 40) '(400 2000 400) 8) 0.0)
+    (check-false (outside-cores #f '(400 2000 240) 8))
+    (check-false (outside-cores '(100 1000 40) '(400 1000 240) 8))
+    (define now (process-cpu-times))
+    (when now
+      (check-true (andmap exact-nonnegative-integer? now))
+      (check-true (<= (third now) (first now)))))
+
+  (test-case "a load that rises by the suite's own k workers does not fire the load note"
+    (define ticks (box '(1000 10000 50)))
+    (define (busy-as-self)
+      (define now (unbox ticks))
+      (set-box! ticks (list (+ (first now) 500) (+ (second now) 1000) (+ (third now) 500)))
+      now)
+    (define cells (scaling-cells #:workers '(1 4 7) #:trips '(#f) #:scale 1 #:workloads '(cpu)
+                                 #:mains '(idle)))
+    (define (rendered records)
+      ((section-render (car r-sections)) records))
+    (define measured (records-of cells #:run fake-run #:max-load 4 #:cpu-times busy-as-self))
+    (check-equal? (map (lambda (r) (hash-ref r 'load_outside)) measured) '((0.0) (0.0) (0.0)))
+    (check-false (regexp-match? #rx"load [0-9]" (rendered measured)))
+    (define fallback (records-of cells #:run fake-run #:max-load 4 #:load (lambda () '(8.5 1.0 1.0))))
+    (check-equal? (map (lambda (r) (hash-ref r 'load_outside)) fallback) '((6.5) (3.5) (0.5)))
+    (check-regexp-match #rx"load 6\\.5 ≥ 4" (rendered fallback))
+    (check-false (regexp-match? #rx"load 3\\.5" (rendered fallback))))
+
+  (test-case "places collect after every place is ready and before the timed phase"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define events '())
+       (define (note! e) (set! events (cons e events)))
+       (define c (cell #:group 'places #:runner 'places #:workload 'cpu #:k 2 #:units 10))
+       (run-places c
+                   #:collect (lambda () (note! 'collect) (collect-garbage))
+                   #:expect (lambda (p message) (expect-message p message) (note! message)))
+       (check-equal? (reverse events) '(ready ready collect done done)))))
 
   (test-case "warmup runs are left out of a record's rounds"
     (call-with-process-deadline

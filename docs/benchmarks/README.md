@@ -479,7 +479,8 @@ nothing above the raw layer.
 - **R2. Native calls beside an allocating main** — main's allocation rate,
   over the `none` row's, and its pauses, per call, `between` and mode.
 - **R3. Places against threads** — the same rows side by side, each over
-  its own lowest k, with the GC time of the main place.
+  its own lowest k, with each run's GC time; Racket CS counts every
+  place's collections in it, not the main place's alone.
 - **R4. Real ops in workers** — main's rate over its `none` row's, its
   pauses, and the workers' throughput, per op, mode and main.
 
@@ -488,8 +489,11 @@ Every row names its trip setting, and the heading the host, its CPU list,
 the host's, and the run. `spread` is the IQR over the median of the
 row's rounds, and needs 3; identical cells on the lab host vary by ±15%,
 so read ratios, not absolutes, and repeat a run before trusting a gap
-inside its spread. A row whose 1-minute load reached `--max-load` before
-or after any round is noted `load L ≥ M`.
+inside its spread. Each round measures the load from outside the suite:
+the host's busy cores over the round less the suite's own CPU time
+(`/proc/stat` less `/proc/self/stat`, so its k workers and main do not
+count), or, without `/proc`, the 1-minute load less k + 1. A row whose
+outside load reached `--max-load` in any round is noted `load L ≥ M`.
 
 On a hyperthreaded host, two threads on one core's siblings share its
 execution units, and the CPU floor itself stops scaling past the
@@ -563,8 +567,8 @@ null without `/proc`); `runtime` records (`group` `scaling`, `native`,
 `between`, `runner` (`threads` or `places`), `units` or `seconds`,
 `max_load`, and per round `wall_ms`, `work_gc_ms`, `main_rate`,
 `pause_p50_ms`, `pause_p99_ms`, `pause_max_ms`, `worker_ops_per_s`,
-`us_per_op`, `stopped`, `load_start` and `load_end` (the 1-minute load
-around the run); `host-gpu` step records add `gc_ms` per step,
+`us_per_op`, `stopped` and `load_outside` (the busy cores outside the
+suite over the run, as Table R notes it); `host-gpu` step records add `gc_ms` per step,
 one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and

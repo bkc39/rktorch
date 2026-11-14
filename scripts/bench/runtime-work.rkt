@@ -4,11 +4,12 @@
          (only-in ffi/unsafe _fun _int _uint32 get-ffi-obj)
          (only-in ffi/unsafe/os-thread make-os-semaphore os-semaphore-post os-semaphore-wait)
          (only-in ffi/unsafe/vm vm-eval vm-primitive)
-         (only-in racket/match match match-define)
+         (only-in racket/match match-define)
          (only-in racket/math exact-round)
          (only-in racket/place place-channel-get place-channel-put)
          (only-in racket/unsafe/ops unsafe-fx* unsafe-fx+ unsafe-fxand)
-         (only-in syntax/parse/define define-syntax-parse-rule))
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in threading ~>))
 
 (provide workload-names
          work-units
@@ -87,39 +88,38 @@
   (findf (lambda (w) (eq? (workload-name w) name)) workloads))
 
 (define (work-units name scale)
-  (max 1 (exact-round (* scale (workload-units (workload-named name))))))
+  (~> name workload-named workload-units (* scale _) exact-round (max 1)))
 
 (define (run-work name units)
   ((workload-run (workload-named name)) units))
 
 (define sink (box #f))
 
-(define (allocate-until stop?)
-  (define t0 (current-inexact-monotonic-milliseconds))
+(define (allocate-until stop? #:start [t0 (current-inexact-monotonic-milliseconds)])
   (let loop ([i 0] [keep #f] [last t0] [gaps '()])
     (cond
       [(positive? (unsafe-fxand i 4095)) (loop (add1 i) (make-vector 8 i) last gaps)]
       [else
        (define now (current-inexact-monotonic-milliseconds))
-       (define seen (if (zero? i) gaps (cons (- now last) gaps)))
+       (define seen (cons (- now last) gaps))
        (cond
          [(stop? now) (set-box! sink keep) (values i seen)]
          [else (loop (add1 i) (make-vector 8 i) now seen)])])))
 
 (define (call-with-trip-bytes mb thunk)
-  (match mb
-    [#f (thunk)]
-    [_
+  (cond
+    [mb
      (define before (vm-eval '(collect-trip-bytes)))
      (dynamic-wind (lambda () (vm-eval `(collect-trip-bytes ,(* mb 1024 1024))))
                    thunk
-                   (lambda () (vm-eval `(collect-trip-bytes ,before))))]))
+                   (lambda () (vm-eval `(collect-trip-bytes ,before))))]
+    [else (thunk)]))
 
 (define-syntax-parse-rule (with-trip-bytes mb:expr body:expr ...+)
   (call-with-trip-bytes mb (lambda () body ...)))
 
-(define usleep/plain (get-ffi-obj "usleep" #f (_fun _uint32 -> _int)))
-(define usleep/collect-safe (get-ffi-obj "usleep" #f (_fun #:blocking? #t _uint32 -> _int)))
+(define (usleep-call collect-safe?)
+  (get-ffi-obj "usleep" #f (_fun #:blocking? collect-safe? _uint32 -> _int)))
 
 (define native-calls '((usleep-2000 . 2000) (usleep-200 . 200)))
 
@@ -132,7 +132,7 @@
 
 (define (native-call name ffi between)
   (define us (cdr (assq name native-calls)))
-  (define call (if (eq? ffi 'collect-safe) usleep/collect-safe usleep/plain))
+  (define call (usleep-call (eq? ffi 'collect-safe)))
   (define poll? (eq? ffi 'poll))
   (define alloc? (eq? between 'alloc))
   (lambda ()
@@ -164,8 +164,15 @@
     (define deadline (+ (current-inexact-monotonic-milliseconds) 50.0))
     (define-values (n gaps) (allocate-until (lambda (now) (>= now deadline))))
     (check-true (positive? n))
-    (check-equal? (length gaps) (quotient n 4096))
+    (check-equal? (length gaps) (add1 (quotient n 4096)))
     (check-true (andmap (lambda (g) (>= g 0.0)) gaps)))
+
+  (test-case "a stall before main's first clock read is one of its pauses"
+    (define start (- (current-inexact-monotonic-milliseconds) 100.0))
+    (define-values (n gaps) (allocate-until (lambda (_now) #t) #:start start))
+    (check-equal? n 0)
+    (check-equal? (length gaps) 1)
+    (check-true (>= (car gaps) 100.0) (format "~a" gaps)))
 
   (test-case "a trip setting holds only inside its body"
     (define before (vm-eval '(collect-trip-bytes)))

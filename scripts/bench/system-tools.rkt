@@ -38,13 +38,14 @@
      (control 'wait)
      (and (zero? (control 'exit-code)) (string-trim text))]))
 
+(define (range-size part)
+  (match (regexp-match #px"^\\s*(\\d+)(?:-(\\d+))?\\s*$" part)
+    [(list _ _ #f) 1]
+    [(list _ lo hi) (add1 (- (string->number hi) (string->number lo)))]
+    [#f #f]))
+
 (define (affinity-count text)
-  (define ranges
-    (for/list ([part (in-list (string-split (or text "") ","))])
-      (match (regexp-match #px"^\\s*(\\d+)(?:-(\\d+))?\\s*$" part)
-        [(list _ _ #f) 1]
-        [(list _ lo hi) (add1 (- (string->number hi) (string->number lo)))]
-        [#f #f])))
+  (define ranges (map range-size (string-split (or text "") ",")))
   (and (pair? ranges) (andmap exact-positive-integer? ranges) (apply + ranges)))
 
 (module+ test
