@@ -27,6 +27,7 @@ line per case goes to standard error.
 | `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
 | `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
+| `--mix grain` | the op mix of `threads` and `pytorch-threads`: `small` (the default) or `grain` |
 | `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU. For `e2e`, the device every child must report: a child on another fails its variant with an `error` record naming both |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
 | `--full` | the examples' full settings instead of the short ones |
@@ -212,11 +213,33 @@ median, quartiles and IQR, and the load average before and after.
   their custodian (racket/racket#5614); `stopped` counts those that
   stopped in time. A worker that raises stops the others, and the run
   raises it, so the case fails rather than reporting fewer ops. Warmup
-  runs are not kept.
+  runs are not kept. `--mix grain` runs a mix above ATen's grain size
+  (`at::internal::GRAIN_SIZE`, 32768 elements) instead, a 256×256 matmul
+  and a 256×256 add, so each worker's ops start an OpenMP team of
+  `OMP_NUM_THREADS` threads, or of MKL's thread count where that is lower
+  (ATen sizes each thread's team by `mkl_get_max_threads`). The small mix's elementwise ops stay below
+  it, but its 64×64 matmul goes to MKL, which starts a team of its own, so
+  above one intra-op thread the small mix peaks with the grain mix. The
+  grain mix builds its tensors on its worker's first call, so the main
+  thread starts no team for it. A process's first run starts the
+  collector's sweeper threads, which Chez starts lazily and keeps, with
+  a collection over 32 allocating threads, so no run's peak counts one it
+  started. A run first waits (up to 2 s) for the process's OS
+  thread count to stop falling, since the last run's workers and their
+  teams take a moment to exit, and records it as `baseline_os_threads`. A
+  green thread on the main pool then counts the entries of
+  `/proc/self/task` every 100 ms of the run, and the row keeps the most it
+  saw over its rounds as `peak_os_threads` (both null without `/proc`, as
+  on macOS): a team per worker shows as a peak that grows with workers ×
+  intra-op threads. The
+  Racket process holds more OS threads of its own than Python's at one
+  worker, so read a side's peak down its column, not across the two.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
   count, released and counted the same way, and failing the same way. Its
   main loop drops the gradients (`zero_grad()`), as `zero-grads!` does.
+  It takes the same `--mix` and records the same baseline, and its
+  `peak_os_threads` counts its sampler, a Python thread, as one of them.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -307,10 +330,14 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 - **A. Per op against PyTorch** — `ops` facade and raw beside
   `pytorch-ops`, in µs per call, and their ratios, one table per device and
   thread count and invocation (`run_id`).
-- **B. Thread scaling** — ops per second at each thread count, each
+- **B. Thread scaling** — ops per second at each worker count, each
   implementation's ops over its own idle-main one-thread ops, rktorch over
-  PyTorch, and the main thread's steps per second, one table per thread
-  count and invocation (`run_id`). An idle row's ratio is
+  PyTorch, the main thread's steps per second, and each side's peak OS
+  threads, one table per intra-op thread count and invocation (`run_id`).
+  Each row names its mix and intra-op thread count, so the tables of the
+  `OMP_NUM_THREADS` passes read as an intra-op × workers grid; a row
+  recorded before the mix and the peak existed shows `small` and `-`. An
+  idle row's ratio is
   the speedup over one thread. A train row measures how far a training
   main slows the workers: rktorch's workers run their ops on their own OS
   threads, sharing only the collector with main, PyTorch's wait on the GIL.
@@ -352,13 +379,15 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   its batches (rktorch has no pinned memory, #307), `twin crops per image`
   on the `batched` rows, and `load L ≥ M` when a run of the pair ended
   with the one-minute load at or above `--max-load`. Its heading is the
-  host and run, not the device, so a split pair stays in one table; the
-  loader rows and the ResNet rows are two invocations, so two tables.
+  host, `OMP_NUM_THREADS` and run, not the device, so a split pair stays
+  in one table; the loader rows and the ResNet rows are two invocations,
+  so two tables.
 
 `scripts/bench/l0-baseline.sh` (unsets `OMP_NUM_THREADS` and
 `MKL_NUM_THREADS`) takes the baseline from the host shell, entering one dev
 shell at a time: in `nix develop`, A on the CPU at the default thread count
-and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
+and at `OMP_NUM_THREADS=1`, and B at one ATen thread on the small mix and
+at `OMP_NUM_THREADS` 1, 4 and 8 on the grain mix, one invocation each;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
@@ -366,8 +395,13 @@ default), 0.2 and 1; then, in the same shell, the `loader` stage writes
 the CIFAR-10 PNG tree under `BASELINE_CACHE` and runs H with
 `--device cuda`: `cifar-loader` at `WORKERS` 0, 1, 2, 4 and 8 and
 `cifar-resnet` at 0, 2 and 4, each `PIPELINE` `per-sample` and `batched`,
-beside their twins, with `PNG_DIGEST` set to the tree's. Every stage runs
-at libtorch's default thread count unless a pass or variant sets one. An
+beside their twins, with `PNG_DIGEST` set to the tree's. C and H run at
+`OMP_NUM_THREADS=1`, both sides: each rktorch worker on its own OS thread
+(`#:pool 'own`) would otherwise start its own OpenMP team, where
+PyTorch's DataLoader workers call `torch.set_num_threads(1)` (#533). C
+and H baselines taken before this ran at the default and are not
+comparable. Every other stage runs at libtorch's default thread count
+unless a pass or variant sets one. An
 example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
@@ -418,12 +452,16 @@ record adds each run's mean `epoch_gc_ms`, median `step_ms` and
 `host_ms`, its one-minute load (`run_loads`), the `--max-load` it ran
 under (`max_load`), and `reads`, the settings its runner reads. A twin's `meta` is the parent's
 with the child's `impl`, `python`, `libtorch` (the torch version),
-`device`, `threads` (`torch.get_num_threads`) and, for the e2e twins,
+`device`, `threads` (`torch.get_num_threads`), `omp_num_threads` and
+`mkl_num_threads` as the child saw them (null when unset, which H reads
+as rktorch's false) and, for the e2e twins,
 `optimizer` and `foreach` over it; torch's name for the GPU
 goes to `torch_gpu`, so `gpu` stays the parent's and a twin pairs with the
 rktorch records of its device. `scaling` records add `threads_run`,
-`main_steps_per_s` and `stopped` (one per round) and `settings` (`seconds`
-per round, `warmup` rounds); `host-gpu` step records add `gc_ms` per step,
+`main_steps_per_s` and `stopped` (one per round), `settings` (`seconds`
+per round, `warmup` rounds), `mix` (`small` or `grain`) and
+`peak_os_threads` and `baseline_os_threads` (the most over its rounds,
+null without `/proc`); `host-gpu` step records add `gc_ms` per step,
 one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and
