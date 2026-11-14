@@ -3,19 +3,13 @@
 (module+ test
   (require (only-in racket/match match-define)
            rackunit
-           (only-in "../main.rkt" zeros)
            (only-in "../nn.rkt"
-                    Parameter chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
-                    exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr param-group
-                    scheduler-rate sequential-lr sgd step-lr)
+                    chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
+                    exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr scheduler-rate
+                    sequential-lr step-lr)
            (only-in (submod "../nn/scheduler.rkt" private) closed-form-rates)
            (only-in "private/python-env.rkt" python-check python-torch-available?)
-           (only-in "private/scheduler-steps.rkt" stepped-reads))
-
-  (define (two-group-opt)
-    (sgd (list (param-group (list (Parameter (zeros 1))) #:lr 0.1)
-               (param-group (list (Parameter (zeros 1))) #:lr 0.02))
-         #:lr 0.1))
+           (only-in "private/scheduler-steps.rkt" stepped-reads two-group-opt))
 
   (define cases
     `((step ,(lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
@@ -72,7 +66,7 @@
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 4 #:t-mult 1 #:eta-min 0)))))
 
   (define (stepped make read)
-    (stepped-reads (make (two-group-opt)) read 12))
+    (stepped-reads (make (two-group-opt #:lr '(0.1 0.02))) read 12))
 
   (define (rates make)
     (stepped make (lambda (s) (list (scheduler-rate s #:group 0) (scheduler-rate s #:group 1)))))
