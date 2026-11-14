@@ -249,6 +249,7 @@
          grad-enabled?
          call-with-no-grad
          autocast-enabled?
+         autocast-cache-enabled?
          autocast-dtype
          call-with-autocast
          sub!

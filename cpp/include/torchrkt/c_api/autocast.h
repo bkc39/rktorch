@@ -24,6 +24,14 @@ int tr_is_autocast_enabled(tr_device_type type, int* out);
  * is float16 for CUDA and bfloat16 for the CPU). */
 int tr_autocast_dtype(tr_device_type type, tr_dtype* out);
 
+/* Whether autocast keeps the casts of leaf float32 weights that require grad
+ * for the rest of the extent, per calling thread and for every device type
+ * (torch.autocast's cache_enabled, default on). An in-place update of a
+ * weight inside the extent is not seen by its cached cast. */
+int tr_set_autocast_cache_enabled(int enabled);
+
+int tr_is_autocast_cache_enabled(int* out);
+
 #ifdef __cplusplus
 }
 #endif

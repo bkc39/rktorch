@@ -71,6 +71,8 @@ void torchrkt_c_api_compile_check(void) {
       tr_set_autocast_enabled;
   int (*is_autocast_enabled)(tr_device_type, int*) = tr_is_autocast_enabled;
   int (*autocast_dtype)(tr_device_type, tr_dtype*) = tr_autocast_dtype;
+  int (*set_autocast_cache_enabled)(int) = tr_set_autocast_cache_enabled;
+  int (*is_autocast_cache_enabled)(int*) = tr_is_autocast_cache_enabled;
   int (*tensor_dtype)(const tr_tensor*, tr_dtype*) = tr_tensor_dtype;
   int (*copy_data_i64)(const tr_tensor*, uint64_t, int64_t*, uint64_t*) =
       tr_tensor_copy_data_i64;
@@ -341,6 +343,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)set_autocast_enabled;
   (void)is_autocast_enabled;
   (void)autocast_dtype;
+  (void)set_autocast_cache_enabled;
+  (void)is_autocast_cache_enabled;
   (void)hann_window;
   (void)stft;
   (void)audio_info;

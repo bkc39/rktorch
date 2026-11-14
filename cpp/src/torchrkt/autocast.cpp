@@ -86,4 +86,19 @@ int tr_autocast_dtype(tr_device_type type, tr_dtype* out) {
   });
 }
 
+int tr_set_autocast_cache_enabled(int enabled) {
+  return torchrkt::status_call("tr_set_autocast_cache_enabled", [&] {
+    at::autocast::set_autocast_cache_enabled(enabled != 0);
+  });
+}
+
+int tr_is_autocast_cache_enabled(int* out) {
+  if (!out) {
+    return torchrkt::null_arg_status("tr_is_autocast_cache_enabled");
+  }
+  return torchrkt::status_call("tr_is_autocast_cache_enabled", [&] {
+    *out = at::autocast::is_autocast_cache_enabled() ? 1 : 0;
+  });
+}
+
 }  // extern "C"

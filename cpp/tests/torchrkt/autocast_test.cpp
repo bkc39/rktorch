@@ -86,4 +86,17 @@ TEST(TorchrktAutocast, RejectsNonHalfDtypesAndBadArguments) {
   EXPECT_EQ(tr_autocast_dtype(TR_DEVICE_CPU, nullptr), 1);
 }
 
+TEST(TorchrktAutocast, CacheFlagOnByDefaultAndSettable) {
+  int on = -1;
+  ASSERT_EQ(tr_is_autocast_cache_enabled(&on), 0) << tr_last_error();
+  EXPECT_EQ(on, 1);
+  ASSERT_EQ(tr_set_autocast_cache_enabled(0), 0) << tr_last_error();
+  ASSERT_EQ(tr_is_autocast_cache_enabled(&on), 0);
+  EXPECT_EQ(on, 0);
+  ASSERT_EQ(tr_set_autocast_cache_enabled(1), 0) << tr_last_error();
+  ASSERT_EQ(tr_is_autocast_cache_enabled(&on), 0);
+  EXPECT_EQ(on, 1);
+  EXPECT_EQ(tr_is_autocast_cache_enabled(nullptr), 1);
+}
+
 }  // namespace

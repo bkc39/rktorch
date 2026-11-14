@@ -109,9 +109,10 @@ choice for inference and storage.
   (step! opt))
 ]
 
-@defform[(with-autocast maybe-device maybe-dtype body ...+)
+@defform[(with-autocast maybe-device maybe-dtype maybe-cache body ...+)
          #:grammar [(maybe-device (code:line) (code:line #:device device))
-                    (maybe-dtype (code:line) (code:line #:dtype dtype))]]{
+                    (maybe-dtype (code:line) (code:line #:dtype dtype))
+                    (maybe-cache (code:line) (code:line #:cache-enabled? cache?))]]{
 Runs the body with autocast on for @racket[device], which is a device type
 or a @racket[device?] value and defaults to the default device, in
 @racket[dtype]. Without @racket[#:dtype] it is @racket['bfloat16], or
@@ -125,12 +126,20 @@ the extent. Threads of a shared parallel thread pool share that of the pool
 thread running them. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
+
+With @racket[cache?], @racket[#t] by default as in torch, each float32 leaf
+weight that requires grad is cast once and the cast reused for the rest of
+the extent, so a weight updated in place inside the body, by
+@racket[step!] say, reaches later ops at its old value; pass @racket[#f] to
+cast it afresh each time. The flag is the thread's for every device type,
+and leaving the body restores it.
 }
 
 @defproc[(call-with-autocast [thunk (-> any)]
                              [#:device device (or/c 'cpu 'cuda 'mps device?)
                               (default-device)]
-                             [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16])
+                             [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16]
+                             [#:cache-enabled? cache? boolean? #t])
          any]{
 The procedure form of @racket[with-autocast], with its default dtype: the
 @racket['bfloat16] shown becomes @racket['float16] on a CUDA device
@@ -142,6 +151,12 @@ The procedure form of @racket[with-autocast], with its default dtype: the
 Whether autocast is on for @racket[device] in the calling thread's state,
 which a thread made with @racket[#:pool 'own] keeps for itself and other
 threads share as @racket[with-autocast] describes.
+}
+
+@defproc[(autocast-cache-enabled?) boolean?]{
+Whether autocast reuses its weight casts within an extent in the calling
+thread, as @racket[with-autocast]'s @racket[#:cache-enabled?] sets it;
+@racket[#t] outside every extent.
 }
 
 @defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])

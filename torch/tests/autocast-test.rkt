@@ -51,6 +51,34 @@
                    (error 'test "escaped"))))
     (check-false (autocast-enabled? 'cpu) "an exception still restores"))
 
+  (define (cast-after-update cache?)
+    (define w (requires-grad! (tensor '((1.0 0.0) (0.0 1.0)))))
+    (define x (tensor '((1.0 2.0))))
+    (with-autocast #:device 'cpu #:cache-enabled? cache?
+      (@ x w)
+      (with-no-grad (copy! w (tensor '((2.0 0.0) (0.0 2.0)))))
+      (tensor->list (@ x w))))
+
+  (test-case "G3 H1: the cast cache serves a stale weight unless #:cache-enabled? is #f"
+    (check-true (autocast-cache-enabled?))
+    (check-equal? (cast-after-update #t) '(1.0 2.0) "torch's cache keys by tensor")
+    (check-equal? (cast-after-update #f) '(2.0 4.0))
+    (check-true (autocast-cache-enabled?)))
+
+  (test-case "G3 H1: with-autocast restores the cache flag, even on escape"
+    (with-autocast #:device 'cpu #:cache-enabled? #f
+      (check-false (autocast-cache-enabled?))
+      (with-autocast #:device 'cpu
+        (check-true (autocast-cache-enabled?)))
+      (check-false (autocast-cache-enabled?) "the outer flag is back"))
+    (check-exn #rx"escaped"
+               (lambda ()
+                 (with-autocast #:device 'cpu #:cache-enabled? #f
+                   (error 'test "escaped"))))
+    (check-true (autocast-cache-enabled?) "an exception still restores")
+    (check-exn exn:fail:contract?
+               (lambda () (with-autocast #:device 'cpu #:cache-enabled? 'no 1))))
+
   (test-case "call-with-autocast takes a device struct and a thunk"
     (define out
       (call-with-autocast (lambda () (@ (ones 2 2) (ones 2 2)))
