@@ -1,14 +1,15 @@
 import time
 import unittest
 
-from op_cost import stack_inputs, thread_loop
+from common import GcClock
+from op_cost import sample, stack_inputs, thread_loop
 from pipelines import peak_rss_mb
 
 
 class ThreadLoop(unittest.TestCase):
     def test_counts_only_the_steps_the_window_finished(self):
         step_s = 0.1
-        ops, elapsed = thread_loop(1, lambda: lambda: time.sleep(step_s), 0.25)
+        ops, elapsed, _cpu = thread_loop(1, lambda: lambda: time.sleep(step_s), 0.25)
         self.assertGreaterEqual(ops, 1)
         self.assertLessEqual(ops * step_s, elapsed, (ops, elapsed))
 
@@ -37,6 +38,37 @@ class ThreadLoop(unittest.TestCase):
         thread_loop(3, make_step, 0.1)
         self.assertEqual(len(cases), 3)
         self.assertTrue(all(cases), [len(c) for c in cases])
+
+
+def burn(seconds):
+    t0 = time.process_time()
+    while time.process_time() - t0 < seconds:
+        pass
+
+
+class Sample(unittest.TestCase):
+    def test_records_process_cpu_per_op_beside_wall_time(self):
+        def step():
+            return sum(range(10000))
+
+        t0 = time.process_time()
+        for _ in range(200):
+            step()
+        step_cpu_us = 1e6 * (time.process_time() - t0) / 200
+        record = sample("scalar-add", 0, step, lambda: step, 0.05, GcClock())
+        us, cpu_us = record["us_per_op"], record["cpu_us_per_op"]
+        self.assertGreater(us, 0)
+        self.assertLessEqual(cpu_us, 1.5 * us, record)
+        self.assertLessEqual(0.5 * step_cpu_us, cpu_us, (step_cpu_us, record))
+        self.assertLessEqual(cpu_us, 1.5 * step_cpu_us, (step_cpu_us, record))
+
+    def test_threaded_cpu_leaves_out_building_the_steps(self):
+        def make_step():
+            burn(0.2)
+            return lambda: time.sleep(0.001)
+
+        record = sample("scalar-add", 1, None, make_step, 0.05, GcClock())
+        self.assertLess(record["cpu_us_per_op"] * record["ops"] / 1e6, 0.15, record)
 
 
 class StackInputs(unittest.TestCase):

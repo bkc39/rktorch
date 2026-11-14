@@ -57,13 +57,15 @@ OPS = {"scalar-add": scalar_add, "add-8x8": add_8x8, "zeros-8x8": zeros_8x8,
 
 
 def main_loop(step, seconds):
+    cpu0 = time.process_time()
     t0 = time.perf_counter()
     deadline = t0 + seconds
     n = 0
     while time.perf_counter() < deadline:
         step()
         n += 1
-    return n, time.perf_counter() - t0
+    elapsed = time.perf_counter() - t0
+    return n, elapsed, time.process_time() - cpu0
 
 
 def thread_loop(n, make_step, seconds):
@@ -90,31 +92,34 @@ def thread_loop(n, make_step, seconds):
     workers = [threading.Thread(target=work, args=(i,)) for i in range(n)]
     for w in workers:
         w.start()
+    cpu0 = time.process_time()
     t0 = time.perf_counter()
     go.set()
     stop.wait(seconds)
     stop.set()
     elapsed = time.perf_counter() - t0
+    cpu = time.process_time() - cpu0
     ops = sum(counts)
     for w in workers:
         w.join()
     if errors:
         raise errors[0]
-    return ops, elapsed
+    return ops, elapsed, cpu
 
 
 def load():
     return list(os.getloadavg())
 
 
-def sample(op, threads, step, seconds, gc_clock):
+def sample(op, threads, step, make_step, seconds, gc_clock):
     gc0 = gc_clock.ms()
     run_load = load()
-    ops, elapsed = (main_loop(step, seconds) if threads == 0
-                    else thread_loop(threads, OPS[op], seconds))
+    ops, elapsed, cpu = (main_loop(step, seconds) if threads == 0
+                         else thread_loop(threads, make_step, seconds))
     return {"kind": "op", "impl": "pytorch", "op": op, "layer": "facade", "threads": threads,
             "ops": ops, "elapsed_ms": 1000.0 * elapsed,
             "us_per_op": 1e6 * elapsed * max(1, threads) / ops if ops else None,
+            "cpu_us_per_op": 1e6 * cpu / ops if ops else None,
             "ops_per_s": ops / elapsed, "heap_bytes_per_op": None,
             "gc_ms": gc_clock.ms() - gc0, "load": run_load}
 
@@ -136,7 +141,8 @@ def main():
     conditions = [(op, n) for n in threads for op in steps]
     k = args.rep % len(conditions)
     for op, n in conditions[k:] + conditions[:k]:
-        record = sample(op, n, steps[op], args.seconds if n == 0 else args.thread_seconds, gc_clock)
+        record = sample(op, n, steps[op], OPS[op],
+                        args.seconds if n == 0 else args.thread_seconds, gc_clock)
         record["rep"] = args.rep
         emit(record)
 
