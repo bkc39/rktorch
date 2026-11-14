@@ -216,11 +216,15 @@ median, quartiles and IQR, and the load average before and after.
   runs are not kept. `--mix grain` runs a mix above ATen's grain size
   (`at::internal::GRAIN_SIZE`, 32768 elements) instead, a 256×256 matmul
   and a 256×256 add, so each worker's ops start an OpenMP team of
-  `OMP_NUM_THREADS` threads. The small mix's elementwise ops stay below
+  `OMP_NUM_THREADS` threads, or of MKL's thread count where that is lower
+  (ATen sizes each thread's team by `mkl_get_max_threads`). The small mix's elementwise ops stay below
   it, but its 64×64 matmul goes to MKL, which starts a team of its own, so
   above one intra-op thread the small mix peaks with the grain mix. The
   grain mix builds its tensors on its worker's first call, so the main
-  thread starts no team for it. A run first waits (up to 2 s) for the process's OS
+  thread starts no team for it. A process's first run starts the
+  collector's sweeper threads, which Chez starts lazily and keeps, with
+  a collection over 32 allocating threads, so no run's peak counts one it
+  started. A run first waits (up to 2 s) for the process's OS
   thread count to stop falling, since the last run's workers and their
   teams take a moment to exit, and records it as `baseline_os_threads`. A
   green thread on the main pool then counts the entries of
