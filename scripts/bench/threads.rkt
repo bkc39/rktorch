@@ -67,6 +67,40 @@
 (define (peak-of counts)
   (and (andmap values counts) (apply max counts)))
 
+;; Chez's collector starts a sweeper OS thread, up to 16, when more threads
+;; wait on a collection than it has sweepers, and keeps it for the life of the
+;; process; priming past a run's threads keeps the run from starting any.
+(define sweeper-spinners 32)
+
+(define (collect-with-allocating-threads! k)
+  (define started (make-semaphore 0))
+  (define stop? (box #f))
+  (define spinners
+    (for/list ([_ (in-range k)])
+      (thread (lambda ()
+                (define sink (box #f))
+                (semaphore-post started)
+                (let loop ()
+                  (unless (unbox stop?)
+                    (set-box! sink (make-vector 16))
+                    (loop))))
+              #:pool 'own)))
+  (dynamic-wind void
+                (lambda ()
+                  (for ([_ (in-range k)]) (semaphore-wait started))
+                  (collect-garbage 'major))
+                (lambda ()
+                  (set-box! stop? #t)
+                  (for-each thread-wait spinners))))
+
+(define (start-collector-sweepers! tasks)
+  (let loop ([before (settled-thread-count tasks)] [rounds 4])
+    (collect-with-allocating-threads! sweeper-spinners)
+    (define after (settled-thread-count tasks))
+    (if (or (equal? after before) (zero? rounds)) after (loop after (sub1 rounds)))))
+
+(define collector-sweepers (delay (start-collector-sweepers! task-dir)))
+
 (define (call-with-peak-sampler proc #:tasks [tasks task-dir] #:interval [interval sample-interval])
   (define peak (box (os-thread-count tasks)))
   (define (sample!) (set-box! peak (peak-of (list (unbox peak) (os-thread-count tasks)))))
@@ -160,6 +194,7 @@
                      #:ops-per-mix [ops-per-mix ops-per-iteration]
                      #:probe [probe void]
                      #:tasks [tasks task-dir])
+  (force collector-sweepers)
   (define baseline (settled-thread-count tasks))
   (define-values (run stopped)
     (call-with-workers
@@ -317,14 +352,21 @@
   (define-runtime-path harness-module "harness.rkt")
   (define-runtime-path threads-module "threads.rkt")
 
-  (define (counts-under omp mixes rounds)
+  (define (counts-under omp mixes rounds #:mkl [mkl #f])
     (define env (environment-variables-copy (current-environment-variables)))
     (environment-variables-set! env #"OMP_NUM_THREADS" (string->bytes/utf-8 (number->string omp)))
-    (environment-variables-set! env #"MKL_NUM_THREADS" #f)
+    (environment-variables-set! env #"MKL_NUM_THREADS" (and mkl (string->bytes/utf-8 (number->string mkl))))
     (define program
       `(begin
-         (require (only-in (file ,(path->string harness-module)) measure)
+         (require (only-in ffi/unsafe _fun _int get-ffi-obj)
+                  (only-in torch/foreign/raw/native-library native-library)
+                  (only-in (file ,(path->string harness-module)) measure)
                   (only-in (file ,(path->string threads-module)) scaling-cases))
+         (define (worker-team)
+           (define team (box #f))
+           (define at-threads (get-ffi-obj "_ZN2at15get_num_threadsEv" native-library (_fun -> _int)))
+           (thread-wait (thread (lambda () (set-box! team (at-threads))) #:pool 'own))
+           (unbox team))
          (define (counts mix)
            (define runs '())
            (measure (scaling-cases #:seconds 0.5 #:threads '(2) #:states '(idle) #:mix mix
@@ -332,7 +374,7 @@
                     #:warmup 0 #:rounds ,rounds #:load void)
            (for/list ([run (in-list (reverse runs))])
              (list (hash-ref run 'baseline_os_threads) (hash-ref run 'peak_os_threads))))
-         (write (map counts ',mixes))))
+         (write (cons (worker-team) (map counts ',mixes)))))
     (define ok? #f)
     (define out
       (parameterize ([current-environment-variables env])
@@ -344,19 +386,36 @@
     (read (open-input-string out)))
 
   (when (directory-exists? "/proc/self/task")
-    (test-case "a run's peak counts each worker's intra-op team"
+    (test-case "a process's first run starts the collector sweepers a run's threads would"
+      (call-with-process-deadline
+       120
+       (lambda ()
+         (scaling-run 1 'idle #:seconds 0.1)
+         (define before (settled-thread-count task-dir))
+         (collect-with-allocating-threads! (apply max thread-counts))
+         (check-equal? (settled-thread-count task-dir) before))))
+
+    (test-case "a run's peak counts each worker's intra-op team, as ATen sizes it"
       (call-with-process-deadline
        300
        (lambda ()
-         (match-define (list (list (list _ one))) (counts-under 1 '(grain) 1))
-         (match-define (list (list (list _ four))) (counts-under 4 '(grain) 1))
-         (check-true (>= four (+ one 3)) (format "OMP 1: ~a, OMP 4: ~a" one four)))))
+         (define (added omp #:mkl [mkl #f])
+           (match-define (list team (list (list base peak))) (counts-under omp '(grain) 1 #:mkl mkl))
+           (values team (- peak base)))
+         (define-values (team₁ one) (added 1))
+         (check-equal? team₁ 1)
+         (for ([mkl (in-list '(#f 2))])
+           (define-values (team four) (added 4 #:mkl mkl))
+           (define seen (format "MKL ~a: team ~a, added ~a at OMP 1, ~a at OMP 4" mkl team one four))
+           (if (< team 2)
+               (printf "[threads] team check skipped: ~a\n" seen)
+               (check-true (>= four (+ one (* 2 (sub1 team)))) seen))))))
 
     (test-case "back-to-back runs start from the same threads and peak alike"
       (call-with-process-deadline
        300
        (lambda ()
-         (match-define (list (list (list base₁ peak₁) (list base₂ peak₂)))
+         (match-define (list _ (list (list base₁ peak₁) (list base₂ peak₂)))
            (counts-under 4 '(grain) 2))
          (define seen (format "~a then ~a" (list base₁ peak₁) (list base₂ peak₂)))
          (check-true (<= (abs (- base₂ base₁)) 1) seen)
