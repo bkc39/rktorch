@@ -28,6 +28,7 @@ jobs:
   claude-review:
     if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # full history: the incremental range and the base branch must resolve
       - uses: actions/checkout@v5

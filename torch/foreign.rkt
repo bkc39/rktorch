@@ -19,7 +19,8 @@
                   accelerator-if-available mps-if-available)
          (except-in "foreign/creation-ops.rkt" tensor zeros)
          (submod "foreign/creation-ops.rkt" checked)
-         (except-in "foreign/generator.rkt" generator-on?)
+         (except-in "foreign/generator.rkt"
+                    check-generator-on! generator-on? uniform-range?)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
@@ -34,6 +35,7 @@
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
          "foreign/autocast.rkt"
+         "foreign/switches.rkt"
          (submod "foreign/slice.rkt" checked))
 
 (provide ref ref! with-no-grad with-autocast with-default-device)
@@ -48,6 +50,7 @@
          randn
          rand
          uniform!
+         normal!
          tensor?
          exn:fail:rktorch:oom?
          tensor-shape
@@ -76,6 +79,10 @@
          randperm
          draw-seed
          current-generator
+         rng-state
+         set-rng-state!
+         generator-state
+         set-generator-state!
          seed/c
          size/c
          arange
@@ -249,6 +256,19 @@
          autocast-enabled?
          autocast-dtype
          call-with-autocast
+         use-deterministic-algorithms!
+         deterministic-algorithms-enabled?
+         deterministic-algorithms-warn-only?
+         cudnn-deterministic?
+         set-cudnn-deterministic!
+         cudnn-benchmark?
+         set-cudnn-benchmark!
+         set-float32-matmul-precision!
+         float32-matmul-precision
+         cuda-matmul-allow-tf32?
+         set-cuda-matmul-allow-tf32!
+         cudnn-allow-tf32?
+         set-cudnn-allow-tf32!
          sub!
          zero!
          mul!
