@@ -10,7 +10,7 @@
          (only-in racket/string string-join string-prefix? string-split string-trim)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
-         (only-in "system-tools.rkt" command-output))
+         (only-in "system-tools.rkt" affinity-count command-output))
 
 (provide bench-case
          bench-case?
@@ -263,6 +263,7 @@
   (define status (git "status" "--porcelain" "--untracked-files=no"))
   (define threads (thread-setting #:aten aten #:omp (getenv "OMP_NUM_THREADS")
                                   #:mkl (getenv "MKL_NUM_THREADS") #:cores (processor-count)))
+  (define affinity (proc-field "/proc/self/status" "Cpus_allowed_list"))
   (hasheq 'git_sha (or sha "unknown")
           'git_dirty (and status (positive? (string-length status)))
           'racket (string-append (version) " " (symbol->string (system-type 'vm)))
@@ -281,7 +282,8 @@
           'cores (processor-count)
           'cpu (or (proc-field "/proc/cpuinfo" "model name")
                    (command-output "sysctl" "-n" "machdep.cpu.brand_string"))
-          'affinity (proc-field "/proc/self/status" "Cpus_allowed_list")
+          'affinity affinity
+          'affinity_cpus (affinity-count affinity)
           'host (command-output "hostname")
           'os (~a (system-type 'os*) "-" (system-type 'arch))))
 
@@ -480,6 +482,7 @@
     (check-equal? (hash-ref meta 'device) "cpu")
     (check-false (hash-ref meta 'gpu))
     (check-true (exact-positive-integer? (hash-ref meta 'threads)))
+    (check-equal? (hash-ref meta 'affinity_cpus) (affinity-count (hash-ref meta 'affinity)))
     (check-equal? (hash-ref (host-meta #:device 'cuda #:libtorch "x") 'device) "cuda")
     (define r (result 'add 100 '(0.001 0.002 0.003) '(0 1 0) '((1.0 1.0 1.0) #f)))
     (define line
