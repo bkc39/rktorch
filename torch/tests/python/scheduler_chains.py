@@ -3,7 +3,8 @@
 optimizer-then-scheduler steps, for each shape the Racket schedulers
 implement, chains, sequences and warm restarts, including sequences that
 start a warm restart or a lambda at a milestone, ones that start on a chain
-or on a sequence, and one with unsorted milestones (G2-L1). Under "groups",
+or on a sequence, one with unsorted milestones, one with a milestone at 0,
+and ones handed a warm restart already stepped once (G2-L1). Under "groups",
 the seven single shapes' _get_closed_form_lr() at each of those steps, or
 get_last_lr() where torch has no closed form (G1-L10). The Racket twin is scheduler-parity-test.rkt.
 """
@@ -42,6 +43,11 @@ def closed(sched):
     if hasattr(sched, "_get_closed_form_lr"):
         return sched._get_closed_form_lr()
     return sched.get_last_lr()
+
+
+def stepped_once(sched):
+    sched.step()
+    return sched
 
 
 shapes = {
@@ -85,6 +91,15 @@ composites = {
     "sequential_unsorted_milestones": lambda o: S.SequentialLR(
         o, [S.ExponentialLR(o, gamma=0.5), S.StepLR(o, step_size=100),
             S.LinearLR(o, start_factor=0.5, total_iters=2)], milestones=[4, 2]),
+    "sequential_milestone_zero": lambda o: S.SequentialLR(
+        o, [S.LinearLR(o, start_factor=0.25, end_factor=1.0, total_iters=4),
+            S.ExponentialLR(o, gamma=0.9)], milestones=[0]),
+    "sequential_stepped_warm_restarts": lambda o: S.SequentialLR(
+        o, [S.ExponentialLR(o, gamma=0.9),
+            stepped_once(S.CosineAnnealingWarmRestarts(o, T_0=4))], milestones=[2]),
+    "sequential_stepped_warm_restarts_first": lambda o: S.SequentialLR(
+        o, [S.ExponentialLR(o, gamma=0.9),
+            stepped_once(S.CosineAnnealingWarmRestarts(o, T_0=4))], milestones=[0]),
     "warm_restarts_3_2": lambda o: S.CosineAnnealingWarmRestarts(
         o, T_0=3, T_mult=2, eta_min=0.01),
     "warm_restarts_4_1": lambda o: S.CosineAnnealingWarmRestarts(

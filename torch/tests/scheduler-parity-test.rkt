@@ -6,10 +6,14 @@
            (only-in "../nn.rkt"
                     chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
                     exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr scheduler-rate
-                    sequential-lr step-lr)
+                    sequential-lr step! step-lr)
            (only-in (submod "../nn/scheduler.rkt" private) closed-form-rates)
            (only-in "private/python-env.rkt" python-check python-torch-available?)
            (only-in "private/scheduler-steps.rkt" stepped-reads two-group-opt))
+
+  (define (stepped-once s)
+    (step! s)
+    s)
 
   (define cases
     `((step ,(lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
@@ -60,6 +64,21 @@
                                            (step-lr o #:step-size 100)
                                            (linear-lr o #:start-factor 0.5 #:total-iters 2))
                                    #:milestones '(4 2))))
+      (sequential_milestone_zero
+       ,(lambda (o) (sequential-lr
+                     o (list (linear-lr o #:start-factor 0.25 #:end-factor 1.0 #:total-iters 4)
+                             (exponential-lr o #:gamma 0.9))
+                     #:milestones '(0))))
+      (sequential_stepped_warm_restarts
+       ,(lambda (o) (sequential-lr
+                     o (list (exponential-lr o #:gamma 0.9)
+                             (stepped-once (cosine-annealing-warm-restarts o #:t-0 4)))
+                     #:milestones '(2))))
+      (sequential_stepped_warm_restarts_first
+       ,(lambda (o) (sequential-lr
+                     o (list (exponential-lr o #:gamma 0.9)
+                             (stepped-once (cosine-annealing-warm-restarts o #:t-0 4)))
+                     #:milestones '(0))))
       (warm_restarts_3_2
        ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 3 #:t-mult 2 #:eta-min 0.01)))
       (warm_restarts_4_1
