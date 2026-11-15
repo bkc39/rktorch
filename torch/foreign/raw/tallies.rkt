@@ -5,11 +5,14 @@
          (only-in racket/list filter-not)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
+         (only-in "phantoms.rkt"
+                  fresh-phantoms note-young! sync-phantoms! young-epoch?)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
          counters-live counters-entries counters-since-check counters-since-sample
+         note-counters-live!
          note-counters-mark!
          forget-mark!
          pending-of
@@ -22,7 +25,7 @@
          flush-tallies!)
 
 (module+ private
-  (provide own-pending registered-tallies tally-count tally-limit tally-owner))
+  (provide counters-phantoms own-pending registered-tallies tally-count tally-limit tally-owner))
 
 (define-syntax-parse-rule (tally-add! b:expr n:expr)
   (cas-add! b n #:site 'tally))
@@ -33,14 +36,25 @@
 (define-syntax-parse-rule (tally-update! b:expr f:expr)
   (cas-update! b f #:site 'tally))
 
-(struct counters (index live entries since-check since-sample [limit #:mutable]))
+(struct counters (index live entries since-check since-sample phantoms [limit #:mutable]))
 
 (define counted (box 0))
 
 (define (fresh-counters)
-  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) #f))
+  (counters (sub1 (cas-add! counted 1)) (box 0) (box 0) (box 0) (box 0) (fresh-phantoms) #f))
 
-(struct pending (tally counters live entries since-check since-sample))
+(define (sync-counters-phantoms! c)
+  (sync-phantoms! (counters-phantoms c) (counters-live c)))
+
+(define (note-counters-live! c nbytes young epoch)
+  (cas-add! (counters-live c) nbytes)
+  (note-young! (counters-phantoms c) young epoch)
+  (with-uninterruptible
+    (sync-counters-phantoms! c)))
+
+(struct pending (tally counters live entries since-check since-sample young young-epoch))
+
+(define unheld (make-weak-box #f))
 
 (struct tally (owner slots [ops #:mutable] moving))
 
@@ -113,7 +127,7 @@
 (define (pending-of c)
   (define t (own-tally))
   (or (slot-of t c)
-      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0))])
+      (let ([p (pending t c (box 0) (box 0) (box 0) (box 0) (box 0) (box unheld))])
         (tally-update! (tally-slots t)
                        (lambda (slots) (with-slot slots (counters-index c) p)))
         p)))
@@ -138,9 +152,28 @@
 (define (tally-staleness c)
   (* 2 (tally-count) (limit-of c)))
 
-(define (tally-live! p nbytes entries)
+(define (tally-live! p nbytes entries young [epoch unheld])
   (tally-add! (pending-live p) nbytes)
-  (tally-add! (pending-entries p) entries))
+  (tally-add! (pending-entries p) entries)
+  (unless (eqv? 0 young)
+    (gather-young! p young epoch)))
+
+(define (clamp n)
+  (max 0 n))
+
+(define (gather-young! p young epoch)
+  (define held (pending-young-epoch p))
+  (define tag (unbox held))
+  (cond
+    [(eq? epoch tag) (tally-add! (pending-young p) young)]
+    [(young-epoch? tag) (tally-add! (pending-young p) (clamp young))]
+    [else
+     (tally-update! (pending-young p) clamp)
+     (race-point young-clamped p)
+     (memory-order-release)
+     (set-box! held epoch)
+     (race-point young-retagged p)
+     (tally-add! (pending-young p) young)]))
 
 (define (tally-checked! p nbytes)
   (tally-add! (pending-since-check p) nbytes)
@@ -158,23 +191,39 @@
      (flush! t)]
     [else (set-tally-ops! t ops)]))
 
-(define (move! t from to)
-  (unless (eqv? 0 (unbox from))
-    (define taken (tally-take! from))
-    (race-point tally-moving t)
-    (cas-add! to taken)))
+(define (take! from)
+  (if (eqv? 0 (unbox from)) 0 (tally-take! from)))
 
-(define (flush! t)
+(define (take-young! p)
+  (define held (unbox (pending-young-epoch p)))
+  (memory-order-acquire)
+  (define n (take! (pending-young p)))
+  (values held (if (young-epoch? held) n (clamp n))))
+
+(define (move! t from to)
+  (define n (take! from))
+  (unless (eqv? 0 n)
+    (race-point tally-moving t)
+    (cas-add! to n))
+  n)
+
+(define (flush! t #:sync-all? [sync-all? #f])
   (define moving (tally-moving t))
   (with-uninterruptible
-    (tally-add! moving 1)
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
       (define c (pending-counters p))
-      (move! t (pending-live p) (counters-live c))
+      (tally-add! moving 1)
+      (define live (move! t (pending-live p) (counters-live c)))
+      (define-values (held young) (take-young! p))
       (move! t (pending-entries p) (counters-entries c))
       (move! t (pending-since-check p) (counters-since-check c))
-      (move! t (pending-since-sample p) (counters-since-sample c)))
-    (tally-add! moving -1)
+      (move! t (pending-since-sample p) (counters-since-sample c))
+      (race-point young-taken p)
+      (note-young! (counters-phantoms c) young held)
+      (tally-add! moving -1)
+      (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
+      (unless quiet?
+        (sync-counters-phantoms! c)))
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))
 
@@ -199,7 +248,7 @@
     (define gone? (prunable? (tally-owner t) ask?))
     (race-point tally-judged t)
     (when (or every? gone?)
-      (flush! t)
+      (flush! t #:sync-all? every?)
       (landed! t))
     (if gone? (cons t dead) dead)))
 

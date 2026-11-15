@@ -4,21 +4,26 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../foreign/device-type.rkt" device)
          (only-in "../../foreign/raw/accounts.rkt" account-of note-mark!)
-         (only-in (submod "../../foreign/raw/accounts.rkt" private) accounts raw-live)
+         (only-in (submod "../../foreign/raw/accounts.rkt" private)
+                  account-counters accounts raw-live)
          (only-in "../../foreign/raw/cas.rkt" cas-update!)
          (only-in "../../foreign/raw/memory.rkt" record-allocation! unaccount!)
+         (only-in (submod "../../foreign/raw/phantoms.rkt" private) phantom-bytes)
          (only-in "../../foreign/raw/tallies.rkt" flush-tallies! flush-tally!)
          (only-in (submod "../../foreign/raw/tallies.rkt" private)
-                  registered-tallies tally-owner)
+                  counters-phantoms registered-tallies tally-owner)
          (only-in "race-harness.rkt" join spawn with-race-hook worker-thread))
 
-(provide kib
+(provide charged
+         kib
          mib
          mark
+         phantoms-of
          shared-live
          tally-of-thread
          with-batched-device
          with-unmarked-device
+         young-charged
          unaccount-all!
          charging
          with-parked
@@ -31,6 +36,17 @@
 (define mark (* 512 mib))
 
 (define (shared-live dev) (raw-live (account-of dev)))
+
+(define (phantoms-of dev)
+  (counters-phantoms (account-counters (account-of dev))))
+
+(define (charged dev)
+  (define-values (old young) (phantom-bytes (phantoms-of dev)))
+  (+ old young))
+
+(define (young-charged dev)
+  (define-values (_old young) (phantom-bytes (phantoms-of dev)))
+  young)
 
 (define (tally-of-thread th)
   (memf (lambda (t) (eq? (weak-box-value (tally-owner t)) th)) (registered-tallies)))
