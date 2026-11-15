@@ -977,11 +977,13 @@ optimizer.
          scheduler?]{
 @tt{SequentialLR}: the i-th schedule runs from milestone i−1; at a milestone
 the next starts from its own step 0. The milestones are searched as
-@tt{bisect_right} searches them, unsorted ones included. Every schedule wraps
+@tt{bisect_right} searches them, unsorted ones included, so the schedule a
+milestone of 0 selects takes the construction step. Every schedule wraps
 @racket[opt], which is not itself a schedule, and there is one milestone fewer
-than schedules. A chained or sequential schedule has no step 0 to restart
-at, so one placed after the first raises at its milestone, as @tt{step(0)}
-does in PyTorch.
+than schedules. A warm restart keeps the phase it had reached, as
+@tt{_update_lr(0)} does in PyTorch. A chained or sequential schedule has no
+step 0 to restart at, so one placed after the first raises at its milestone,
+as PyTorch's does.
 
 @torch-examples[
 (define opt (sgd (list (Parameter (zeros 1))) #:lr 0.1))
