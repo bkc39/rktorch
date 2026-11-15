@@ -22,7 +22,7 @@
 
 (module+ test
   (require (only-in racket/file file->value)
-           (only-in racket/list append-map count fourth last)
+           (only-in racket/list append-map count fifth fourth last second third)
            (only-in racket/match match match-define)
            (only-in racket/math exact-ceiling)
            (only-in racket/runtime-path #%datum define-runtime-path)
@@ -40,7 +40,8 @@
            (only-in torch/vision/fashion-mnist load-fashion-mnist-fixture)
            (only-in "private/lightning-trace.rkt"
                     compare-trace flat-state lightning-name trace-callback trace-labels
-                    trace-gaps trace-logger trace-lrs trace-losses trace-norms trace-recorder)
+                    trace-gaps trace-logger trace-lrs trace-losses trace-norms trace-recorder
+                    trace-rows)
            (only-in "../../scripts/fashion-mnist-results.rkt" fashion-mnist-record))
 
   (define-runtime-path bundle-path "../../torch/scribblings/results/fashion-mnist.rktd")
@@ -56,12 +57,13 @@
     (define tr (trace-recorder))
     (define stepping (box #f))
     (define (note-total! r) (set-box! stepping (run-estimated-stepping-batches r)))
+    (define-values (recorder rows) (epoch-recorder))
     (define-values (r classifier)
       (run-example #:device device #:precision precision #:epochs epochs
-                   #:callbacks (list (trace-callback tr)
+                   #:callbacks (list (trace-callback tr) recorder
                                      (lambda-callback #:on-train-start note-total!))
                    #:logger (trace-logger tr)))
-    (values tr r classifier (unbox stepping)))
+    (values tr r classifier (unbox stepping) (rows)))
 
   (define (hand-loop precision)
     (manual-seed! seed)
@@ -111,8 +113,8 @@
     (values (flat-state (append (named-parameters net) (named-buffers net)))
             (reverse recorded-losses) (reverse recorded-lrs)))
 
-  (define-values (trace-a run-a classifier-a stepping-a) (traced 'cpu '32-true))
-  (define-values (trace-b run-b classifier-b _stepping-b) (traced 'cpu 'bf16-mixed))
+  (define-values (trace-a run-a classifier-a stepping-a rows-a) (traced 'cpu '32-true))
+  (define-values (trace-b run-b classifier-b _stepping-b _rows-b) (traced 'cpu 'bf16-mixed))
 
   (define (without-prefix state)
     (for/list ([entry (in-list state)])
@@ -159,6 +161,18 @@
 
   (test-case "G4-L10: the clip is live in (a)"
     (check-true (> (apply max (trace-norms trace-a)) clip-val)))
+
+  (test-case "the epoch rows are the logged epoch reductions"
+    (define (logged key)
+      (for*/list ([entry (in-list (reverse (trace-rows trace-a)))]
+                  [v (in-value (hash-ref (second entry) key #f))]
+                  #:when v)
+        v))
+    (check-equal? (map car rows-a) '(1 2))
+    (check-equal? (map second rows-a) (logged 'train/loss-epoch))
+    (check-equal? (map third rows-a) (logged 'val/loss))
+    (check-equal? (map fourth rows-a) (logged 'val/acc))
+    (check-true (andmap (lambda (row) (positive? (fifth row))) rows-a)))
 
   (test-case "G4-L20: only (c) has a scaler"
     (check-false (run-grad-scaler run-a))
@@ -256,6 +270,6 @@
      (check-twin "(a)" 'cpu '32-true trace-a run-a classifier-a tol tol)
      (check-twin "(b)" 'cpu 'bf16-mixed trace-b run-b classifier-b tol tol)
      (when (and (cuda-available?) (python-cuda-available?))
-       (define-values (trace-c run-c classifier-c _stepping-c) (traced 'cuda '16-mixed))
+       (define-values (trace-c run-c classifier-c _stepping-c _rows-c) (traced 'cuda '16-mixed))
        (check-true (grad-scaler? (run-grad-scaler run-c)))
        (check-twin "(c)" 'cuda '16-mixed trace-c run-c classifier-c 5e-3 (/ 1.0 128)))]))

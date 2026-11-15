@@ -31,7 +31,7 @@ gradients accumulated over two batches and clipped, and mixed precision. Its twi
 
 @chunk[<r20-provide>
 (provide FashionClassifier fashion-net pick-device precision-for seed batch-size accumulate
-         clip-val lr weight-decay run-example train-fashion-mnist)]
+         clip-val lr weight-decay run-example epoch-recorder train-fashion-mnist)]
 
 @bold{The model.} Two convolution blocks, each a 3 by 3 convolution, a batch norm,
 a ReLU and a 2 by 2 max pool, take the 28 by 28 picture to 32 channels of 7 by 7,
@@ -129,10 +129,28 @@ warmup. It answers the run and the trained classifier.
          #:log-every-n-steps 1 #:logger logger #:callbacks callbacks))
   (values run classifier))]
 
+@bold{The epoch rows.} @racket[epoch-recorder] answers a callback and a thunk:
+the callback keeps one row per epoch, the epoch, the mean training loss, the test
+loss and accuracy and the seconds it took, and the thunk answers the rows so far.
+In @racket['on-train-epoch-end] @racket[run-metric] reads a key's epoch reduction.
+
+@chunk[<r20-rows>
+(define (epoch-recorder)
+  (define rows '())
+  (define clock #f)
+  (define (start! _r)
+    (set! clock (current-inexact-milliseconds)))
+  (define (record! r)
+    (set! rows (cons (list (add1 (run-epoch r)) (run-metric r 'train/loss)
+                           (run-metric r 'val/loss) (run-metric r 'val/acc)
+                           (/ (- (current-inexact-milliseconds) clock) 1000.0))
+                     rows)))
+  (values (lambda-callback #:on-train-epoch-start start! #:on-train-epoch-end record!)
+          (lambda () (reverse rows))))]
+
 @bold{The headline run.} The full sets, resident on the device, in batches of 128,
-and the test set after every epoch. @racket[train-fashion-mnist] answers one row
-per epoch, the epoch, the mean training loss, the test loss and accuracy and the
-seconds it took, and the run.
+and the test set after every epoch. @racket[train-fashion-mnist] answers the epoch
+rows and the run.
 
 @chunk[<r20-train>
 (define (train-fashion-mnist #:epochs [epochs 5] #:device [device (pick-device)]
@@ -142,15 +160,7 @@ seconds it took, and the run.
   (define classifier (FashionClassifier))
   (define train-set (fashion-mnist-dataset 'train #:device device))
   (define test-set (fashion-mnist-dataset 'test #:device device))
-  (define rows '())
-  (define clock #f)
-  (define (start! _r)
-    (set! clock (current-inexact-milliseconds)))
-  (define (record! r)
-    (set! rows (cons (list (add1 (run-epoch r)) (run-metric r 'train/loss-epoch)
-                           (run-metric r 'val/loss) (run-metric r 'val/acc)
-                           (/ (- (current-inexact-milliseconds) clock) 1000.0))
-                     rows)))
+  (define-values (recorder rows) (epoch-recorder))
   (define run
     (fit classifier
          (dataloader train-set #:batch-size (hash-ref batch-size 'full) #:shuffle? #t
@@ -158,10 +168,8 @@ seconds it took, and the run.
          #:val (dataloader test-set #:batch-size 1000)
          #:device (device-of device) #:precision precision #:max-epochs epochs
          #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val #:logger #f
-         #:callbacks (cons (lambda-callback #:on-train-epoch-start start!
-                                            #:on-train-epoch-end record!)
-                           callbacks)))
-  (values (reverse rows) run))]
+         #:callbacks (cons recorder callbacks)))
+  (values (rows) run))]
 
 @bold{The result.} @filepath{scripts/fashion-mnist-results.rkt} ran this program and
 its twin at commit @tt{@(hash-ref results 'commit)} on @(hash-ref results 'hardware)
@@ -195,4 +203,5 @@ epochs at precision @tt{@(hash-ref results 'precision)}, seed
   <r20-trainer>
   <r20-device>
   <r20-run>
+  <r20-rows>
   <r20-train>]
