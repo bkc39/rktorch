@@ -60,14 +60,14 @@
 
 (define (training-until)
   (define step! (training-step))
-  (lambda (deadline)
-    (let loop ([n 0] [gaps '()])
-      (define t0 (clock-ms))
+  (lambda (start deadline)
+    (let loop ([n 0] [last start] [gaps '()])
       (cond
-        [(>= t0 deadline) (values n gaps)]
+        [(>= last deadline) (values n gaps)]
         [else
          (step!)
-         (loop (add1 n) (cons (- (clock-ms) t0) gaps))]))))
+         (define now (clock-ms))
+         (loop (add1 n) now (cons (- now last) gaps))]))))
 
 (define (run-op-cell c)
   (define main-loop
@@ -94,6 +94,15 @@
            rackunit
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "runtime.rkt" cell-records))
+
+  (test-case "a training main's first pause counts from the run's start"
+    (call-with-process-deadline
+     60
+     (lambda ()
+       (define start (- (clock-ms) 100.0))
+       (define-values (n gaps) ((training-until) start (clock-ms)))
+       (check-equal? n 1)
+       (check-true (>= (car gaps) 100.0) (format "~a" gaps)))))
 
   (test-case "every op arm runs in workers beside main allocating or training"
     (call-with-process-deadline

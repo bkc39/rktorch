@@ -161,7 +161,7 @@
        (define gc0 (current-gc-milliseconds))
        (define t0 (clock-ms))
        (go!)
-       (define-values (n gaps) (~> c cell-seconds (* 1000.0) (+ t0) main-loop))
+       (define-values (n gaps) (main-loop t0 (~> c cell-seconds (* 1000.0) (+ t0))))
        (define elapsed (- (clock-ms) t0))
        (define ops (ops-done))
        (hash-set* (main-stats c n gaps elapsed (- (current-gc-milliseconds) gc0))
@@ -169,8 +169,8 @@
                   'us_per_op (and (positive? ops) (/ (* 1000.0 elapsed k) ops))))))
   (hash-set run 'stopped stopped))
 
-(define (allocate-until-deadline deadline)
-  (allocate-until (lambda (now) (>= now deadline))))
+(define (allocate-until-deadline start deadline)
+  (allocate-until (lambda (now) (>= now deadline)) #:start start))
 
 (define (run-native c)
   (duration-run c
@@ -380,6 +380,20 @@
          (unless (zero? (hash-ref r 'k))
            (check-true (positive? (only r 'worker_ops_per_s)) (format "~a" (row r)))
            (check-pred real? (only r 'us_per_op)))))))
+
+  (test-case "a stall after the workers are released is one of main's pauses"
+    (call-with-process-deadline
+     60
+     (lambda ()
+       (define c (cell #:group 'native #:workload 'usleep-200 #:main 'alloc #:k 1 #:ffi 'collect-safe
+                       #:seconds 0.2))
+       (define run
+         (duration-run c
+                       (lambda () (native-call (cell-workload c) (cell-ffi c) (cell-between c)))
+                       (lambda (start deadline)
+                         (sleep 0.1)
+                         (allocate-until-deadline start deadline))))
+       (check-true (>= (hash-ref run 'pause_max_ms) 100.0) (format "~a" (hash-ref run 'pause_max_ms))))))
 
   (test-case "main's p99 pause beside a 2 ms collect-safe call is a tenth of the plain call's"
     (call-with-process-deadline
