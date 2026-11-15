@@ -9,13 +9,15 @@
          (only-in torch/nn Linear Sequential cross-entropy parameters sgd step! zero-grads!)
          (only-in "harness.rkt" bench-case clock-ms))
 
-(provide thread-counts
+(provide call-with-workers
+         thread-counts
          main-states
          mix-names
          ops-per-iteration
          peak-of
          scaling-run
-         scaling-cases)
+         scaling-cases
+         training-step)
 
 (define thread-counts '(1 2 4 8))
 (define main-states '(idle train))

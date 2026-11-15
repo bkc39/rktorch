@@ -2,7 +2,7 @@
 
 (require (only-in racket/cmdline command-line)
          (only-in racket/format ~a)
-         (only-in racket/list check-duplicates)
+         (only-in racket/list append-map check-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/string string-split)
          (only-in torch torch-version)
@@ -14,6 +14,9 @@
          (only-in "l0.rkt" l0-suites run-l0-suite)
          (only-in "layers.rkt" layer-cases)
          (only-in "ops.rkt" op-cases)
+         (only-in "runtime.rkt"
+                  cell-records default-workers native-cells places-cells run-cell scaling-cells)
+         (only-in "runtime-ops.rkt" ops-cells run-op-cell)
          (only-in "session.rkt" fresh-run-id record-writer wait-for-load)
          (only-in "shim.rkt" aten-threads)
          (only-in "threads.rkt" mix-names))
@@ -21,10 +24,18 @@
 (provide run-suites
          parse-arguments
          parse-variant
-         micro-suites)
+         micro-suites
+         runtime-suites)
 
 (define micro-suites '(crossings layers ops contracts))
-(define known-suites (append micro-suites '(e2e) l0-suites))
+(define runtime-suites '(runtime-scaling runtime-native runtime-places runtime-ops))
+(define known-suites (append micro-suites '(e2e) l0-suites runtime-suites))
+
+(define (suite-family name)
+  (match name
+    ["micro" micro-suites]
+    ["runtime" runtime-suites]
+    [_ (list (string->symbol name))]))
 
 (define (check-suites suites)
   (define unknown (for/first ([s (in-list suites)] #:unless (memq s known-suites)) s))
@@ -50,12 +61,39 @@
 (define (ops-device? d)
   (and (memq d '(cpu cuda mps)) #t))
 
+(define (comma-values text parse)
+  (define parsed (map parse (string-split text ",")))
+  (and (pair? parsed) (andmap values parsed) (not (check-duplicates parsed)) parsed))
+
+(define (worker-counts text)
+  (comma-values text (lambda (w)
+                       (define k (string->number w))
+                       (and (exact-positive-integer? k) k))))
+
+(define (trip-settings text)
+  (comma-values text (lambda (w)
+                       (define mb (string->number w))
+                       (cond
+                         [(equal? w "default") 'default]
+                         [(exact-positive-integer? mb) mb]
+                         [else #f]))))
+
+(define (runtime-cells suite #:workers ks #:trips trips #:scale scale)
+  (define seconds (max 0.5 (* 3.0 scale)))
+  (match suite
+    ['runtime-scaling (scaling-cells #:workers ks #:trips trips #:scale scale)]
+    ['runtime-native (native-cells #:workers ks #:trips trips #:seconds seconds)]
+    ['runtime-places (places-cells #:workers ks #:trips trips #:scale scale)]
+    ['runtime-ops (ops-cells #:workers ks #:trips trips #:seconds seconds)]))
+
 (define (run-suites suites
                     #:rounds [rounds #f]
                     #:warmup [warmup #f]
                     #:scale [scale 1]
                     #:device [device #f]
                     #:mix [mix 'small]
+                    #:workers [workers #f]
+                    #:trips [trips '(#f)]
                     #:full? [full? #f]
                     #:only [only #f]
                     #:variants [variants '((#f))]
@@ -104,6 +142,17 @@
        (fprintf log "~a\n" suite)
        (run-l0-suite suite #:emit emit #:log log #:device on-device #:scale scale
                      #:rounds rounds #:warmup warmup #:libtorch libtorch #:mix mix)]
+      [(runtime-scaling runtime-native runtime-places runtime-ops)
+       (wait-for-load max-load log)
+       (fprintf log "~a\n" suite)
+       (define meta (host-meta #:device 'cpu #:libtorch libtorch #:threads (aten-threads)))
+       (define ks
+         (or workers (default-workers (or (hash-ref meta 'affinity_cpus) (hash-ref meta 'cores)))))
+       (for-each emit
+                 (cell-records (runtime-cells suite #:workers ks #:trips trips #:scale scale)
+                               (if (eq? suite 'runtime-ops) run-op-cell run-cell)
+                               #:rounds (or rounds 3) #:warmup (or warmup 0) #:meta meta
+                               #:max-load max-load #:log log))]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
@@ -119,7 +168,8 @@
        #:program "run.rkt"
        #:argv argv
        #:usage-help "Suites: micro crossings layers ops contracts e2e,"
-                    "and pytorch-ops threads pytorch-threads calls host-gpu."
+                    "pytorch-ops threads pytorch-threads calls host-gpu,"
+                    "and runtime: runtime-scaling runtime-native runtime-places runtime-ops."
                     "Options go before or after the suites."
        #:once-each
        [("--rounds") n "Timed rounds (default 5; e2e 1)"
@@ -143,6 +193,15 @@
                   (option! 'mix (flag-value "--mix" string->symbol
                                            (lambda (name) (memq name mix-names))
                                            "small or grain" m))]
+       [("--workers") ks "Comma-separated worker counts for the runtime suites"
+                      (option! 'workers
+                               (flag-value "--workers" worker-counts values
+                                           "distinct positive integers, comma-separated" ks))]
+       [("--trip") mbs "Comma-separated collect-trip-bytes in MB, or default, for runtime"
+                   (option! 'trips
+                            (flag-value "--trip" trip-settings values
+                                        "default or distinct positive integers, comma-separated"
+                                        mbs))]
        [("--full") "Run examples at their full settings" (option! 'full? #t)]
        [("--only") names "Comma-separated example numbers"
                    (option! 'only (string-split names ","))]
@@ -165,10 +224,7 @@
        (match suite
          ['() (reverse names)]
          [(cons name more) (parse more (cons name names))]))))
-  (define suites
-    (for*/list ([s (in-list names)]
-                [x (in-list (if (equal? s "micro") (map symbol->string micro-suites) (list s)))])
-      (string->symbol x)))
+  (define suites (append-map suite-family names))
   (check-suites suites)
   (values suites options))
 
@@ -181,6 +237,8 @@
                 #:rounds (option 'rounds)
                 #:warmup (option 'warmup #f) #:scale (option 'scale 1)
                 #:device (option 'device) #:mix (option 'mix 'small) #:full? (option 'full?)
+                #:workers (option 'workers)
+                #:trips (map (lambda (t) (and (exact-integer? t) t)) (option 'trips '(default)))
                 #:only (option 'only)
                 #:variants (option 'variants '((#f)))
                 #:cache (option 'cache) #:max-load (option 'max-load)
@@ -193,6 +251,7 @@
   (require (only-in racket/file make-temporary-file)
            (only-in racket/port open-output-nowhere)
            rackunit
+           (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "summary.rkt" read-records summary-markdown))
 
@@ -250,7 +309,12 @@
                   (list '(e2e) (make-hasheq '((time-limit . 5)))))
     (check-equal? (parsed "threads" "pytorch-threads" "--mix" "grain")
                   (list '(threads pytorch-threads) (make-hasheq '((mix . grain)))))
-    (check-equal? (parsed "threads") (list '(threads) (make-hasheq))))
+    (check-equal? (parsed "threads") (list '(threads) (make-hasheq)))
+    (check-equal? (parsed "runtime" "--workers" "1,4,7" "--trip" "default,64")
+                  (list runtime-suites (make-hasheq '((workers . (1 4 7))
+                                                      (trips . (default 64))))))
+    (check-equal? (parsed "runtime-native" "crossings") (list '(runtime-native crossings)
+                                                              (make-hasheq))))
 
   (test-case "a flag rejects what is not its value"
     (define (fails flag value expected)
@@ -268,12 +332,34 @@
     (fails "--device" "gpu" "cpu, cuda or mps")
     (fails "--device" "CUDA" "cpu, cuda or mps")
     (fails "--mix" "huge" "small or grain")
+    (for ([value (in-list '("" "0" "1,x" "1,,2" "1.5" "4,4" "1,4,1"))])
+      (fails "--workers" value "distinct positive integers, comma-separated"))
+    (for ([value (in-list '("" "0" "auto" "default,-1" "64,64" "default,8,default"))])
+      (fails "--trip" value "default or distinct positive integers, comma-separated"))
     (define-values (_suites options)
       (parse-arguments (vector "micro" "--warmup" "0" "--scale" "0.5" "--max-load" "2.5")))
     (check-equal? options (make-hasheq '((warmup . 0) (scale . 0.5) (max-load . 2.5))))
     (for ([d (in-list '("cpu" "cuda" "mps"))])
       (define-values (_ops parsed) (parse-arguments (vector "ops" "--device" d)))
       (check-equal? (hash-ref parsed 'device) (string->symbol d))))
+
+  (test-case "a runtime suite records its rows with the host's affinity, and Table R shows them"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define records
+         (records-of (lambda (out)
+                       (run-suites '(runtime-scaling) #:rounds 1 #:scale 1e-5 #:workers '(1)
+                                   #:trips '(#f 8) #:max-load 99 #:out out #:log quiet))))
+       (check-equal? (length records) 28)
+       (for ([r (in-list records)])
+         (define meta (hash-ref r 'meta))
+         (check-equal? (hash-ref r 'suite) "runtime")
+         (check-equal? (hash-ref r 'max_load) 99)
+         (check-true (hash-has-key? meta 'affinity_cpus))
+         (check-true (hash-has-key? meta 'omp_num_threads))
+         (check-true (string? (hash-ref r 'run_id))))
+       (check-regexp-match #rx"## R1\\. Pure-Racket scaling" (summary-markdown records)))))
 
   (test-case "an unknown suite fails before any suite runs"
     (check-exn #rx"unknown suite --out"
