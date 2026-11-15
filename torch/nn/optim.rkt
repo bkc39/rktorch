@@ -69,7 +69,7 @@
 (define (fallback-store opt)
   (match opt
     [(? tracked?) (tracked-store opt)]
-    [_ (error 'optimizer-store "unimplemented")]))
+    [_ (group-store (optimizer-parameters opt) (hasheq))]))
 
 (define (tracked-parameters opt)
   (store-params (tracked-store opt)))
