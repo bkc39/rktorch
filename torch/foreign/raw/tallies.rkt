@@ -56,13 +56,14 @@
 
 (define unheld (make-weak-box #f))
 
-(struct tally (owner slots [ops #:mutable]))
+(struct tally (owner slots [ops #:mutable] moving))
 
-(struct registry (count all))
+(struct registry (count all pruned))
 
 (define flush-ops 64)
 (define limit-cap (* 1024 1024))
 (define limit-divisor 512)
+(define prune-floor 16)
 
 (define (tally-limit mark)
   (if mark (min limit-cap (quotient mark limit-divisor)) limit-cap))
@@ -71,8 +72,9 @@
   (or (counters-limit c) 0))
 
 (define (lower-limit! c limit)
-  (set-counters-limit! c limit)
-  (flush-tallies!))
+  (with-uninterruptible
+    (set-counters-limit! c limit)
+    (flush-tallies!)))
 
 (define (note-counters-mark! c mark)
   (define was (counters-limit c))
@@ -87,7 +89,7 @@
     (lower-limit! c #f)))
 
 (define current-tally (make-thread-cell #f #f))
-(define tallies (box (registry 0 '())))
+(define tallies (box (registry 0 '() 0)))
 
 (define (registered-tallies)
   (registry-all (unbox tallies)))
@@ -97,11 +99,19 @@
 
 (define (own-tally)
   (or (thread-cell-ref current-tally)
-      (let ([t (tally (make-weak-box (current-thread)) (box (vector)) 0)])
-        (tally-update! tallies
-                       (lambda (r) (registry (add1 (registry-count r)) (cons t (registry-all r)))))
-        (thread-cell-set! current-tally t)
-        t)))
+      (register-tally!)))
+
+(define (register-tally!)
+  (define t (tally (make-weak-box (current-thread)) (box (vector)) 0 (box 0)))
+  (define r
+    (tally-update! tallies
+                   (lambda (r)
+                     (registry (add1 (registry-count r)) (cons t (registry-all r))
+                               (registry-pruned r)))))
+  (thread-cell-set! current-tally t)
+  (when (> (registry-count r) (* 2 (max prune-floor (registry-pruned r))))
+    (prune-tallies!))
+  t)
 
 (define (with-slot slots i p)
   (define grown (make-vector (max (vector-length slots) (add1 i)) #f))
@@ -190,49 +200,75 @@
   (define n (take! (pending-young p)))
   (values held (if (young-epoch? held) n (clamp n))))
 
-(define (move! from to)
+(define (move! t from to)
   (define n (take! from))
   (unless (eqv? 0 n)
+    (race-point tally-moving t)
     (cas-add! to n))
   n)
 
 (define (flush! t #:sync-all? [sync-all? #f])
+  (define moving (tally-moving t))
   (with-uninterruptible
+    (tally-add! moving 1)
     (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
       (define c (pending-counters p))
-      (define live (move! (pending-live p) (counters-live c)))
+      (define live (move! t (pending-live p) (counters-live c)))
       (define-values (held young) (take-young! p))
-      (move! (pending-entries p) (counters-entries c))
-      (move! (pending-since-check p) (counters-since-check c))
-      (move! (pending-since-sample p) (counters-since-sample c))
+      (move! t (pending-entries p) (counters-entries c))
+      (move! t (pending-since-check p) (counters-since-check c))
+      (move! t (pending-since-sample p) (counters-since-sample c))
       (race-point young-taken p)
       (note-young! (counters-phantoms c) young held)
       (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
       (unless quiet?
         (sync-counters-phantoms! c)))
+    (tally-add! moving -1)
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))
 
+(define (landed! t)
+  (define moving (tally-moving t))
+  (let wait ()
+    (unless (eqv? 0 (unbox moving))
+      (wait))))
+
 (define (flush-tally!)
   (define t (thread-cell-ref current-tally))
-  (when t (flush! t)))
+  (when t
+    (flush! t)
+    (landed! t)))
 
 (define (prunable? owner ask?)
   (define th (weak-box-value owner))
   (or (not th) (and ask? (thread-dead? th))))
 
+(define (sweep! ask? every?)
+  (for/fold ([dead '()]) ([t (in-list (registered-tallies))])
+    (define gone? (prunable? (tally-owner t) ask?))
+    (race-point tally-judged t)
+    (when (or every? gone?)
+      (flush! t #:sync-all? every?)
+      (landed! t))
+    (if gone? (cons t dead) dead)))
+
+(define (forget-tallies! dead)
+  (tally-update! tallies
+                 (lambda (r)
+                   (define kept (filter-not (lambda (t) (memq t dead)) (registry-all r)))
+                   (define n (length kept))
+                   (registry n kept n))))
+
 (define (flush-tallies!)
   (define ask? (not (in-atomic-mode?)))
   (race-point tallies-flushing ask?)
-  (define dead
-    (for/fold ([dead '()]) ([t (in-list (registered-tallies))])
-      (define gone? (prunable? (tally-owner t) ask?))
-      (race-point tally-judged t)
-      (flush! t #:sync-all? #t)
-      (if gone? (cons t dead) dead)))
+  (define dead (sweep! ask? #t))
   (unless (null? dead)
-    (tally-update! tallies
-                   (lambda (r)
-                     (define kept (filter-not (lambda (t) (memq t dead)) (registry-all r)))
-                     (registry (length kept) kept))))
+    (forget-tallies! dead))
+  (void))
+
+(define (prune-tallies!)
+  (define ask? (not (in-atomic-mode?)))
+  (race-point tallies-pruning ask?)
+  (forget-tallies! (sweep! ask? #f))
   (void))

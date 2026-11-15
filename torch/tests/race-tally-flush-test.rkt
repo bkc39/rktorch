@@ -44,6 +44,23 @@
                   (format "~a tallies registered after, ~a before" (tally-count) before))
       (check-equal? (shared-live dev) 0)))
 
+  (bounded-test "short-lived threads that never flush every tally leave the registry bounded"
+    (with-batched-device (dev 57)
+      (define before (tally-count))
+      (define flushes (box 0))
+      (define (count-flushes name _subject)
+        (when (eq? name 'tallies-flushing)
+          (cas-add! flushes 1)))
+      (with-race-hook count-flushes
+        (one-op-threads! dev (lambda (i) (and (odd? i) 'own))))
+      (collect-garbage)
+      (check-equal? (unbox flushes) 0 "nothing flushed every tally")
+      (check-true (<= (tally-count) (+ (* 2 before) 64))
+                  (format "~a tallies registered after 1000 threads, ~a before" (tally-count) before))
+      (check-equal? (tally-count) (length (registered-tallies)) "the count is the list's length")
+      (flush-tallies!)
+      (check-equal? (shared-live dev) 0 "the pruned tallies' counts were taken")))
+
   (bounded-test "a parallel thread's flush prunes the tallies of collected threads"
     (with-batched-device (dev 56)
       (define before (tally-count))
