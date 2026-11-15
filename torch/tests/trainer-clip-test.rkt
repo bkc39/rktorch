@@ -98,6 +98,8 @@
         [else
          (define j (twin-result config))
          (define-values (losses params) (fit-config config))
+         (check-equal? (length losses) (length (hash-ref j 'losses)))
+         (check-equal? (length params) (length (hash-ref j 'values)))
          (for ([r (in-list losses)] [p (in-list (hash-ref j 'losses))] [i (in-naturals)])
            (check-= r p tol (format "~a: loss at step ~a" config i)))
          (for ([r (in-list params)] [p (in-list (hash-ref j 'values))] [i (in-naturals)])
