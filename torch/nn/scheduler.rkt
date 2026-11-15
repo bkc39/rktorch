@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out listof
+                  -> ->i </c <=/c >/c >=/c and/c any/c contract-out listof
                   non-empty-listof real-in unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
@@ -12,8 +12,8 @@
          (only-in "optim-groups.rkt"
                   store-initial-lrs! store-set-each! store-update-each! store-values)
          (only-in "optim.rkt"
-                  gen:optimizer group-index? optimizer-parameters optimizer-root optimizer-store
-                  optimizer?))
+                  gen:optimizer group-index? has-hyperparameter? optimizer-parameters
+                  optimizer-root optimizer-store optimizer?))
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
@@ -176,8 +176,9 @@
   (list-ref (scheduler-last-rates s) group))
 
 (define/contract-out (step-lr opt #:step-size step-size #:gamma [gamma 0.1]) ;; noqa
-  (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
-       scheduler?)
+  (->i ([opt optimizer?] #:step-size [step-size exact-positive-integer?]) (#:gamma [gamma real?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (let ([gamma (real->double-flonum gamma)])
     (shaped-by opt
                (lambda (_base lr t _initial?)
@@ -187,9 +188,10 @@
 (define/contract-out (multi-step-lr opt ;; noqa
                                     #:milestones milestones
                                     #:gamma [gamma 0.1])
-  (->* [optimizer? #:milestones (listof exact-nonnegative-integer?)]
-       [#:gamma real?]
-       scheduler?)
+  (->i ([opt optimizer?] #:milestones [milestones (listof exact-nonnegative-integer?)])
+       (#:gamma [gamma real?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (let ([gamma (real->double-flonum gamma)])
     (shaped-by opt
                (lambda (_base lr t _initial?)
@@ -200,7 +202,9 @@
                           (* base (flexpt gamma (->fl (milestones-reached milestones t))))))))
 
 (define/contract-out (exponential-lr opt #:gamma gamma) ;; noqa
-  (-> optimizer? #:gamma real? scheduler?)
+  (->i ([opt optimizer?] #:gamma [gamma real?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (let ([gamma (real->double-flonum gamma)])
     (shaped-by opt
                (lambda (_base lr _t initial?) (if initial? lr (* lr gamma)))
@@ -209,8 +213,9 @@
 (define/contract-out (cosine-annealing-lr opt ;; noqa
                                           #:t-max t-max
                                           #:eta-min [eta-min 0.0])
-  (->* [optimizer? #:t-max exact-positive-integer?] [#:eta-min real?]
-       scheduler?)
+  (->i ([opt optimizer?] #:t-max [t-max exact-positive-integer?]) (#:eta-min [eta-min real?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (define (one-plus-cos t) (+ 1.0 (cos (/ (* pi (->fl t)) (->fl t-max)))))
   (let ([eta-min (real->double-flonum eta-min)])
     (shaped-by opt
@@ -228,10 +233,12 @@
                                 #:start-factor [start-factor (/ 1.0 3.0)]
                                 #:end-factor [end-factor 1.0]
                                 #:total-iters [total-iters 5])
-  (->* [optimizer?]
-       [#:start-factor (and/c (>/c 0) (<=/c 1)) #:end-factor (real-in 0 1)
-        #:total-iters exact-positive-integer?]
-       scheduler?)
+  (->i ([opt optimizer?])
+       (#:start-factor [start-factor (and/c (>/c 0) (<=/c 1))]
+        #:end-factor [end-factor (real-in 0 1)]
+        #:total-iters [total-iters exact-positive-integer?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (define start (real->double-flonum start-factor))
   (define rise (- (real->double-flonum end-factor) start))
   (define total (->fl total-iters))
@@ -252,10 +259,12 @@
                                    #:pct-start [pct-start 0.3]
                                    #:div-factor [div-factor 25.0]
                                    #:final-div-factor [final-div-factor 1e4])
-  (->* [optimizer? #:max-lr (>/c 0) #:total-steps exact-positive-integer?]
-       [#:pct-start (and/c (>=/c 0) (</c 1)) #:div-factor (>/c 0)
-        #:final-div-factor (>/c 0)]
-       scheduler?)
+  (->i ([opt optimizer?] #:max-lr [max-lr (>/c 0)]
+        #:total-steps [total-steps exact-positive-integer?])
+       (#:pct-start [pct-start (and/c (>=/c 0) (</c 1))] #:div-factor [div-factor (>/c 0)]
+        #:final-div-factor [final-div-factor (>/c 0)])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (define initial (/ max-lr div-factor))
   (define final (/ initial final-div-factor))
   (define up-end (- (* pct-start total-steps) 1.0))
@@ -275,7 +284,9 @@
                   (anneal max-lr final (/ (- t up-end) (- down-end up-end)))))))
 
 (define/contract-out (lambda-lr opt factor) ;; noqa
-  (-> optimizer? (-> exact-nonnegative-integer? real?) scheduler?)
+  (->i ([opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (rated-by opt (lambda (base t) (* base (real->double-flonum (factor t))))))
 
 (define/contract-out (scheduler-optimizer-of s) ;; noqa
@@ -296,6 +307,7 @@
 (define/contract-out (sequential-lr opt schedulers #:milestones milestones) ;; noqa
   (->i ([opt optimizer?] [schedulers (non-empty-listof scheduler?)]
         #:milestones [milestones (listof exact-nonnegative-integer?)])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
        #:pre/name (opt) "sequential-lr takes an optimizer, not a schedule"
        (not (scheduler? opt))
        #:pre/name (opt schedulers) "every schedule wraps opt"
@@ -316,7 +328,8 @@
                                                      #:t-0 t-0
                                                      #:t-mult [t-mult 1]
                                                      #:eta-min [eta-min 0.0])
-  (->* (optimizer? #:t-0 exact-positive-integer?)
-       (#:t-mult exact-positive-integer? #:eta-min real?)
-       scheduler?)
+  (->i ([opt optimizer?] #:t-0 [t-0 exact-positive-integer?])
+       (#:t-mult [t-mult exact-positive-integer?] #:eta-min [eta-min real?])
+       #:pre/name (opt) "this optimizer has no learning rate" (has-hyperparameter? opt 'lr)
+       [_ scheduler?])
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))

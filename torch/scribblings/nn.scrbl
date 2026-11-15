@@ -850,6 +850,32 @@ The optimizer predicates; @racket[optimizer?] holds of every optimizer and
 of every schedule.
 }
 
+@defthing[gen:optimizer any/c]{
+The interface every optimizer and schedule implements, a subclass of
+@tt{torch.optim.Optimizer}. A structure implements it with @racket[#:methods] and
+must define @racketidfont{optimizer-step!}, one update, and
+@racketidfont{optimizer-parameters}, the tensors it updates; leaving either out is an
+error when the structure is defined. Such an optimizer has one parameter group and no
+hyperparameters, an @tt{Optimizer} built with @tt{defaults={}}: @racket[step!],
+@racket[zero-grads!] and @racket[fit], with clipping, accumulation and
+@racket[grad-scaler], accept it; @racket[learning-rate] and the schedules reject it.
+
+@torch-examples[
+(struct plain-sgd (params lr)
+  #:methods gen:optimizer
+  [(define (optimizer-parameters opt) (plain-sgd-params opt))
+   (define (optimizer-step! opt)
+     (with-no-grad
+       (for* ([p (in-list (plain-sgd-params opt))] [g (in-value (maybe-grad p))] #:when g)
+         (sub! p g (plain-sgd-lr opt)))))])
+(define w (requires-grad! (ones 2)))
+(define opt (plain-sgd (list w) 0.5))
+(backward! (sum (* w w)))
+(step! opt)
+w
+(param-group-count opt)
+]}
+
 @defproc[(step! [opt optimizer?]) void?]{
 Applies one update to every parameter that has a gradient, under
 @racket[with-no-grad]; on a schedule, advances it and writes its rate.
@@ -884,7 +910,8 @@ each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 The learning rate the next @racket[step!] will use; on a schedule, its
 optimizer's. Without @racket[#:group], @racket[learning-rate] reads group 0
 and @racket[set-learning-rate!] writes every group; a schedule scales each
-group from that group's initial rate.
+group from that group's initial rate. An optimizer without a learning rate, such as a
+@racket[gen:optimizer] of one's own, is a contract violation.
 }
 
 A schedule wraps an optimizer and answers to @racket[step!] like one: the

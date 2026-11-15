@@ -60,11 +60,19 @@
   (optimizer-parameters optimizer)
   (optimizer-store optimizer)
   (optimizer-root optimizer)
-  #:fallbacks [(define (optimizer-parameters opt) (store-params (tracked-store opt)))
-               (define (optimizer-store opt) (tracked-store opt))
+  #:requires (optimizer-step! optimizer-parameters)
+  #:fallbacks [(define (optimizer-store opt) (fallback-store opt))
                (define (optimizer-root opt) opt)])
 
 (struct tracked (state keys [generation #:mutable] store))
+
+(define (fallback-store opt)
+  (match opt
+    [(? tracked?) (tracked-store opt)]
+    [_ (error 'optimizer-store "unimplemented")]))
+
+(define (tracked-parameters opt)
+  (store-params (tracked-store opt)))
 
 (define (optimizer-state opt)
   (for*/list ([table (in-hash-values (tracked-state opt))]
@@ -243,7 +251,8 @@
   #:constructor-name make-sgd
   #:name sgd-optimizer
   #:methods gen:optimizer
-  [(define (optimizer-step! opt) (sgd-do-step! opt))])
+  [(define (optimizer-step! opt) (sgd-do-step! opt))
+   (define (optimizer-parameters opt) (tracked-parameters opt))])
 
 (define-fusable-optimizer (sgd params
                                [#:lr lr (>=/c 0)]
@@ -298,7 +307,8 @@
   #:constructor-name make-adam
   #:name adam-optimizer
   #:methods gen:optimizer
-  [(define (optimizer-step! opt) (adam-do-step! opt))])
+  [(define (optimizer-step! opt) (adam-do-step! opt))
+   (define (optimizer-parameters opt) (tracked-parameters opt))])
 
 (struct adamw adam-optimizer ()
   #:constructor-name make-adamw
@@ -360,7 +370,8 @@
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
-  [(define (optimizer-step! opt) (rmsprop-do-step! opt))])
+  [(define (optimizer-step! opt) (rmsprop-do-step! opt))
+   (define (optimizer-parameters opt) (tracked-parameters opt))])
 
 (define/contract-out (rmsprop params ;; noqa
                               #:lr [lr 1e-2]
@@ -454,6 +465,8 @@
 
 (define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
   (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
+       #:pre/name (opt) "this optimizer has no learning rate"
+       (has-hyperparameter? opt 'lr)
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (or (unsupplied-arg? group) (group-index? opt group))
        [_ real?])
@@ -461,6 +474,8 @@
 
 (define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
   (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
+       #:pre/name (opt) "this optimizer has no learning rate"
+       (has-hyperparameter? opt 'lr)
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (match (supplied-or group)
          [#f #t]

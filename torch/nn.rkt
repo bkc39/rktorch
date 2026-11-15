@@ -38,7 +38,7 @@
          "nn/loss.rkt"
          "nn/mode.rkt"
          (only-in "nn/optim.rkt"
-                  adam adam? adamw adamw? learning-rate optimizer-param-groups
+                  adam adam? adamw adamw? gen:optimizer learning-rate optimizer-param-groups
                   param-group-ref param-group-set! rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
          (submod "nn/optim.rkt" checked)
@@ -167,6 +167,7 @@
          rmsprop
          rmsprop?
          optimizer?
+         gen:optimizer
          step!
          zero-grads!
          learning-rate

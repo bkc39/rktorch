@@ -262,6 +262,7 @@ lists what it bundles in its `THIRD-PARTY-NOTICES`
 ([Linux](pkgs/torch-x86_64-linux/THIRD-PARTY-NOTICES),
 [macOS](pkgs/torch-aarch64-macosx/THIRD-PARTY-NOTICES)). The package's
 license expression, from [`torch/info.rkt`](torch/info.rkt), is
-`(Apache-2.0 AND (CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR))`. The dataset
+`((Apache-2.0 AND MIT) AND (CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR))`; MIT
+is Fashion-MNIST's, for its fixture. The dataset
 loaders download data rktorch does not distribute: check each dataset's
 license before use.

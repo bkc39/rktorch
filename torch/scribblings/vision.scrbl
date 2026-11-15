@@ -5,6 +5,7 @@
           (for-label torch/data/loader
                      torch/vision/augment
                      torch/vision/cifar10
+                     torch/vision/fashion-mnist
                      torch/vision/hymenoptera
                      torch/vision/image
                      torch/vision/image-folder
@@ -105,6 +106,46 @@ pixels in @tt{[0, 1]}, and its labels as an int64 tensor of shape
 256 synthetic digits and their labels, in the same form as
 @racket[load-mnist]: each digit is a 5 by 7 bitmap glyph. What the tests
 and the offline examples train on.}
+
+@section{Fashion-MNIST}
+
+@defmodule[torch/vision/fashion-mnist]
+
+Zalando's Fashion-MNIST, torchvision's @tt{FashionMNIST}: 28 by 28 grey images of
+clothing in ten classes, in MNIST's IDX layout, 60000 for training and 10000 for
+testing. Fetched once from torchvision's mirror into the cache directory (or
+@envvar{RKTORCH_FASHION_MNIST_DIR}); a file whose MD5 is not torchvision's is not
+cached. MIT-licensed; a real subset ships as the fixture.
+
+@defproc[(load-fashion-mnist [split (or/c 'train 'test) 'train]
+                             [#:device device (or/c #f device/c) #f])
+         (values tensor? tensor?)]{
+As @racket[load-mnist]: float32 images @tt{[N 1 28 28]} in @tt{[0, 1]} and int64
+labels @tt{[N]}, on @racket[device] or else the default device.}
+
+@defproc[(fashion-mnist-dataset [split (or/c 'train 'test) 'train]
+                                [#:device device (or/c #f device/c) #f]) dataset?]{
+@racket[load-fashion-mnist] as a @racket[tensor-dataset].}
+
+@defthing[fashion-mnist-classes (listof string?)]{
+The class names in label order, @tt{FashionMNIST.classes}.}
+
+@defproc[(load-fashion-mnist-fixture [split (or/c 'train 'test) 'train]
+                                     [#:device device (or/c #f device/c) #f])
+         (values tensor? tensor?)]{
+The first 512 training or 128 test records of the real dataset, committed with
+Zalando's MIT notice, in the form of @racket[load-fashion-mnist]. What the parity
+tests train on.}
+
+@defproc[(fashion-mnist-cached?) boolean?]{
+Whether all four files are in the cache.}
+
+@torch-examples[
+(require torch/vision/fashion-mnist)
+(define-values (xs ys) (load-fashion-mnist-fixture 'test))
+(shape xs)
+(list-ref fashion-mnist-classes (item (ref ys 0)))
+]
 
 @section{Diffusion}
 
