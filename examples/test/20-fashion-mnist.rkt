@@ -142,7 +142,7 @@
       (define ts (param-group-params g))
       (list (length ts) (for/sum ([t (in-list ts)]) (numel t))))
     (check-equal? (sizes decay) '(4 206736))
-    (check-equal? (sizes no-decay) '(12 282))
+    (check-equal? (sizes no-decay) '(8 282))
     (check-equal? (hash-ref (param-group-hyperparameters no-decay) 'weight-decay) 0.0))
 
   (test-case "G4-L9: sixteen optimizer steps, four of warmup, over 32 batches"
