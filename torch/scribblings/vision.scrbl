@@ -144,7 +144,7 @@ Whether all four files are in the cache.}
 (require torch/vision/fashion-mnist)
 (define-values (xs ys) (load-fashion-mnist-fixture 'test))
 (shape xs)
-(list-ref fashion-mnist-classes (item (ref ys 0)))
+(list-ref fashion-mnist-classes (ref ys 0))
 ]
 
 @section{Diffusion}

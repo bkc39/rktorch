@@ -65,6 +65,30 @@
                    (eval definitions)
                    (namespace-require ''half)))))
 
+  (define reference-example
+    '(module reference racket/base
+       (require torch torch/nn)
+       (provide stepped groups)
+       (struct plain-sgd (params lr)
+         #:methods gen:optimizer
+         [(define (optimizer-parameters opt) (plain-sgd-params opt))
+          (define (optimizer-step! opt)
+            (with-no-grad
+              (for* ([p (in-list (plain-sgd-params opt))] [g (in-value (maybe-grad p))] #:when g)
+                (copy! p (- p (* (plain-sgd-lr opt) g))))))])
+       (define w (requires-grad! (ones 2)))
+       (define opt (plain-sgd (list w) 0.5))
+       (backward! (sum (* w w)))
+       (step! opt)
+       (define stepped (tensor->list w))
+       (define groups (param-group-count opt))))
+
+  (test-case "the reference's plain-sgd steps w by its rate times the gradient"
+    (parameterize ([current-namespace (make-base-namespace)])
+      (eval reference-example)
+      (check-equal? (dynamic-require ''reference 'stepped) '(0.0 0.0))
+      (check-equal? (dynamic-require ''reference 'groups) 1)))
+
   (define w (requires-grad! (ones 2)))
   (define opt (plain-sgd (list w) eta))
 

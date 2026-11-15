@@ -10,7 +10,7 @@
            (only-in "../data/loader.rkt" dataset-length)
            (only-in "../main.rkt"
                     * + ~> accelerator-if-available cpu-device device device-type dtype
-                    reshape shape tensor->list to-dtype to-device)
+                    ref reshape shape tensor->list to-dtype to-device)
            (only-in "../private/util.rkt" cache-dir with-temporary-directory)
            (only-in "../vision/fashion-mnist.rkt"
                     fashion-mnist-cached? fashion-mnist-classes fashion-mnist-dataset
@@ -30,7 +30,7 @@
       (test "t10k-128-images-idx3-ubyte" "t10k-128-labels-idx1-ubyte" 128)))
 
   (define (payload name)
-    (define-values (_dims data) (read-idx (file->bytes (build-path fixture-dir name))))
+    (define-values (_dims data) (~> (build-path fixture-dir name) file->bytes read-idx))
     data)
 
   (define (record-count bs)
@@ -53,6 +53,11 @@
       (check-true (andmap (lambda (y) (<= 0 y 9)) (tensor->list ys))))
     (define-values (_xs ys) (load-fashion-mnist-fixture))
     (check-equal? (sort (remove-duplicates (tensor->list ys)) <) (range 10)))
+
+  (test-case "the reference's example: the first test picture is an ankle boot"
+    (define-values (xs ys) (load-fashion-mnist-fixture 'test))
+    (check-equal? (shape xs) '(128 1 28 28))
+    (check-equal? (list-ref fashion-mnist-classes (ref ys 0)) "Ankle boot"))
 
   (test-case "G4-L2: the images and labels give back the fixture's bytes"
     (for ([entry (in-list fixture-files)])

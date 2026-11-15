@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list append* append-map count)
+(require (only-in racket/list append* append-map count second)
          (only-in racket/match match match-define match-lambda)
          (only-in racket/string string-prefix? string-replace)
          (only-in rackunit check-= check-equal?)
@@ -77,7 +77,7 @@
     (check-= x y tolerance (format "~a[~a]" label i))))
 
 (define (val-row? row)
-  (for/or ([k (in-hash-keys (cadr row))]) (string-prefix? k "val/")))
+  (for/or ([k (in-hash-keys (second row))]) (string-prefix? k "val/")))
 
 (define (row-keys rows)
   (map (match-lambda [(list _ m) (sort (hash-keys m) string<?)]) rows))
@@ -89,7 +89,7 @@
   (check-equal? (count val-row? theirs) epochs (format "~a: twin validation rows" label))
   (for ([o (in-list ours)] [t (in-list theirs)] [i (in-naturals)])
     (match-define (list _ om) o)
-    (for ([(k v) (in-hash (cadr t))] #:when (hash-has-key? om k))
+    (for ([(k v) (in-hash (second t))] #:when (hash-has-key? om k))
       (check-= (hash-ref om k) v (if (equal? k "val/acc") acc-tolerance tolerance)
                (format "~a: row ~a ~a" label i k)))))
 
@@ -124,13 +124,15 @@
 (define (trace-gaps tr json state)
   (define theirs (hash-ref json 'state))
   (define (row-values rows)
-    (for*/list ([row (in-list rows)] [k (in-list (sort (hash-keys (cadr row)) string<?))])
-      (hash-ref (cadr row) k)))
+    (for*/list ([row (in-list rows)]
+                [metrics (in-value (second row))]
+                [k (in-list (sort (hash-keys metrics) string<?))])
+      (hash-ref metrics k)))
   (hasheq 'losses (largest-gap (reverse (trace-losses tr)) (hash-ref json 'losses))
-          'lrs (largest-gap (append* (reverse (trace-lrs tr))) (append* (hash-ref json 'lrs)))
+          'lrs (largest-gap (~> tr trace-lrs reverse append*) (append* (hash-ref json 'lrs)))
           'norms (largest-gap (reverse (trace-norms tr)) (hash-ref json 'norms))
           'scales (largest-gap (reverse (trace-scales tr)) (hash-ref json 'scales))
-          'rows (largest-gap (row-values (map lightning-row (reverse (trace-rows tr))))
+          'rows (largest-gap (~> tr trace-rows reverse (map lightning-row _) row-values)
                              (row-values (map json-row (hash-ref json 'rows))))
           'state (for/fold ([gap 0.0]) ([entry (in-list state)])
                    (max gap (largest-gap (cdr entry)

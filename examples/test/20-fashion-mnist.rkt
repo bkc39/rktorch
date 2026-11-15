@@ -22,8 +22,8 @@
 
 (module+ test
   (require (only-in racket/file file->value)
-           (only-in racket/list append-map count fifth fourth last second third)
-           (only-in racket/match match match-define)
+           (only-in racket/list append-map count fifth first fourth last second third)
+           (only-in racket/match match match-define match-lambda)
            (only-in racket/math exact-ceiling)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
@@ -117,8 +117,7 @@
   (define-values (trace-b run-b classifier-b _stepping-b _rows-b) (traced 'cpu 'bf16-mixed))
 
   (define (without-prefix state)
-    (for/list ([entry (in-list state)])
-      (cons (regexp-replace #rx"^net[.]" (car entry) "") (cdr entry))))
+    (map (match-lambda [(cons name v) (cons (regexp-replace #rx"^net[.]" name "") v)]) state))
 
   (test-case "G4-L7: fit runs the loop a hand-written one runs, in (a) and (b)"
     (for ([config (in-list (list (list '32-true trace-a classifier-a)
@@ -131,7 +130,7 @@
 
   (test-case "G4-L8: the network's parameters and its two groups"
     (define net (fashion-net))
-    (check-equal? (map (lambda (np) (cons (car np) (shape (cdr np)))) (named-parameters net))
+    (check-equal? (map (match-lambda [(cons name t) (cons name (shape t))]) (named-parameters net))
                   '(("0.conv.weight" 16 1 3 3) ("0.conv.bias" 16)
                     ("0.bn.weight" 16) ("0.bn.bias" 16)
                     ("1.conv.weight" 32 16 3 3) ("1.conv.bias" 32)
@@ -155,9 +154,10 @@
     (define lrs (reverse (trace-lrs trace-a)))
     (check-equal? (length lrs) total-steps)
     (for ([pair (in-list lrs)])
-      (check-true (= (car pair) (cadr pair)) (format "group rates differ: ~a" pair)))
-    (check-equal? (car (list-ref lrs 0)) (* lr 0.1))
-    (check-equal? (car (list-ref lrs warmup)) lr))
+      (match-define (list decayed undecayed) pair)
+      (check-true (= decayed undecayed) (format "group rates differ: ~a" pair)))
+    (check-equal? (first (list-ref lrs 0)) (* lr 0.1))
+    (check-equal? (first (list-ref lrs warmup)) lr))
 
   (test-case "G4-L10: the clip is live in (a)"
     (check-true (> (apply max (trace-norms trace-a)) clip-val)))
@@ -168,7 +168,7 @@
                   [v (in-value (hash-ref (second entry) key #f))]
                   #:when v)
         v))
-    (check-equal? (map car rows-a) '(1 2))
+    (check-equal? (map first rows-a) '(1 2))
     (check-equal? (map second rows-a) (logged 'train/loss-epoch))
     (check-equal? (map third rows-a) (logged 'val/loss))
     (check-equal? (map fourth rows-a) (logged 'val/acc))
@@ -228,13 +228,15 @@
 
   (define (check-names r classifier json)
     (define names (hash-ref json 'names))
-    (define (named-of xs) (map (lambda (np) (lightning-name (car np))) xs))
+    (define (named-of xs) (map (match-lambda [(cons name _) (lightning-name name)]) xs))
     (check-equal? (named-of (named-parameters classifier)) (hash-ref names 'parameters))
     (check-equal? (named-of (named-buffers classifier)) (hash-ref names 'buffers))
     (define by-tensor
-      (for/hasheq ([np (in-list (named-parameters classifier))]) (values (cdr np) (car np))))
+      (for/hasheq ([np (in-list (named-parameters classifier))])
+        (match-define (cons name t) np)
+        (values t name)))
     (match-define (list decay no-decay)
-      (for/list ([g (in-list (optimizer-param-groups (car (run-optimizers r))))])
+      (for/list ([g (in-list (~> r run-optimizers car optimizer-param-groups))])
         (map (lambda (t) (hash-ref by-tensor t)) (param-group-params g))))
     (check-equal? (map lightning-name decay) (hash-ref names 'decay))
     (check-equal? (map lightning-name no-decay) (hash-ref names 'no_decay)))

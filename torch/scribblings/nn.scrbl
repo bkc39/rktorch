@@ -867,7 +867,7 @@ hyperparameters, an @tt{Optimizer} built with @tt{defaults={}}: @racket[step!],
    (define (optimizer-step! opt)
      (with-no-grad
        (for* ([p (in-list (plain-sgd-params opt))] [g (in-value (maybe-grad p))] #:when g)
-         (sub! p g (plain-sgd-lr opt)))))])
+         (copy! p (- p (* (plain-sgd-lr opt) g))))))])
 (define w (requires-grad! (ones 2)))
 (define opt (plain-sgd (list w) 0.5))
 (backward! (sum (* w w)))
