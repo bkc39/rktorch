@@ -1,14 +1,45 @@
-#hasheq((model . "unmeasured")
-        (data . "unmeasured")
-        (config . #hasheq())
-        (device . "unmeasured")
-        (hardware . "unmeasured")
-        (precision . "unmeasured")
-        (torch . "unmeasured")
-        (lightning-version . "unmeasured")
-        (seed . -1)
-        (commit . "unmeasured")
-        (command . "unmeasured")
-        (date . "unmeasured")
-        (racket . #hasheq((seconds . 0.0) (accuracy . 0.0) (epochs . ((1 0.0 0.0 0.0 0.0)))))
-        (lightning . #hasheq((seconds . 0.0) (accuracy . 0.0) (epochs . ((1 0.0 0.0 0.0 0.0))))))
+#hasheq((command
+         .
+         "EPOCHS=5 nix develop .#cuda --command racket scripts/fashion-mnist-results.rkt")
+        (commit . "d3f89b6b0b7a")
+        (config
+         .
+         #hasheq((accumulate . 2)
+                 (batch . 128)
+                 (clip . 0.5)
+                 (epochs . 5)
+                 (lr . 0.002)
+                 (weight-decay . 0.05)))
+        (data . "Fashion-MNIST: 60000 train, 10000 test")
+        (date . "2026-11-15")
+        (device . "cuda")
+        (hardware . "NVIDIA GeForce RTX 3090 Ti")
+        (lightning
+         .
+         #hasheq((accuracy . 0.9122)
+                 (epochs
+                  .
+                  ((1 0.5281 0.3424 0.8776 2.1)
+                   (2 0.3201 0.3229 0.8839 1.6)
+                   (3 0.2521 0.279 0.897 1.6)
+                   (4 0.2053 0.2441 0.9113 1.6)
+                   (5 0.1711 0.2371 0.9122 1.6)))
+                 (seconds . 14.0)))
+        (lightning-version . "2.6.5")
+        (model
+         .
+         "two conv blocks (3x3 conv, batch norm, ReLU, 2x2 max pool), Linear 1568-128-10")
+        (precision . "16-mixed")
+        (racket
+         .
+         #hasheq((accuracy . 0.9122)
+                 (epochs
+                  .
+                  ((1 0.5281 0.3424 0.8776 1.8)
+                   (2 0.3201 0.3229 0.8839 1.2)
+                   (3 0.2521 0.279 0.897 1.3)
+                   (4 0.2053 0.2441 0.9113 1.2)
+                   (5 0.1711 0.2371 0.9122 1.3)))
+                 (seconds . 9.3)))
+        (seed . 0)
+        (torch . "2.14.0"))
