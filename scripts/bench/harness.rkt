@@ -29,6 +29,7 @@
          parse-load-average
          load-average
          parse-cpu-times
+         proc-field
          busy-cores
          thread-setting
          cuda-gpu-name
