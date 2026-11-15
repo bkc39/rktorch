@@ -6,7 +6,7 @@
            (only-in threading ~>)
            (only-in "../main.rkt"
                     * + backward! cuda-available? cuda-device device full grad item manual-seed!
-                    randn sum tensor)
+                    randn sum tensor to)
            (only-in "../nn.rkt"
                     Linear Parameter adam grad-scaler grad-scaler-enabled? grad-scaler-scale
                     grad-scaler-scale-loss grad-scaler-step! grad-scaler-unscale!
@@ -51,6 +51,45 @@
 
   (define (fused-sgd ps)
     (sgd ps #:fused? #t #:lr 0.1 #:momentum 0.9))
+
+  (when (cuda-available?)
+    (define (mixed-fused-run make-opt home factors #:scaled? scaled?)
+      (define pc (Parameter (tensor '(0.5 -0.25))))
+      (define pg (Parameter (tensor '(1.5 2.0) #:device (cuda-device))))
+      (define opt (make-opt (list pc pg)))
+      (define s (grad-scaler #:device home #:init-scale 8))
+      (for ([f (in-list factors)])
+        (zero-grads! opt)
+        (define loss (+ (~> (* pg pg) sum (to home)) (~> (* pc pc) sum (* f) (to home))))
+        (cond
+          [scaled?
+           (backward! (grad-scaler-scale-loss s loss))
+           (grad-scaler-step! s opt)
+           (grad-scaler-update! s)]
+          [else
+           (backward! loss)
+           (step! opt)]))
+      (define state
+        (sort (map flat (optimizer-state opt)) string<? #:key (lambda (xs) (format "~a" xs))))
+      (list (flat pc) (flat pg) state (grad-scaler-scale s)))
+
+    (for* ([make-opt (in-list (list fused-adam fused-sgd))]
+           [home (in-list '(cpu cuda))])
+      (bounded-test (format "a ~a over CPU and CUDA buckets with a ~a scale steps as unscaled"
+                            (object-name make-opt) home)
+        (match-define (list pc pg state _) (mixed-fused-run make-opt home '(1.0 1.0) #:scaled? #f))
+        (match-define (list spc spg sstate scale)
+          (mixed-fused-run make-opt home '(1.0 1.0) #:scaled? #t))
+        (check-equal? (list spc spg sstate) (list pc pg state))
+        (check-equal? scale 8.0))
+
+      (bounded-test (format "a ~a over CPU and CUDA buckets with a ~a scale skips a CPU inf on both"
+                            (object-name make-opt) home)
+        (match-define (list pc pg state _) (mixed-fused-run make-opt home '(1.0) #:scaled? #t))
+        (match-define (list ipc ipg istate scale)
+          (mixed-fused-run make-opt home '(1.0 +inf.0) #:scaled? #t))
+        (check-equal? (list ipc ipg istate) (list pc pg state))
+        (check-equal? scale 4.0))))
 
   (define (fused-run mode bad? #:optimizer [make-opt fused-adam])
     (manual-seed! 0)

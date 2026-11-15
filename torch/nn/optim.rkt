@@ -28,7 +28,7 @@
                   floating-params/c groups-distinct? groups-keys-within? groups-setting-holds?
                   param-group-settings param-group-tensors params/c)
          (only-in "optim-foreach.rkt"
-                  adam-foreach! adam-fused! bias-correction current-amp-scaling
+                  adam-foreach! adam-fused! amp-scaling-at bias-correction current-amp-scaling
                   rmsprop-foreach! sgd-foreach! sgd-fused! slot! slot-ref step-count!))
 
 (provide gen:optimizer
@@ -101,11 +101,12 @@
     (match-define (cons q _) qg)
     (hash-ref! keys q (lambda () (placement q))))
   (for ([bucket (in-list (group-by key-of (map cons qs gs)))])
+    (match-define (cons (app key-of (cons dev _)) _) bucket)
     (define-values (bqs bgs)
       (for/lists (bqs bgs) ([qg (in-list bucket)])
         (match-define (cons q g) qg)
         (values q g)))
-    (update! bqs bgs)))
+    (update! dev bqs bgs)))
 
 (struct gradient-bucket (device dtype grads))
 
@@ -133,8 +134,8 @@
     [(? adam? o) (eq? (adam-mode o) 'fused)]
     [_ #f]))
 
-(define (scaled-step! opt [grad-scale #f] [found-inf #f])
-  (parameterize ([current-amp-scaling (and found-inf (cons grad-scale found-inf))])
+(define (scaled-step! opt [grad-scale #f] [found-inf #f] [home #f])
+  (parameterize ([current-amp-scaling (and found-inf (amp-scaling-at home grad-scale found-inf))])
     (step! opt)))
 
 (define (update-mode foreach? fused?)
@@ -143,13 +144,13 @@
     [foreach? 'foreach]
     [else 'loop]))
 
-(define (step-by! opt mode #:loop loop! #:foreach foreach! #:fused [fused! #f])
+(define (step-by! opt mode #:loop loop! #:foreach foreach! #:fused [fused-on #f])
   (define st (tracked-store opt))
-  (define (by-group! update!)
+  (define (by-group! update-on)
     (with-gradients ([qs gs] (store-params st))
       (for ([part (in-list (store-partition st qs gs))])
         (match-define (list h gqs ggs) part)
-        (update-buckets! opt gqs ggs (lambda (bqs bgs) (update! h bqs bgs))))))
+        (update-buckets! opt gqs ggs (lambda (dev bqs bgs) ((update-on dev) h bqs bgs))))))
   (with-no-grad
     (follow-moves! opt)
     (match mode
@@ -159,8 +160,8 @@
               [p (in-list (param-group-tensors group))])
          (with-gradient (g p)
            (loop! h p g)))]
-      ['foreach (by-group! foreach!)]
-      ['fused (by-group! fused!)])))
+      ['foreach (by-group! (lambda (_) foreach!))]
+      ['fused (by-group! fused-on)])))
 
 (define (unit-scalar)
   (full 1.0 #:device (cpu-device) #:dtype 'float32))
@@ -291,7 +292,7 @@
   (step-by! opt (sgd-mode opt)
             #:loop (with-hyperparameters sgd-loop!)
             #:foreach (with-hyperparameters sgd-foreach!)
-            #:fused (with-hyperparameters sgd-fused!)))
+            #:fused (lambda (dev) (with-hyperparameters (sgd-fused! dev)))))
 
 (struct adam tracked (mode one)
   #:constructor-name make-adam
@@ -353,7 +354,7 @@
   (step-by! opt (adam-mode opt)
             #:loop (with-hyperparameters (adam-loop! (adam-one opt)))
             #:foreach (with-hyperparameters adam-foreach!)
-            #:fused (with-hyperparameters adam-fused!)))
+            #:fused (lambda (dev) (with-hyperparameters (adam-fused! dev)))))
 
 (struct rmsprop tracked (mode one)
   #:constructor-name make-rmsprop

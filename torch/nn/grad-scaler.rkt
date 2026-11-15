@@ -188,8 +188,8 @@
 (define (fused-step! st opt ready?)
   (define found-infs
     (if ready? (check-and-unscale! st opt (device-state-unit st)) (stage-infs st opt)))
-  (scaled-step! opt (and ready? (device-state-factor st))
-                (combined-inf (device-state-home st) found-infs))
+  (define home (device-state-home st))
+  (scaled-step! opt (and ready? (device-state-factor st)) (combined-inf home found-infs) home)
   (set-stage! st opt 'stepped found-infs))
 
 (define (inf-count found-infs)
