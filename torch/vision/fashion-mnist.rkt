@@ -2,21 +2,26 @@
 
 (require (only-in file/gunzip gunzip-through-ports)
          (only-in file/md5 md5)
-         (only-in racket/contract/base -> ->* listof or/c)
+         (only-in racket/contract/base -> ->* ->i contract-out listof or/c)
          (only-in racket/file file->bytes)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
          (only-in "../main.rkt" ~> default-device device/c tensor? with-default-device)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/download.rkt" download-cached)
          (only-in "../private/util.rkt" cache-dir)
-         (only-in "mnist.rkt" idx->images idx->labels))
+         (only-in "mnist.rkt" idx->images idx->labels read-idx))
 
 (module+ private
   (provide archive-valid?
            fashion-mnist-idx
-           fashion-mnist-resources))
+           fashion-mnist-resources
+           (contract-out
+            [idx-head (->i ([bs bytes?] [n exact-nonnegative-integer?])
+                           #:pre/name (bs n) "n exceeds the buffer's record count"
+                           (<= n (record-count bs))
+                           [_ bytes?])])))
 
 (define/contract-out fashion-mnist-classes (listof string?) ;; noqa
   '("T-shirt/top" "Trouser" "Pullover" "Dress" "Coat"
@@ -55,6 +60,22 @@
        (match (gunzipped bs)
          [#f #f]
          [idx (whole-split? idx)])))
+
+(define (record-count bs)
+  (define-values (dims _data) (read-idx bs))
+  (match-define (cons n _) dims)
+  n)
+
+(define (idx-head bs n)
+  (define ndim (bytes-ref bs 3))
+  (define-values (dims _data) (read-idx bs))
+  (match-define (cons _ record-shape) dims)
+  (define record (apply * record-shape))
+  (define start (+ 4 (* 4 ndim)))
+  (bytes-append (subbytes bs 0 4)
+                (integer->integer-bytes n 4 #f #t)
+                (subbytes bs 8 start)
+                (subbytes bs start (+ start (* n record)))))
 
 (define (fashion-mnist-idx name)
   (define archive

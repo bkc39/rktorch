@@ -16,9 +16,8 @@
                     fashion-mnist-cached? fashion-mnist-classes fashion-mnist-dataset
                     load-fashion-mnist load-fashion-mnist-fixture)
            (only-in (submod "../vision/fashion-mnist.rkt" private)
-                    archive-valid? fashion-mnist-idx fashion-mnist-resources)
+                    archive-valid? fashion-mnist-idx fashion-mnist-resources idx-head)
            (only-in "../vision/mnist.rkt" read-idx)
-           (only-in "../../scripts/fashion-mnist-fixture.rkt" idx-head)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/python-env.rkt"
                     python-check python-module-available? python-torch-available? unpack))

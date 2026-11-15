@@ -1,28 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->i)
-         (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in "../torch/private/contract.rkt" define/contract-out)
-         (only-in "../torch/vision/mnist.rkt" read-idx)
-         (only-in (submod "../torch/vision/fashion-mnist.rkt" private) fashion-mnist-idx))
-
-(define (record-count bs)
-  (define-values (dims _data) (read-idx bs))
-  (car dims))
-
-(define/contract-out (idx-head bs n)
-  (->i ([bs bytes?] [n exact-nonnegative-integer?])
-       #:pre/name (bs n) "n exceeds the buffer's record count"
-       (<= n (record-count bs))
-       [_ bytes?])
-  (define ndim (bytes-ref bs 3))
-  (define-values (dims _data) (read-idx bs))
-  (define record (apply * (cdr dims)))
-  (define start (+ 4 (* 4 ndim)))
-  (bytes-append (subbytes bs 0 4)
-                (integer->integer-bytes n 4 #f #t)
-                (subbytes bs 8 start)
-                (subbytes bs start (+ start (* n record)))))
+(require (only-in racket/runtime-path #%datum define-runtime-path)
+         (only-in (submod "../torch/vision/fashion-mnist.rkt" private) fashion-mnist-idx idx-head))
 
 (define-runtime-path fixture-dir "../torch/vision/fixtures/fashion-mnist")
 
