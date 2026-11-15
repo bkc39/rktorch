@@ -112,12 +112,14 @@
 
 (define/contract-out (grad-scaler-scale-loss s loss)
   (-> grad-scaler? tensor? tensor?)
+  (define dev (and (grad-scaler-active? s) (device loss)))
   (cond
-    [(not (grad-scaler-active? s)) loss]
+    [(not dev) loss]
     [else
      (unless (grad-scaler-state s)
-       (set-grad-scaler-state! s (fresh-state s (device loss))))
-     (* loss (device-state-factor (grad-scaler-state s)))]))
+       (set-grad-scaler-state! s (fresh-state s dev)))
+     (match-define (struct* device-state ([factor factor] [home home])) (grad-scaler-state s))
+     (* loss (on-device factor home dev))]))
 
 (define (set-stage! st opt state found-infs)
   (set-device-state-stages! st (hash-set (device-state-stages st) (optimizer-root opt)

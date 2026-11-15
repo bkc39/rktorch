@@ -5,7 +5,8 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + backward! cuda-available? grad manual-seed! randn sum tensor)
+                    * + backward! cuda-available? cuda-device device full grad item manual-seed!
+                    randn sum tensor)
            (only-in "../nn.rkt"
                     Linear Parameter adam grad-scaler grad-scaler-enabled? grad-scaler-scale
                     grad-scaler-scale-loss grad-scaler-step! grad-scaler-unscale!
@@ -24,6 +25,14 @@
   (unless (cuda-available?)
     (bounded-test "a 'cuda scaler without CUDA is disabled"
       (check-false (grad-scaler-enabled? (grad-scaler)))))
+
+  (when (cuda-available?)
+    (bounded-test "a loss on another device than the first is scaled on its own device"
+      (define s (grad-scaler #:init-scale 8))
+      (grad-scaler-scale-loss s (full 1.0 #:device (cuda-device)))
+      (define scaled (grad-scaler-scale-loss s (sum (tensor '(0.5 -0.25)))))
+      (check-equal? (device scaled) (device 'cpu))
+      (check-equal? (item scaled) 2.0)))
 
   (bounded-test "the scale before any loss is scaled is the initial scale"
     (check-equal? (grad-scaler-scale (grad-scaler #:device 'cpu #:init-scale 8)) 8.0))

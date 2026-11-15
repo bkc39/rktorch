@@ -262,7 +262,7 @@ disabled), and whether it scales.
 }
 
 @defproc[(grad-scaler-scale-loss [s grad-scaler?] [loss tensor?]) tensor?]{
-@racket[loss] times the scale, @tt{scaler.scale(loss)}.
+@racket[loss] times the scale, on @racket[loss]'s device, @tt{scaler.scale(loss)}.
 }
 
 @defproc[(grad-scaler-unscale! [s grad-scaler?] [opt optimizer?]) void?]{
