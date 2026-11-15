@@ -216,7 +216,8 @@ def main():
     trainer = pl.Trainer(
         accelerator="gpu" if DEVICE == "cuda" else "cpu", devices=1, precision=PRECISION,
         max_epochs=EPOCHS, accumulate_grad_batches=ACCUMULATE, gradient_clip_val=CLIP,
-        gradient_clip_algorithm="norm", log_every_n_steps=1, logger=rows, callbacks=[trace],
+        gradient_clip_algorithm="norm",
+        log_every_n_steps=1 if MODE == "fixture" else 50, logger=rows, callbacks=[trace],
         enable_checkpointing=False, enable_progress_bar=False, enable_model_summary=False,
         default_root_dir=tempfile.mkdtemp())
     trainer.fit(model, train, val)

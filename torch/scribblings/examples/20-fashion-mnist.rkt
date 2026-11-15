@@ -115,7 +115,19 @@ warmup. It answers the run and the trained classifier.
 @chunk[<r20-run>
 (define (run-example #:device [device 'cpu] #:precision [precision '32-true]
                      #:epochs [epochs 2] #:callbacks [callbacks '()] #:logger [logger #f])
-  (error 'run-example "unimplemented"))]
+  (manual-seed! seed)
+  (define classifier (FashionClassifier))
+  (define-values (xs ys) (load-fashion-mnist-fixture 'train))
+  (define-values (test-xs test-ys) (load-fashion-mnist-fixture 'test))
+  (define run
+    (fit classifier
+         (dataloader (tensor-dataset xs ys) #:batch-size (hash-ref batch-size 'fixture)
+                     #:shuffle? #t #:generator (make-generator seed))
+         #:val (dataloader (tensor-dataset test-xs test-ys) #:batch-size 64)
+         #:device (device-of device) #:precision precision #:max-epochs epochs
+         #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val
+         #:log-every-n-steps 1 #:logger logger #:callbacks callbacks))
+  (values run classifier))]
 
 @bold{The headline run.} The full sets, resident on the device, in batches of 128,
 and the test set after every epoch. @racket[train-fashion-mnist] answers one row
@@ -126,7 +138,30 @@ seconds it took, and the run.
 (define (train-fashion-mnist #:epochs [epochs 5] #:device [device (pick-device)]
                              #:precision [precision (precision-for device)]
                              #:callbacks [callbacks '()])
-  (error 'train-fashion-mnist "unimplemented"))]
+  (manual-seed! seed)
+  (define classifier (FashionClassifier))
+  (define train-set (fashion-mnist-dataset 'train #:device device))
+  (define test-set (fashion-mnist-dataset 'test #:device device))
+  (define rows '())
+  (define clock #f)
+  (define (start! _r)
+    (set! clock (current-inexact-milliseconds)))
+  (define (record! r)
+    (set! rows (cons (list (add1 (run-epoch r)) (run-metric r 'train/loss-epoch)
+                           (run-metric r 'val/loss) (run-metric r 'val/acc)
+                           (/ (- (current-inexact-milliseconds) clock) 1000.0))
+                     rows)))
+  (define run
+    (fit classifier
+         (dataloader train-set #:batch-size (hash-ref batch-size 'full) #:shuffle? #t
+                     #:generator (make-generator seed))
+         #:val (dataloader test-set #:batch-size 1000)
+         #:device (device-of device) #:precision precision #:max-epochs epochs
+         #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val #:logger #f
+         #:callbacks (cons (lambda-callback #:on-train-epoch-start start!
+                                            #:on-train-epoch-end record!)
+                           callbacks)))
+  (values (reverse rows) run))]
 
 @bold{The result.} @filepath{scripts/fashion-mnist-results.rkt} ran this program and
 its twin at commit @tt{@(hash-ref results 'commit)} on @(hash-ref results 'hardware)

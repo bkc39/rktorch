@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list append-map count)
+(require (only-in racket/list append* append-map count)
          (only-in racket/match match match-define match-lambda)
          (only-in racket/string string-prefix? string-replace)
          (only-in rackunit check-= check-equal?)
@@ -18,7 +18,8 @@
          lightning-name
          lightning-row
          flat-state
-         compare-trace)
+         compare-trace
+         trace-gaps)
 
 (struct trace ([labels #:mutable] [losses #:mutable] [lrs #:mutable] [norms #:mutable]
                [scales #:mutable] [rows #:mutable]))
@@ -115,3 +116,22 @@
               (map json-row (hash-ref json 'rows))
               epochs tolerance acc-tolerance)
   (check-state label state (hash-ref json 'state) tolerance))
+
+(define (largest-gap xs ys)
+  (for/fold ([gap 0.0]) ([x (in-list xs)] [y (in-list ys)])
+    (max gap (abs (- x y)))))
+
+(define (trace-gaps tr json state)
+  (define theirs (hash-ref json 'state))
+  (define (row-values rows)
+    (for*/list ([row (in-list rows)] [k (in-list (sort (hash-keys (cadr row)) string<?))])
+      (hash-ref (cadr row) k)))
+  (hasheq 'losses (largest-gap (reverse (trace-losses tr)) (hash-ref json 'losses))
+          'lrs (largest-gap (append* (reverse (trace-lrs tr))) (append* (hash-ref json 'lrs)))
+          'norms (largest-gap (reverse (trace-norms tr)) (hash-ref json 'norms))
+          'scales (largest-gap (reverse (trace-scales tr)) (hash-ref json 'scales))
+          'rows (largest-gap (row-values (map lightning-row (reverse (trace-rows tr))))
+                             (row-values (map json-row (hash-ref json 'rows))))
+          'state (for/fold ([gap 0.0]) ([entry (in-list state)])
+                   (max gap (largest-gap (cdr entry)
+                                         (hash-ref theirs (string->symbol (car entry))))))))

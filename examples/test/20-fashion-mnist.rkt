@@ -40,7 +40,7 @@
            (only-in torch/vision/fashion-mnist load-fashion-mnist-fixture)
            (only-in "private/lightning-trace.rkt"
                     compare-trace flat-state lightning-name trace-callback trace-labels
-                    trace-logger trace-lrs trace-losses trace-norms trace-recorder)
+                    trace-gaps trace-logger trace-lrs trace-losses trace-norms trace-recorder)
            (only-in "../../scripts/fashion-mnist-results.rkt" fashion-mnist-record))
 
   (define-runtime-path bundle-path "../../torch/scribblings/results/fashion-mnist.rktd")
@@ -88,14 +88,14 @@
     (define (validate! limit)
       (eval! net)
       (with-no-grad
-        (for ([(xb yb) (in-dataloader val)] [_ (in-range limit)])
+        (for ([_ (in-range limit)] [(xb yb) (in-dataloader val)])
           (loss-of xb yb)))
       (train! net))
     (validate! 2)
     (define recorded-losses '())
     (define recorded-lrs '())
     (for ([_ (in-range epochs)])
-      (for ([(xb yb) (in-dataloader loader)] [i (in-naturals)])
+      (for ([i (in-range (dataloader-length loader))] [(xb yb) (in-dataloader loader)])
         (define loss (/ (loss-of xb yb) accumulate))
         (when (even? i) (zero-grads! opt))
         (backward! loss)
@@ -240,6 +240,8 @@
         (define theirs (hash-ref (hash-ref json 'init) (string->symbol name)))
         (check-true (and (= (length values) (length theirs)) (andmap = values theirs))
                     name)))
+    (printf "[20-fashion-mnist] ~a largest gaps: ~s\n" label
+            (trace-gaps tr json (state-of classifier)))
     (test-case (format "G4-L14..L19: ~a: the trace is the twin's" label)
       (compare-trace label tr json (state-of classifier) tolerance
                      #:acc-tolerance acc-tolerance))
