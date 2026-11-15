@@ -8,7 +8,7 @@
          (only-in "phantoms.rkt"
                   fresh-phantoms note-young! sync-phantoms! young-epoch?)
          (only-in "race-points.rkt" race-point)
-         (only-in "regions.rkt" with-cleanup with-uninterruptible))
+         (only-in "regions.rkt" with-uninterruptible))
 
 (provide fresh-counters
          counters-live counters-entries counters-since-check counters-since-sample
@@ -210,21 +210,20 @@
 (define (flush! t #:sync-all? [sync-all? #f])
   (define moving (tally-moving t))
   (with-uninterruptible
-    (tally-add! moving 1)
-    (with-cleanup
-      (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
-        (define c (pending-counters p))
-        (define live (move! t (pending-live p) (counters-live c)))
-        (define-values (held young) (take-young! p))
-        (move! t (pending-entries p) (counters-entries c))
-        (move! t (pending-since-check p) (counters-since-check c))
-        (move! t (pending-since-sample p) (counters-since-sample c))
-        (race-point young-taken p)
-        (note-young! (counters-phantoms c) young held)
-        (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
-        (unless quiet?
-          (sync-counters-phantoms! c)))
-      #:finally (tally-add! moving -1))
+    (for ([p (in-vector (unbox (tally-slots t)))] #:when p)
+      (define c (pending-counters p))
+      (tally-add! moving 1)
+      (define live (move! t (pending-live p) (counters-live c)))
+      (define-values (held young) (take-young! p))
+      (move! t (pending-entries p) (counters-entries c))
+      (move! t (pending-since-check p) (counters-since-check c))
+      (move! t (pending-since-sample p) (counters-since-sample c))
+      (race-point young-taken p)
+      (note-young! (counters-phantoms c) young held)
+      (tally-add! moving -1)
+      (define quiet? (and (eqv? 0 live) (eqv? 0 young) (not sync-all?)))
+      (unless quiet?
+        (sync-counters-phantoms! c)))
     (when (eq? (weak-box-value (tally-owner t)) (current-thread))
       (set-tally-ops! t 0))))
 

@@ -508,13 +508,16 @@ the last defence when a trough collection is not yet due:
   flush moves every pending count with a `cas-take!` and a `cas-add!` in
   one uninterruptible region, so a kill never strands an amount between
   them, and takes no lock. A flush counts itself in its tally's `moving`
-  box for the length of that region, which covers the young bytes too:
-  their take, the `young-taken` point and their `note-young!` all sit
-  between the raise and the lowering, as do the live and entry moves and
-  their `tally-moving` points. The lowering runs in a cleanup: a flush
-  that raises (a sync that raises with its claim held) would otherwise
-  leave the count raised, and every later wait on that tally would spin
-  forever. Every flush that promises its
+  box around each slot's transfer, from before its first take until its
+  young bytes are counted: the live and entry moves with their
+  `tally-moving` points, the young take, the `young-taken` point and the
+  `note-young!` all sit between the raise and the lowering. The sync comes
+  after the lowering, so a sync that raises (with its claim held) leaves
+  the count at 0 rather than every later wait on that tally spinning, and
+  the bracket costs no cleanup frame (a `dynamic-wind` around the region
+  took `librispeech-dataset-test`'s heap check from under 32 KB to 35.6 KB
+  a ref). A count not yet taken is still pending, so a gap between slots
+  hides nothing in flight. Every flush that promises its
   counts have landed (`flush-tally!`, so the reaper's `#:after-batch`
   hook, and each tally of `flush-tallies!`) waits after its own transfer
   for that count to reach 0: another thread's flush may have taken the
