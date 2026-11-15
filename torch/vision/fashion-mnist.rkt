@@ -4,9 +4,10 @@
          (only-in file/md5 md5)
          (only-in racket/contract/base -> ->* listof or/c)
          (only-in racket/file file->bytes)
+         (only-in racket/match match)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
-         (only-in "../main.rkt" default-device device/c tensor? with-default-device)
+         (only-in "../main.rkt" ~> default-device device/c tensor? with-default-device)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/download.rkt" download-cached)
          (only-in "../private/util.rkt" cache-dir)
@@ -32,26 +33,70 @@
 (define (fashion-mnist-cache-dir)
   (cache-dir "RKTORCH_FASHION_MNIST_DIR" "fashion-mnist"))
 
+(define (gunzipped bs)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (define out (open-output-bytes))
+    (gunzip-through-ports (open-input-bytes bs) out)
+    (get-output-bytes out)))
+
+(define (whole-split? idx)
+  (and (>= (bytes-length idx) 8)
+       (memv (integer-bytes->integer idx #f #t 4 8) '(60000 10000))
+       #t))
+
 (define (archive-valid? path [name #f])
-  (error 'archive-valid? "unimplemented"))
+  (define bs (file->bytes path))
+  (define digest (bytes->string/latin-1 (md5 bs)))
+  (define expected
+    (if name
+        (list (cdr (assoc name fashion-mnist-resources)))
+        (map cdr fashion-mnist-resources)))
+  (and (member digest expected)
+       (match (gunzipped bs)
+         [#f #f]
+         [idx (whole-split? idx)])))
 
 (define (fashion-mnist-idx name)
-  (error 'fashion-mnist-idx "unimplemented"))
+  (define archive
+    (download-cached 'load-fashion-mnist (fashion-mnist-cache-dir) name
+                     (string-append fashion-mnist-mirror name)
+                     #:valid? (lambda (tmp) (archive-valid? tmp name))))
+  (gunzipped (file->bytes archive)))
 
 (define/contract-out (fashion-mnist-cached?) ;; noqa
   (-> boolean?)
-  (error 'fashion-mnist-cached? "unimplemented"))
+  (for/and ([entry (in-list fashion-mnist-resources)])
+    (file-exists? (build-path (fashion-mnist-cache-dir) (car entry)))))
+
+(define (prefix-of split)
+  (match split
+    ['train "train"]
+    ['test "t10k"]))
+
+(define (idx->tensors images labels device)
+  (with-default-device (or device (default-device))
+    (values (idx->images images) (idx->labels labels))))
 
 (define/contract-out (load-fashion-mnist [split 'train] #:device [device #f]) ;; noqa
   (->* () ((or/c 'train 'test) #:device (or/c #f device/c)) (values tensor? tensor?))
-  (error 'load-fashion-mnist "unimplemented"))
+  (define prefix (prefix-of split))
+  (idx->tensors (fashion-mnist-idx (string-append prefix "-images-idx3-ubyte.gz"))
+                (fashion-mnist-idx (string-append prefix "-labels-idx1-ubyte.gz"))
+                device))
 
 (define/contract-out (fashion-mnist-dataset [split 'train] #:device [device #f]) ;; noqa
   (->* () ((or/c 'train 'test) #:device (or/c #f device/c)) dataset?)
-  (error 'fashion-mnist-dataset "unimplemented"))
+  (define-values (images labels) (load-fashion-mnist split #:device device))
+  (tensor-dataset images labels))
 
 (define-runtime-path fixture-dir "fixtures/fashion-mnist")
 
 (define/contract-out (load-fashion-mnist-fixture [split 'train] #:device [device #f]) ;; noqa
   (->* () ((or/c 'train 'test) #:device (or/c #f device/c)) (values tensor? tensor?))
-  (error 'load-fashion-mnist-fixture "unimplemented"))
+  (define-values (prefix n)
+    (match split
+      ['train (values "train" 512)]
+      ['test (values "t10k" 128)]))
+  (define (fixture kind)
+    (~> (format "~a-~a-~a-ubyte" prefix n kind) (build-path fixture-dir _) file->bytes))
+  (idx->tensors (fixture "images-idx3") (fixture "labels-idx1") device))

@@ -15,7 +15,14 @@
        #:pre/name (bs n) "n exceeds the buffer's record count"
        (<= n (record-count bs))
        [_ bytes?])
-  (error 'idx-head "unimplemented"))
+  (define ndim (bytes-ref bs 3))
+  (define-values (dims _data) (read-idx bs))
+  (define record (apply * (cdr dims)))
+  (define start (+ 4 (* 4 ndim)))
+  (bytes-append (subbytes bs 0 4)
+                (integer->integer-bytes n 4 #f #t)
+                (subbytes bs 8 start)
+                (subbytes bs start (+ start (* n record)))))
 
 (define-runtime-path fixture-dir "../torch/vision/fixtures/fashion-mnist")
 
