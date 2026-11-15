@@ -156,7 +156,7 @@
     (~> (twin x) sum backward!)
     (define twin-grads (map (lambda (p) (flat (grad p))) (parameters twin)))
     (define before (map flat (parameters twin)))
-    (step! (plain-sgd (parameters twin) 0.1))
+    (~> (parameters twin) (plain-sgd 0.1) step!)
     (plain-run unscaled twin-grads before (map flat (parameters twin))
                (map flat (parameters net)) (grad-scaler-scale s)))
 
