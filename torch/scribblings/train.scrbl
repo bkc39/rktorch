@@ -452,7 +452,9 @@ naming it.
                        void?])]{
 Manual optimization, inside a @racket[define-training-step] of a trainer
 defined with @racket[#:automatic-optimization? #f]; the loop then zeroes,
-backpropagates, clips and steps nothing, and steps no schedule.
+backpropagates, clips and steps nothing, and steps no schedule; it still
+clears every gradient before a validation within the epoch, as Lightning's
+@tt{on_validation_model_zero_grad} does after each manual batch.
 @racket[manual-zero-grads!] runs the @racket[on-before-zero-grad] hooks, then
 @racket[zero-grads!]. @racket[manual-backward!] scales the loss under a
 @racket['16-mixed] scaler and runs @racket[backward!] between

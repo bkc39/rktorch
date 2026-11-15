@@ -134,6 +134,44 @@
     (check-exn blames-this-test?
                (lambda () (fit (Skipper) (toy-loader 2) #:max-epochs 1 #:logger #f))))
 
+  (define-trainer Pairs (net)
+    #:automatic-optimization? #f
+    (define-init (n) (set! net n))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y)
+      (manual-backward! run (mse-loss (net x) y))
+      (when (odd? (run-batch-index run))
+        (match-define (list opt) (run-optimizers run))
+        (manual-step! run opt)
+        (manual-zero-grads! run opt))
+      #f)
+    (define-validation-step (x y)
+      (mse-loss (net x) y)))
+
+  (define (hand-pairs net #:clear-each-batch? clear?)
+    (define opt (sgd (parameters net) #:lr 0.1))
+    (for ([(x y) (in-dataloader (loader))]
+          [i (in-naturals)])
+      (~> (net x) (mse-loss y) backward!)
+      (when (odd? i)
+        (step! opt))
+      (when (or clear? (odd? i))
+        (zero-grads! opt)))
+    (map flat (parameters net)))
+
+  (bounded-test "manual mode clears the gradients before an in-epoch validation, as Lightning"
+    (manual-seed! 0)
+    (define net (Linear 2 1))
+    (define validated (layer-copy net))
+    (match-define (list cleared kept)
+      (map (lambda (clear?) (hand-pairs (layer-copy net) #:clear-each-batch? clear?)) '(#t #f)))
+    (fit (Pairs net) (loader) #:max-epochs 1 #:logger #f)
+    (fit (Pairs validated) (loader) #:val (toy-loader 2) #:val-check-interval 1
+         #:max-epochs 1 #:logger #f)
+    (check-equal? (map flat (parameters net)) kept)
+    (check-equal? (map flat (parameters validated)) cleared)
+    (check-not-equal? cleared kept))
+
   (define-trainer ManualLogged (net steps)
     #:automatic-optimization? #f
     (define-init (n) (set! net (Linear 2 1)) (set! steps n))
