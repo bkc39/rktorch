@@ -21,6 +21,7 @@
                     call-with-python-env check-training-twin python-cuda-available?
                     python-torch-available?)
            (only-in "private/flat.rkt" flat)
+           (only-in "private/plain-sgd.rkt" plain-sgd)
            (only-in "private/trainer-kit.rkt" toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
@@ -164,6 +165,34 @@
 
   (bounded-test "a manual step with no gradients leaves the scaler ready for the next"
     (gradless-steps manual-optimizer-step!))
+
+  (define (plain-window factor)
+    (manual-seed! 0)
+    (define net (Linear 2 1))
+    (define twin (layer-copy net))
+    (define opt (plain-sgd (parameters net) 0.1))
+    (define r (fresh-run (Watched (box '())) 'fit (cpu-device) #:optimizers (list opt)))
+    (define s (grad-scaler #:device 'cpu))
+    (define twin-s (grad-scaler #:device 'cpu))
+    (set-run-grad-scaler! r s)
+    (define x (randn 4 2))
+    (define before (map flat (parameters net)))
+    (backward! (grad-scaler-scale-loss s (* (sum (net x)) factor)))
+    (window-step! r #f #:backward? #t)
+    (hand-scaled-step! twin-s (plain-sgd (parameters twin) 0.1) (* (sum (twin x)) factor))
+    (check-equal? (map flat (parameters net)) (map flat (parameters twin)))
+    (check-equal? (grad-scaler-scale s) (grad-scaler-scale twin-s))
+    (list before (map flat (parameters net)) (grad-scaler-scale s)))
+
+  (bounded-test "a scaler window steps a user gen:optimizer as a hand-scaled step"
+    (match-define (list before after scale) (plain-window 1.0))
+    (check-not-equal? after before)
+    (check-equal? scale 65536.0))
+
+  (bounded-test "a scaler window skips a user gen:optimizer's inf step"
+    (match-define (list before after scale) (plain-window +inf.0))
+    (check-equal? after before)
+    (check-equal? scale 32768.0))
 
   (define-trainer Gappy (net)
     (define-init (model) (set! net model))

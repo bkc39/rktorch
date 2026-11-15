@@ -109,18 +109,21 @@
 
 (struct gradient-bucket (device dtype grads))
 
+(define (placement-cache! root)
+  (match root
+    [(? tracked?) (follow-moves! root) (tracked-keys root)]
+    [_ (make-hasheq)]))
+
 (define (call-with-gradient-buckets opt proc)
-  (define root (optimizer-root opt))
-  (define keys (tracked-keys root))
-  (define (key-of qg)
-    (match-define (cons q _) qg)
-    (hash-ref! keys q (lambda () (placement q))))
-  (define (bucket-of qgs)
-    (match-define (list (and head (cons _ g)) (cons _ more) ...) qgs)
-    (match-define (cons dev dt) (key-of head))
-    (gradient-bucket dev dt (cons g more)))
   (with-no-grad
-    (follow-moves! root)
+    (define keys (placement-cache! (optimizer-root opt)))
+    (define (key-of qg)
+      (match-define (cons q _) qg)
+      (hash-ref! keys q (lambda () (placement q))))
+    (define (bucket-of qgs)
+      (match-define (list (and head (cons _ g)) (cons _ more) ...) qgs)
+      (match-define (cons dev dt) (key-of head))
+      (gradient-bucket dev dt (cons g more)))
     (with-gradients ([qs gs] (optimizer-parameters opt))
       (proc (map bucket-of (group-by key-of (map cons qs gs)))))))
 

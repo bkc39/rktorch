@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match)
+  (require (only-in racket/match match match-define struct*)
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
@@ -9,10 +9,11 @@
            (only-in "../nn.rkt"
                     Linear Parameter adam grad-scaler grad-scaler-enabled? grad-scaler-scale
                     grad-scaler-scale-loss grad-scaler-step! grad-scaler-unscale!
-                    grad-scaler-update! parameters sgd step! zero-grads!)
+                    grad-scaler-update! layer-copy parameters sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/flat.rkt" flat)
+           (only-in "private/plain-sgd.rkt" plain-sgd)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "grad-scaler-edge-test"))
@@ -136,4 +137,39 @@
     (check-equal? (list (flat (grad p32)) (flat (grad p64))) '((1.0 -0.5) (3.0 4.0)))
     (grad-scaler-step! s opt)
     (grad-scaler-update! s)
-    (check-equal? (flat p64) (list (- 1.5 (* 0.1 3.0)) (- 2.0 (* 0.1 4.0))))))
+    (check-equal? (flat p64) (list (- 1.5 (* 0.1 3.0)) (- 2.0 (* 0.1 4.0)))))
+
+  (struct plain-run (unscaled twin-grads before stepped params scale))
+
+  (define (plain-scaled-run bad?)
+    (manual-seed! 0)
+    (define net (Linear 3 2))
+    (define twin (layer-copy net))
+    (define x (randn 4 3))
+    (define opt (plain-sgd (parameters net) 0.1))
+    (define s (cpu-scaler))
+    (backward! (grad-scaler-scale-loss s (* (sum (net x)) (if bad? +inf.0 1.0))))
+    (grad-scaler-unscale! s opt)
+    (define unscaled (map (lambda (p) (flat (grad p))) (parameters net)))
+    (grad-scaler-step! s opt)
+    (grad-scaler-update! s)
+    (~> (twin x) sum backward!)
+    (define twin-grads (map (lambda (p) (flat (grad p))) (parameters twin)))
+    (define before (map flat (parameters twin)))
+    (step! (plain-sgd (parameters twin) 0.1))
+    (plain-run unscaled twin-grads before (map flat (parameters twin))
+               (map flat (parameters net)) (grad-scaler-scale s)))
+
+  (bounded-test "a user gen:optimizer unscales and steps as the unscaled run"
+    (match-define (struct* plain-run ([unscaled unscaled] [twin-grads twin-grads] [stepped stepped]
+                                      [params params] [scale scale]))
+      (plain-scaled-run #f))
+    (check-equal? unscaled twin-grads)
+    (check-equal? params stepped)
+    (check-equal? scale 65536.0))
+
+  (bounded-test "a user gen:optimizer skips an inf step and halves the scale"
+    (match-define (struct* plain-run ([before before] [params params] [scale scale]))
+      (plain-scaled-run #t))
+    (check-equal? params before)
+    (check-equal? scale 32768.0)))
