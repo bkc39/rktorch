@@ -511,7 +511,10 @@ the last defence when a trough collection is not yet due:
   box for the length of that region, which covers the young bytes too:
   their take, the `young-taken` point and their `note-young!` all sit
   between the raise and the lowering, as do the live and entry moves and
-  their `tally-moving` points. Every flush that promises its
+  their `tally-moving` points. The lowering runs in a cleanup: a flush
+  that raises (a sync that raises with its claim held) would otherwise
+  leave the count raised, and every later wait on that tally would spin
+  forever. Every flush that promises its
   counts have landed (`flush-tally!`, so the reaper's `#:after-batch`
   hook, and each tally of `flush-tallies!`) waits after its own transfer
   for that count to reach 0: another thread's flush may have taken the
