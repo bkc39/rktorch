@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list append* append-map count second)
+(require (only-in racket/list append* append-map count)
          (only-in racket/match match-define match-lambda)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-prefix? string-replace)
@@ -28,16 +28,13 @@
          compare-trace
          trace-gaps)
 
-(struct trace ([events #:mutable]))
-
-(define (trace-recorder)
-  (trace '()))
+(struct trace-recorder ([events #:auto #:mutable]) #:auto-value '())
 
 (define (note! tr kind v)
-  (set-trace-events! tr (cons (cons kind v) (trace-events tr))))
+  (set-trace-recorder-events! tr (cons (cons kind v) (trace-recorder-events tr))))
 
 (define ((events-of kind) tr)
-  (for/list ([event (in-list (reverse (trace-events tr)))]
+  (for/list ([event (in-list (reverse (trace-recorder-events tr)))]
              #:when (eq? (car event) kind))
     (cdr event)))
 
@@ -62,15 +59,12 @@
       (note! tr 'scale (grad-scaler-scale scaler))))
   (lambda-callback #:on-train-batch-end batch-end! #:on-before-optimizer-step before-step!))
 
-(struct row-logger (tr)
+(struct trace-logger (tr)
   #:methods gen:training-logger
   [(define (logger-log-hyperparams! l _params) (void))
    (define (logger-log-metrics! l metrics step)
-     (note! (row-logger-tr l) 'row (list step metrics)))
+     (note! (trace-logger-tr l) 'row (list step metrics)))
    (define (logger-finalize! l _status) (void))])
-
-(define (trace-logger tr)
-  (row-logger tr))
 
 (define (lightning-name s)
   (string-replace s "-" "_"))
@@ -113,26 +107,31 @@
     (match-define (cons name t) np)
     (cons (lightning-name name) (~> t (reshape -1) tensor->list))))
 
-(define (val-row? row)
-  (for/or ([k (in-hash-keys (second row))]) (string-prefix? k "val/")))
+(define (sorted-keys metrics)
+  (sort (hash-keys metrics) string<?))
+
+(define val-row?
+  (match-lambda [(list _ m) (for/or ([k (in-hash-keys m)]) (string-prefix? k "val/"))]))
+
+(define (row-steps rows)
+  (map (match-lambda [(list step _) step]) rows))
 
 (define (row-keys rows)
-  (map (match-lambda [(list _ m) (sort (hash-keys m) string<?)]) rows))
+  (map (match-lambda [(list _ m) (sorted-keys m)]) rows))
 
 (define (row-values rows)
-  (for*/list ([row (in-list rows)]
-              [metrics (in-value (second row))]
-              [k (in-list (sort (hash-keys metrics) string<?))])
-    (hash-ref metrics k)))
+  (append-map (match-lambda [(list _ m) (map (lambda (k) (hash-ref m k)) (sorted-keys m))])
+              rows))
 
 (define (check-rows label ours theirs epochs tolerance acc-tolerance)
-  (check-equal? (map car ours) (map car theirs) (format "~a: row steps" label))
+  (check-equal? (row-steps ours) (row-steps theirs) (format "~a: row steps" label))
   (check-equal? (row-keys ours) (row-keys theirs) (format "~a: row keys" label))
   (check-equal? (count val-row? ours) epochs (format "~a: validation rows" label))
   (check-equal? (count val-row? theirs) epochs (format "~a: twin validation rows" label))
   (for ([o (in-list ours)] [t (in-list theirs)] [i (in-naturals)])
     (match-define (list _ om) o)
-    (for ([(k v) (in-hash (second t))] #:when (hash-has-key? om k))
+    (match-define (list _ tm) t)
+    (for ([(k v) (in-hash tm)] #:when (hash-has-key? om k))
       (check-close (format "~a: row ~a ~a" label i k) (list (hash-ref om k)) (list v)
                    (if (equal? k "val/acc") acc-tolerance tolerance)))))
 
@@ -167,8 +166,8 @@
           'rows (largest-gap (row-values (map lightning-row (trace-rows tr)))
                              (row-values (map json-row (hash-ref json 'rows))))
           'state (for/fold ([widest 0.0]) ([entry (in-list state)])
-                   (max widest (largest-gap (cdr entry)
-                                            (hash-ref theirs (string->symbol (car entry))))))))
+                   (match-define (cons name vals) entry)
+                   (max widest (largest-gap vals (hash-ref theirs (string->symbol name)))))))
 
 (module+ test
   (require (only-in json string->jsexpr)
