@@ -2,6 +2,7 @@
 
 (module+ cases
   (require (for-syntax racket/base)
+           (only-in racket/dict dict-ref)
            (only-in racket/list drop-right flatten last)
            rackunit
            syntax/parse/define
@@ -55,9 +56,16 @@
               #:when (eq? (device-type (car entry)) 'cpu))
       (cdr entry)))
 
-  (define (cpu-ledger)
+  (struct ledger (counted live drift))
+
+  (define (ledger-reading)
     (define-values (counters fold) (counters-and-fold))
-    (values (cpu-total counters) (cpu-total fold)))
+    (ledger (cpu-total counters)
+            (cpu-total fold)
+            (for/list ([entry (in-list counters)]
+                       #:unless (= (cdr entry) (dict-ref fold (car entry) 0)))
+              (define live (dict-ref fold (car entry) 0))
+              (list (car entry) (cdr entry) live (- (cdr entry) live)))))
 
   (define (log-mel samples rate)
     (log-mel-spectrogram (ref samples 0) #:sample-rate rate))
@@ -207,17 +215,19 @@
     (with-utterances (us)
       (define ds (librispeech us))
       (settle!)
-      (define-values (counted-before before) (cpu-ledger))
+      (define before (ledger-reading))
       (for ([(x lengths transcripts) (dataloader ds #:batch-size 2 #:workers 4)])
         (void))
       (settle!)
-      (define-values (counted after) (cpu-ledger))
-      (unless (= counted after)
-        (printf "[librispeech-dataset-test] L11: the counters read ~a bytes, the fold ~a\n"
-                counted after))
-      (check-true (<= after before)
-                  (format "~a bytes live before, ~a after (counters ~a, ~a; ~a workers alive)"
-                          before after counted-before counted (live-worker-count))))))
+      (define after (ledger-reading))
+      (define workers (live-worker-count))
+      (check-equal? (ledger-drift after) '()
+                    (format "(device counters fold difference): ~a; ~a workers alive"
+                            (ledger-drift after) workers))
+      (check-true (<= (ledger-live after) (ledger-live before))
+                  (format "~a bytes live before, ~a after (CPU counters ~a, ~a); ~a workers alive"
+                          (ledger-live before) (ledger-live after)
+                          (ledger-counted before) (ledger-counted after) workers)))))
 
 (module+ test
   (require (only-in "private/wedge.rkt" call-with-process-deadline))
