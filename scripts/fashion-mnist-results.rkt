@@ -83,7 +83,8 @@
            (only-in torch/scribblings/examples/20-fashion-mnist warmup-steps)
            (only-in "../examples/test/private/env.rkt" env-number)
            (only-in "../examples/test/private/fashion-mnist-kit.rkt"
-                    full-batch-size headline-device run-headline twin-config twin-json))
+                    full-batch-size headline-device print-epoch-rows run-headline twin-config
+                    twin-json))
   (define-runtime-path out "../torch/scribblings/results/fashion-mnist.rktd")
   (define device (headline-device))
   (define epochs (env-number "EPOCHS" 5))
@@ -113,7 +114,6 @@
                           #:commit commit #:seconds (list racket-seconds lightning-seconds)))
   (call-with-output-file out #:exists 'truncate
     (lambda (port) (pretty-write record port)))
-  (for ([name (in-list '(racket lightning))])
-    (printf "~a: acc ~a, ~a s\n" name (hash-ref (hash-ref record name) 'accuracy)
-            (hash-ref (hash-ref record name) 'seconds)))
+  (print-epoch-rows racket-rows)
+  (printf "Lightning: test acc ~a\n" (hash-ref (hash-ref record 'lightning) 'accuracy))
   (printf "wrote ~a\n" out))

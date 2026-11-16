@@ -1,5 +1,14 @@
 #lang racket/base
 
+(module+ main
+  (require (only-in torch accelerator-if-available)
+           (only-in "private/env.rkt" env-number)
+           (only-in "private/fashion-mnist-kit.rkt" print-epoch-rows run-headline))
+  (define device (accelerator-if-available))
+  (printf "device: ~a\n" device)
+  (define-values (rows _run _total) (run-headline #:epochs (env-number "EPOCHS" 5) #:device device))
+  (print-epoch-rows rows))
+
 (module+ test
   (require (only-in racket/file file->value)
            (only-in racket/list append* append-map count fifth filter-map first fourth last

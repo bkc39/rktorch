@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/match match match-define)
+(require (only-in racket/format ~r)
+         (only-in racket/list fourth last)
+         (only-in racket/match match match-define)
          (only-in torch cpu-device cuda-available? cuda-device device-type)
          (only-in torch/data/loader tensor-dataset)
          (only-in torch/scribblings/examples/20-fashion-mnist fashion-recipe train-fashion-mnist)
@@ -16,6 +18,7 @@
          precision-for
          headline-device
          epoch-recorder
+         print-epoch-rows
          run-example
          run-headline
          twin-config
@@ -48,6 +51,16 @@
                      rows)))
   (values (lambda-callback #:on-train-epoch-start start! #:on-train-epoch-end record!)
           (lambda () (reverse rows))))
+
+(define (fixed x digits)
+  (~r x #:precision (list '= digits)))
+
+(define (print-epoch-rows rows)
+  (for ([row (in-list rows)])
+    (match-define (list epoch train-loss val-loss acc seconds) row)
+    (printf "epoch ~a: loss ~a, val loss ~a, val acc ~a, ~as\n" epoch
+            (fixed train-loss 4) (fixed val-loss 4) (fixed acc 4) (fixed seconds 1)))
+  (printf "test acc ~a\n" (fixed (fourth (last rows)) 4)))
 
 (define (stepping-recorder)
   (define total (box #f))
