@@ -158,7 +158,7 @@
   (test-case "the real probe's OOM is caught and warned once"
     (cond
       [(not (mps-available?))
-       (skipped "no Metal device is advertised; the OOM path runs on macOS 14")]
+       (skipped "no Metal device is advertised; the OOM path needs one that cannot allocate")]
       [(not (equal? expected "cpu"))
        (skipped "RKTORCH_EXPECT_ACCELERATOR is not cpu, so MPS is not known to fail here")]
       [else

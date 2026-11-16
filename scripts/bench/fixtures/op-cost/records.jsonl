@@ -67,11 +67,11 @@
 {"kind": "op", "impl": "rktorch", "op": "scalar-add", "layer": "raw", "threads": 1, "rep": 2, "ops": 1000, "elapsed_ms": 1, "us_per_op": 1, "ops_per_s": 1000000.0, "heap_bytes_per_op": 100, "gc_ms": 1, "load": [30.0, 30.0, 30.0]}
 {"kind": "op", "impl": "rktorch", "op": "scalar-add", "layer": "raw", "threads": 8, "rep": 2, "ops": 1000, "elapsed_ms": 1.5, "us_per_op": 1.5, "ops_per_s": 666666.6666666666, "heap_bytes_per_op": 100, "gc_ms": 1, "load": [30.0, 30.0, 30.0]}
 {"kind": "sampler", "impl": "rktorch", "op": "scalar-add", "layer": "facade", "ops": 10, "total_ms": 100, "shares": {"accounting": 0.3, "pressure": 0.25, "finalizer": 0.1, "shape": 0.08, "contract": 0.0}, "load": [30.0, 30.0, 30.0]}
-{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 0, "rep": 0, "samples_per_s": 100, "elapsed_s": 10, "gc_ms": 10, "load": [30.0, 30.0, 30.0]}
+{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 0, "samples": 1000, "rep": 0, "samples_per_s": 100, "elapsed_s": 10, "gc_ms": 10, "load": [30.0, 30.0, 30.0]}
 {"kind": "pipeline", "impl": "pytorch", "pipeline": "cifar", "workers": 0, "rep": 0, "samples_per_s": 400, "elapsed_s": 2, "gc_ms": null, "load": [30.0, 30.0, 30.0]}
-{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "rep": 0, "samples_per_s": 600, "elapsed_s": 2, "gc_ms": 300, "load": [30.0, 30.0, 30.0]}
-{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "rep": 1, "samples_per_s": 700, "elapsed_s": 2, "gc_ms": 400, "load": [30.0, 30.0, 30.0]}
-{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "rep": 2, "samples_per_s": 650, "elapsed_s": 2, "gc_ms": 500, "load": [30.0, 30.0, 30.0]}
+{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "samples": 1200, "rep": 0, "samples_per_s": 600, "elapsed_s": 2, "gc_ms": 300, "load": [30.0, 30.0, 30.0]}
+{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "samples": 1400, "rep": 1, "samples_per_s": 700, "elapsed_s": 2, "gc_ms": 400, "load": [30.0, 30.0, 30.0]}
+{"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "samples": 1300, "rep": 2, "samples_per_s": 650, "elapsed_s": 2, "gc_ms": 500, "load": [30.0, 30.0, 30.0]}
 {"kind": "pipeline", "impl": "pytorch", "pipeline": "cifar", "workers": 8, "rep": 0, "samples_per_s": 650, "elapsed_s": 2, "gc_ms": null, "load": [30.0, 30.0, 30.0]}
 {"kind": "pipeline", "impl": "rktorch", "pipeline": "cifar", "workers": 8, "rep": 3, "error": "op-cost-cell exited with 1", "load": [30.0, 30.0, 30.0]}
 
