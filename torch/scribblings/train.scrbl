@@ -188,7 +188,10 @@ or @racket[exn:break] is raised, @racket[fit] runs each callback's
 @racket[on-exception] and then @racket[teardown] with breaks disabled, and
 re-raises the exception; a break issued meanwhile is absorbed if breaks were
 enabled when @racket[fit] was called, and stays pending otherwise. A loop that
-leaves a loader early stops its @racket[#:workers] threads. The trainer does
+leaves a loader early stops its @racket[#:workers] threads. As Lightning's fetcher, a
+loop pulls a sized loader no further than its last batch, so a shuffled loader that
+its batch size divides evenly orders its next epoch otherwise than a loop run to
+exhaustion. The trainer does
 not yet support training from a loader with @racket[#:workers].
 @racket[#:precision] @racket['auto-mixed] picks @racket['bf16-mixed] where the
 device supports it and @racket['16-mixed] otherwise; @racket['16-mixed] scales
