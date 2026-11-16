@@ -133,6 +133,13 @@
         (check-exn #rx"file: .*train-labels-idx1-ubyte[.]gz"
                    (lambda () (fashion-mnist-idx "train-labels-idx1-ubyte.gz"))))))
 
+  (test-case "fashion-mnist-cached? asks that the four files be present, as _check_exists"
+    (define names (map car fashion-mnist-resources))
+    (with-cache (for/list ([name (in-list names)]) (cons name #"not a gzip"))
+      (lambda () (check-true (fashion-mnist-cached?))))
+    (with-cache (for/list ([name (in-list (cdr names))]) (cons name #"not a gzip"))
+      (lambda () (check-false (fashion-mnist-cached?)))))
+
   (define cache (fashion-mnist-cache-dir))
 
   (cond

@@ -114,9 +114,9 @@ and the offline examples train on.}
 Zalando's Fashion-MNIST, torchvision's @tt{FashionMNIST}: 28 by 28 grey images of
 clothing in ten classes, in MNIST's IDX layout, 60000 for training and 10000 for
 testing. Fetched once from torchvision's mirror into the cache directory (or
-@envvar{RKTORCH_FASHION_MNIST_DIR}); a file whose MD5 is not torchvision's is not
-cached, and a cached one that is not torchvision's is an error naming it. MIT-licensed;
-a real subset ships as the fixture.
+@envvar{RKTORCH_FASHION_MNIST_DIR}); a download whose MD5 is not torchvision's is not
+cached, and loading a cached file whose MD5 is not torchvision's is an error naming it.
+MIT-licensed; a real subset ships as the fixture.
 
 @defproc[(load-fashion-mnist [split (or/c 'train 'test) 'train]
                              [#:device device (or/c #f device/c) #f])
@@ -140,7 +140,8 @@ Zalando's MIT notice, in the form of @racket[load-fashion-mnist]. What the parit
 tests train on.}
 
 @defproc[(fashion-mnist-cached?) boolean?]{
-Whether all four files are in the cache.}
+Whether all four files are present in the cache, as torchvision's @tt{_check_exists};
+their MD5 is checked when they are loaded.}
 
 @torch-examples[
 (require torch/vision/fashion-mnist)

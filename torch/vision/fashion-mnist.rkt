@@ -100,8 +100,10 @@
 
 (define split/c (or/c 'train 'test))
 
+(define maybe-device/c (or/c #f device/c))
+
 (define split-tensors/c
-  (->* () (split/c #:device (or/c #f device/c)) (values tensor? tensor?)))
+  (->* () (split/c #:device maybe-device/c) (values tensor? tensor?)))
 
 (define (split-row split)
   (cdr (assq split splits)))
@@ -112,7 +114,7 @@
   (idx->tensors (lambda (kind) (fashion-mnist-idx (archive-name prefix kind))) device))
 
 (define/contract-out (fashion-mnist-dataset [split 'train] #:device [device #f]) ;; noqa
-  (->* () (split/c #:device (or/c #f device/c)) dataset?)
+  (->* () (split/c #:device maybe-device/c) dataset?)
   (define-values (images labels) (load-fashion-mnist split #:device device))
   (tensor-dataset images labels))
 
