@@ -2,7 +2,7 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in ffi/unsafe/custodian make-custodian-at-root)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match* match-define)
          (only-in racket/promise delay force)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in torch + @ backward! randn relu sum tensor)
@@ -142,25 +142,29 @@
          [(>= (clock-ms) deadline) steps]
          [else (step!) (loop (add1 steps))]))]))
 
-(define (start-workers n go? stop? counts failure make-mix)
+(define (run-worker! phase mix count!)
+  (let loop ([k 0])
+    (match* ((unbox phase) k)
+      [('wait _) (loop k)]
+      [('abort _) (void)]
+      [('stop (? positive?)) (void)]
+      [(_ _)
+       (mix)
+       (count! (add1 k))
+       (loop (add1 k))])))
+
+(define (start-workers n phase counts failure make-mix)
   (define mixes (for/list ([_ (in-range n)]) (make-mix)))
   (define custodian (make-custodian-at-root))
   (define (fail! e)
     (let retry () (unless (or (unbox failure) (box-cas! failure #f e)) (retry)))
-    (set-box! stop? #t))
+    (set-box! phase 'stop))
   (values custodian
           (parameterize ([current-custodian custodian])
             (for/list ([mix (in-list mixes)] [i (in-naturals)])
               (thread (lambda ()
                         (with-handlers ([(lambda (_e) #t) fail!])
-                          (let loop ([k 0])
-                            (cond
-                              [(not (unbox go?)) (unless (unbox stop?) (loop k))]
-                              [(and (positive? k) (unbox stop?)) (void)]
-                              [else
-                               (mix)
-                               (vector-set! counts i (add1 k))
-                               (loop (add1 k))]))))
+                          (run-worker! phase mix (lambda (k) (vector-set! counts i k)))))
                       #:pool 'own)))))
 
 (define (reap! custodian workers grace)
@@ -170,17 +174,16 @@
       [else (parameterize ([current-custodian custodian]) (kill-thread w)) 0])))
 
 (define (call-with-workers n make-mix grace proc)
-  (define go? (box #f))
-  (define stop? (box #f))
+  (define phase (box 'wait))
   (define counts (make-vector n 0))
   (define failure (box #f))
-  (define-values (custodian workers) (start-workers n go? stop? counts failure make-mix))
+  (define-values (custodian workers) (start-workers n phase counts failure make-mix))
   (define (stop!)
-    (set-box! stop? #t)
+    (set-box! phase (if (eq? (unbox phase) 'wait) 'abort 'stop))
     (reap! custodian workers grace))
   (define result
     (with-handlers ([(lambda (_e) #t) (lambda (e) (stop!) (raise e))])
-      (proc (lambda () (set-box! go? #t))
+      (proc (lambda () (set-box! phase 'go))
             (lambda () (for/sum ([k (in-vector counts)]) k)))))
   (define stopped (stop!))
   (match (unbox failure)
@@ -452,6 +455,36 @@
          (for ([b (in-list stamps)])
            (check-pred real? (unbox b) "every worker ran its mix once")
            (check-true (>= (unbox b) (hash-ref run 'started_ms))))))))
+
+  (test-case "a worker runs once if the window closed while it waited, never if the run aborted"
+    (define (scripted seen)
+      (define left seen)
+      (impersonate-box (box 'wait)
+                       (lambda (_b _v)
+                         (match left
+                           [(list now) now]
+                           [(cons now more) (set! left more) now]))
+                       (lambda (_b v) v)))
+    (for ([seen (in-list '((wait wait stop) (wait abort) (go go stop) (stop)))]
+          [runs (in-list '(1 0 2 1))])
+      (define ran (box 0))
+      (define counted (box 0))
+      (run-worker! (scripted seen) (lambda () (set-box! ran (add1 (unbox ran)))) (lambda (k) (set-box! counted k)))
+      (check-equal? (unbox ran) runs (format "~a" seen))
+      (check-equal? (unbox counted) runs (format "~a" seen))))
+
+  (test-case "a run that fails before the clock starts runs no mix"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define ticks (box 0))
+       (define (ticking)
+         (lambda () (let loop () (unless (box-cas! ticks (unbox ticks) (add1 (unbox ticks))) (loop)))))
+       (check-exn #rx"probe: down"
+                  (lambda ()
+                    (scaling-run 2 'idle #:seconds 0 #:mix ticking
+                                 #:probe (lambda () (raise-user-error 'probe "down")))))
+       (check-equal? (unbox ticks) 0))))
 
   (test-case "a worker's raise stops the others and fails the run"
     (call-with-process-deadline
