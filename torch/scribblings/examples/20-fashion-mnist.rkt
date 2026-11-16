@@ -3,6 +3,7 @@
 @(require (only-in racket/file file->value)
           (only-in racket/format ~a)
           (only-in racket/match match-define)
+          (only-in torch/scribblings/epoch-rows epoch-row->strings percent)
           torch/scribblings/labels
           (for-label torch/data/loader torch/vision/fashion-mnist))
 
@@ -11,8 +12,6 @@
                            ('seed run-seed) ('lightning-version lightning-version)
                            ('python-torch python-torch))
    (file->value (collection-file-path "fashion-mnist.rktd" "torch" "scribblings" "results")))
-
-@(define (percent x) (real->decimal-string (* 100 x) 1))
 
 @title[#:tag "ex-fashion-mnist"]{Fashion-MNIST, step for step with Lightning}
 
@@ -25,8 +24,7 @@ gradients accumulated over two batches and clipped, and mixed precision. Its twi
 2.6.5, and the tests hold the two to each other step for step.
 
 @chunk[<r20-require>
-(require (only-in racket/match match-define)
-         (only-in racket/math exact-ceiling)
+(require (only-in racket/math exact-ceiling)
          torch torch/nn torch/data/loader torch/train)]
 
 @chunk[<r20-provide>
@@ -58,12 +56,14 @@ rate over the first quarter of the optimizer steps and then follows a cosine dow
 Lightning's @tt{estimated_stepping_batches}.
 
 @chunk[<r20-trainer>
-(define fashion-recipe
-  (hasheq 'seed 0 'lr 2e-3 'weight-decay 0.05 'accumulate 2 'clip 0.5))
+(define seed 0)
+(define lr 2e-3)
+(define weight-decay 0.05)
+(define accumulate 2)
+(define clip-val 0.5)
 
-(match-define (hash-table ('seed seed) ('lr lr) ('weight-decay weight-decay)
-                          ('accumulate accumulate) ('clip clip-val))
-  fashion-recipe)
+(define fashion-recipe
+  (hasheq 'seed seed 'lr lr 'weight-decay weight-decay 'accumulate accumulate 'clip clip-val))
 
 (define (warmup-steps total)
   (exact-ceiling (/ total 4)))
@@ -132,10 +132,8 @@ here and @(percent (hash-ref theirs 'accuracy)) percent in Lightning
         (for*/list ([(our-row their-row) (in-parallel (hash-ref ours 'epochs)
                                                       (hash-ref theirs 'epochs))]
                     [(side row) (in-parallel '("Racket" "Lightning") (list our-row their-row))])
-          (match-define (list epoch train-loss val-loss acc seconds) row)
-          (list (~a epoch) side (real->decimal-string train-loss 4)
-                (real->decimal-string val-loss 4) (string-append (percent acc) "%")
-                (real->decimal-string seconds 1)))))
+          (match-define (cons epoch cells) (epoch-row->strings row))
+          (list* epoch side cells))))
 
 @chunk[<*>
   <r20-require>
