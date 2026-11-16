@@ -313,7 +313,7 @@
                   (lambda ()
                     (call-with-break-parameterization breaks
                                                       (lambda () (proc count counted-batch))))
-                  (lambda () (if (= taken count) (finish!) (abandon!))))))
+                  (lambda () (abandon!)))))
 
 (define-syntax-parse-rule (with-traversal ([count:id batch:id] loader:expr) body:expr ...+)
   (call-with-traversal loader (lambda (count batch) body ...)))
