@@ -13,13 +13,14 @@
            (only-in "../data/loader.rkt"
                     dataloader dataset-batch dataset-length dataset-ref
                     default-collate)
+           (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../main.rkt"
-                    device-type dtype make-generator narrow native-memory-use
+                    device-type dtype make-generator narrow
                     ref shape sum tensor tensor->list tensor? to-dtype zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/heap-allocation.rkt" median-allocation)
-           (only-in "private/race-harness.rkt" settle!))
+           (only-in "private/race-harness.rkt" counters-and-fold settle!))
 
   (define caller (blamed "librispeech-dataset-test.rkt"))
 
@@ -49,10 +50,14 @@
   (define (batch-of ds indices [collate default-collate])
     (call-with-values (lambda () (dataset-batch ds indices collate)) list))
 
-  (define (cpu-bytes)
-    (for/sum ([entry (in-list (native-memory-use))]
+  (define (cpu-total by-device)
+    (for/sum ([entry (in-list by-device)]
               #:when (eq? (device-type (car entry)) 'cpu))
       (cdr entry)))
+
+  (define (cpu-ledger)
+    (define-values (counters fold) (counters-and-fold))
+    (values (cpu-total counters) (cpu-total fold)))
 
   (define (log-mel samples rate)
     (log-mel-spectrogram (ref samples 0) #:sample-rate rate))
@@ -202,12 +207,17 @@
     (with-utterances (us)
       (define ds (librispeech us))
       (settle!)
-      (define before (cpu-bytes))
+      (define-values (counted-before before) (cpu-ledger))
       (for ([(x lengths transcripts) (dataloader ds #:batch-size 2 #:workers 4)])
         (void))
       (settle!)
-      (define after (cpu-bytes))
-      (check-true (<= after before) (format "~a bytes before, ~a after" before after)))))
+      (define-values (counted after) (cpu-ledger))
+      (unless (= counted after)
+        (printf "[librispeech-dataset-test] L11: the counters read ~a bytes, the fold ~a\n"
+                counted after))
+      (check-true (<= after before)
+                  (format "~a bytes live before, ~a after (counters ~a, ~a; ~a workers alive)"
+                          before after counted-before counted (live-worker-count))))))
 
 (module+ test
   (require (only-in "private/wedge.rkt" call-with-process-deadline))
