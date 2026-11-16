@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list append* append-map count)
-         (only-in racket/match match-define match-lambda)
+         (only-in racket/match == match-define match-lambda)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-prefix? string-replace)
          (only-in rackunit check-equal? check-true)
@@ -34,9 +34,10 @@
   (set-trace-recorder-events! tr (cons (cons kind v) (trace-recorder-events tr))))
 
 (define ((events-of kind) tr)
-  (for/list ([event (in-list (reverse (trace-recorder-events tr)))]
-             #:when (eq? (car event) kind))
-    (cdr event)))
+  (append-map (match-lambda
+                [(cons (== kind eq?) v) (list v)]
+                [_ '()])
+              (reverse (trace-recorder-events tr))))
 
 (define trace-labels (events-of 'label))
 (define trace-losses (events-of 'loss))
