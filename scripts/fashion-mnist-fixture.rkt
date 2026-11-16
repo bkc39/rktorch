@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in (submod "../torch/vision/fashion-mnist.rkt" private) fashion-mnist-idx idx-head))
+         (only-in (submod "../torch/vision/fashion-mnist.rkt" private) fashion-mnist-idx)
+         (only-in "../torch/vision/private/idx.rkt" idx-head))
 
 (define-runtime-path fixture-dir "../torch/vision/fixtures/fashion-mnist")
 
