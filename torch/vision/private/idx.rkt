@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->i flat-named-contract)
-         (only-in racket/match match match-define)
+         (only-in racket/match match-define)
          (only-in "../../private/contract.rkt" define/contract-out))
 
 (define (header-end bs)
@@ -22,10 +22,8 @@
      (list n (apply * record-shape) end)]))
 
 (define (holds-records? bs n)
-  (match (layout bs)
-    [#f #f]
-    [(list count record start)
-     (and (<= n count) (<= (+ start (* n record)) (bytes-length bs)))]))
+  (match-define (list count record start) (layout bs))
+  (and (<= n count) (<= (+ start (* n record)) (bytes-length bs))))
 
 (define idx-bytes/c
   (flat-named-contract "a uint8 IDX buffer" (lambda (bs) (and (bytes? bs) (layout bs) #t))))
