@@ -115,5 +115,6 @@
   (call-with-output-file out #:exists 'truncate
     (lambda (port) (pretty-write record port)))
   (print-epoch-rows racket-rows)
-  (printf "Lightning: test acc ~a\n" (hash-ref (hash-ref record 'lightning) 'accuracy))
+  (printf "Lightning: test acc ~a\n"
+          (real->decimal-string (hash-ref (hash-ref record 'lightning) 'accuracy) 4))
   (printf "wrote ~a\n" out))

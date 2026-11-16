@@ -26,13 +26,14 @@
            (only-in torch/vision/fashion-mnist load-fashion-mnist-fixture)
            (only-in (submod torch/vision/fashion-mnist private) fashion-mnist-size)
            (only-in "private/fashion-mnist-kit.rkt"
-                    epoch-recorder fixture-batch-size full-batch-size run-example twin-config
-                    twin-json)
+                    epoch-recorder fixture-batch-size full-batch-size print-epoch-rows
+                    run-example twin-config twin-json)
            (only-in "private/lightning-trace.rkt"
                     compare-trace flat-state lightning-name trace-callback trace-gaps
                     trace-labels trace-logger trace-losses trace-lrs trace-norms trace-recorder
                     trace-rows)
-           (only-in "../../scripts/fashion-mnist-results.rkt" fashion-mnist-record))
+           (only-in "../../scripts/fashion-mnist-results.rkt" fashion-mnist-record)
+           (only-in racket/port with-output-to-string))
 
   (define-runtime-path bundle-path "../../torch/scribblings/results/fashion-mnist.rktd")
 
@@ -154,6 +155,10 @@
 
   (test-case "G4-L10: the clip is live in (a)"
     (check-true (> (apply max (trace-norms trace-a)) clip-val)))
+
+  (test-case "the runner's test acc line is the fraction docs/epoch-check.md reads"
+    (define out (with-output-to-string (lambda () (print-epoch-rows '((1 0.5 0.4 0.8993 1.0))))))
+    (check-equal? (cadr (regexp-match #rx"test acc ([0-9.]+)" out)) "0.8993"))
 
   (test-case "the epoch rows are the logged epoch reductions"
     (define (logged key)

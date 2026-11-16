@@ -3,7 +3,7 @@
 (require (only-in racket/list fourth last)
          (only-in torch cpu-device cuda-available? cuda-device device-type)
          (only-in torch/data/loader tensor-dataset)
-         (only-in torch/scribblings/epoch-rows epoch-row->strings percent)
+         (only-in torch/scribblings/epoch-rows epoch-row->strings)
          (only-in torch/scribblings/examples/20-fashion-mnist fashion-recipe train-fashion-mnist)
          (only-in torch/tests/private/python-env call-with-python-env python-result)
          (only-in torch/train lambda-callback run-epoch run-estimated-stepping-batches run-metric)
@@ -52,7 +52,7 @@
 (define (print-epoch-rows rows)
   (for ([row (in-list rows)])
     (apply printf "epoch ~a: loss ~a, val loss ~a, val acc ~a, ~as\n" (epoch-row->strings row)))
-  (printf "test acc ~a%\n" (percent (fourth (last rows)))))
+  (printf "test acc ~a\n" (real->decimal-string (fourth (last rows)) 4)))
 
 (define (stepping-recorder)
   (define total (box #f))
