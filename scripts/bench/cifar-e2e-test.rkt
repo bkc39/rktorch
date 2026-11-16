@@ -21,7 +21,7 @@
       (call-with-output-file path #:exists 'truncate thunk)
       (read-records (list path))))
 
-  (define-values (png-digest h-records refusal refusal-log pre-hook-records)
+  (define-values (png-digest h-records refusal refusal-log pre-hook-records omp-records)
     (with-temporary-path (base (make-temporary-directory "bench-png-~a"))
       (define digest (ensure-cifar10-folder! "fixture" #:base base))
       (define env (environment-variables-copy (current-environment-variables)))
@@ -30,8 +30,8 @@
         `(,(format "~a-~a" pipeline workers)
           ("PIPELINE" . ,pipeline) ("WORKERS" . ,(number->string workers))
           ("DATASET" . "fixture") ("BASE" . "4") ("PNG_DIGEST" . ,tree)))
-      (define (run names variants log)
-        (parameterize ([current-environment-variables env])
+      (define (run names variants log #:env [run-env env])
+        (parameterize ([current-environment-variables run-env])
           (records-of (lambda (out)
                         (run-e2e (find-examples names) #:rounds 1 #:full? #f #:variants variants
                                  #:cache #f #:max-load #f #:libtorch "x" #:out out #:log log
@@ -50,7 +50,16 @@
          (lambda (old-torch)
            (match-define (cons name settings) (tiny "batched" 0))
            (run '("cifar-loader") (list `(,name ,old-torch ,@settings)) quiet))))
-      (values digest records refused (get-output-string log) pre-hook)))
+      (define omp-unset (environment-variables-copy env))
+      (environment-variables-set! omp-unset #"OMP_NUM_THREADS" #f)
+      (define at-two-threads
+        (if (pytorch-available?)
+            (run '("cifar-loader" "py-cifar-loader")
+                 (list `("omp-2" ("OMP_NUM_THREADS" . "2") ,@(cdr (tiny "batched" 0))))
+                 quiet
+                 #:env omp-unset)
+            '()))
+      (values digest records refused (get-output-string log) pre-hook at-two-threads)))
 
   (define (h-group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) h-records))
 
@@ -87,6 +96,17 @@
       (for ([r (in-list twin-runs)])
         (check-equal? (hash-ref (hash-ref r 'meta) 'fixture_digest) png-digest)
         (check-true (boolean? (hash-ref (hash-ref r 'meta) 'pin_memory)))))
+
+    (test-case "a variant's OMP_NUM_THREADS reaches both sides' meta, and H pairs them in one table"
+      (define md (summary-markdown omp-records))
+      (define headings (regexp-match* #rx"(?m:^## H\\.[^\n]*)" md))
+      (with-check-info (['headings headings])
+        (check-equal? (length headings) 1)
+        (check-regexp-match #rx"; OMP_NUM_THREADS=2; run " (car headings)))
+      (check-regexp-match
+       #rx"\\| loader only \\| batched \\| 0 \\| [a-z]+ \\| images/s \\| [0-9]+ \\| [0-9]+ \\| [0-9.]+ \\|"
+       md)
+      (check-false (regexp-match? #rx"no twin" md)))
 
     (test-case "a PyTorch twin refuses a tree whose digest is not the one asked for"
       (check-equal? (for/list ([r (in-list refusal)]) (list (hash-ref r 'group) (hash-ref r 'case)))
