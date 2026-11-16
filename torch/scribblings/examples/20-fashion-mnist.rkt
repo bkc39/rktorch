@@ -1,16 +1,20 @@
 #lang scribble/lp2
 
-@(require (only-in racket/format ~a ~r)
+@(require (only-in racket/file file->value)
+          (only-in racket/format ~a ~r)
           (only-in racket/match match-define)
           torch/scribblings/labels
           (for-label torch/data/loader torch/vision/fashion-mnist))
 
 @(define results
-   (call-with-input-file
-     (collection-file-path "fashion-mnist.rktd" "torch" "scribblings" "results")
-     read))
+   (file->value (collection-file-path "fashion-mnist.rktd" "torch" "scribblings" "results")))
 
-@(define (percent x) (~r (* 100 x) #:precision '(= 1)))
+@(define ours (hash-ref results 'racket))
+@(define theirs (hash-ref results 'lightning))
+
+@(define (fixed x digits) (~r x #:precision (list '= digits)))
+
+@(define (percent x) (fixed (* 100 x) 1))
 
 @title[#:tag "ex-fashion-mnist"]{Fashion-MNIST, step for step with Lightning}
 
@@ -23,15 +27,11 @@ gradients accumulated over two batches and clipped, and mixed precision. Its twi
 2.6.5, and the tests hold the two to each other step for step.
 
 @chunk[<r20-require>
-(require (only-in racket/match match)
-         (only-in racket/math exact-ceiling)
-         torch torch/nn torch/data/loader torch/train
-         (only-in torch/vision/fashion-mnist
-                  fashion-mnist-dataset load-fashion-mnist-fixture))]
+(require (only-in racket/math exact-ceiling)
+         torch torch/nn torch/data/loader torch/train)]
 
 @chunk[<r20-provide>
-(provide FashionClassifier fashion-net pick-device precision-for seed batch-size accumulate
-         clip-val lr weight-decay run-example epoch-recorder train-fashion-mnist)]
+(provide FashionClassifier fashion-net fashion-recipe train-fashion-mnist warmup-steps)]
 
 @bold{The model.} Two convolution blocks, each a 3 by 3 convolution, a batch norm,
 a ReLU and a 2 by 2 max pool, take the 28 by 28 picture to 32 channels of 7 by 7,
@@ -60,11 +60,16 @@ Lightning's @tt{estimated_stepping_batches}.
 
 @chunk[<r20-trainer>
 (define seed 0)
-(define batch-size (hasheq 'fixture 32 'full 128))
-(define accumulate 2)
-(define clip-val 0.5)
 (define lr 2e-3)
 (define weight-decay 0.05)
+(define accumulate 2)
+(define clip-val 0.5)
+
+(define fashion-recipe
+  (hasheq 'seed seed 'lr lr 'weight-decay weight-decay 'accumulate accumulate 'clip clip-val))
+
+(define (warmup-steps total)
+  (exact-ceiling (/ total 4)))
 
 (define-trainer FashionClassifier (net)
   (define-init () (set! net (fashion-net)))
@@ -72,7 +77,7 @@ Lightning's @tt{estimated_stepping_batches}.
   (define-optimizers
     (define opt (adamw (weight-decay-param-groups net #:weight-decay weight-decay) #:lr lr))
     (define total (run-estimated-stepping-batches run))
-    (define warmup (exact-ceiling (/ total 4)))
+    (define warmup (warmup-steps total))
     (values opt
             (scheduler-config
              (sequential-lr opt
@@ -89,119 +94,56 @@ Lightning's @tt{estimated_stepping_batches}.
     (log! 'val/loss (cross-entropy logits yb))
     (log! 'val/acc (~> logits (argmax 1) (eq yb) (to-dtype 'float32) mean))))]
 
-@bold{Device and precision.} On a GPU the run is @racket['16-mixed], half
-precision with a @racket[grad-scaler]; elsewhere it is full precision.
+@bold{The fit.} One seeded @racket[fit] over a training and a test
+@racket[tensor-dataset]: shuffled training batches from a seeded generator, the test
+set after every epoch, two batches accumulated per step, the gradient norm clipped at
+@racket[clip-val], at the precision and on the device given. The tests run it on 512
+training and 128 test pictures of the committed fixture, in batches of 32, for 16
+optimizer steps; the headline runs it on the full sets, resident on the device, in
+batches of 128. It answers the run and the trained classifier.
 
-@chunk[<r20-device>
-(define (pick-device)
-  (accelerator-if-available))
-
-(define (precision-for device)
-  (match (device-type device)
-    ['cuda '16-mixed]
-    [_ '32-true]))
-
-(define (device-of d)
-  (match d
-    ['cpu (cpu-device)]
-    ['cuda (cuda-device)]
-    [_ d]))]
-
-@bold{The deterministic core.} @racket[run-example] is the seeded, offline run the
-tests and the twin drive: two epochs on the committed fixture, 512 training and
-128 test pictures, in shuffled batches of 32, so 16 optimizer steps of which 4 are
-warmup. It answers the run and the trained classifier.
-
-@chunk[<r20-run>
-(define (run-example #:device [device 'cpu] #:precision [precision '32-true]
-                     #:epochs [epochs 2] #:callbacks [callbacks '()] #:logger [logger #f])
-  (manual-seed! seed)
-  (define classifier (FashionClassifier))
-  (define-values (xs ys) (load-fashion-mnist-fixture 'train))
-  (define-values (test-xs test-ys) (load-fashion-mnist-fixture 'test))
-  (define run
-    (fit classifier
-         (dataloader (tensor-dataset xs ys) #:batch-size (hash-ref batch-size 'fixture)
-                     #:shuffle? #t #:generator (make-generator seed))
-         #:val (dataloader (tensor-dataset test-xs test-ys) #:batch-size 64)
-         #:device (device-of device) #:precision precision #:max-epochs epochs
-         #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val
-         #:log-every-n-steps 1 #:logger logger #:callbacks callbacks))
-  (values run classifier))]
-
-@bold{The epoch rows.} @racket[epoch-recorder] answers a callback and a thunk:
-the callback keeps one row per epoch, the epoch, the mean training loss, the test
-loss and accuracy and the seconds it took, and the thunk answers the rows so far.
-In @racket['on-train-epoch-end] @racket[run-metric] reads a key's epoch reduction.
-
-@chunk[<r20-rows>
-(define (epoch-recorder)
-  (define rows '())
-  (define clock #f)
-  (define (start! _r)
-    (set! clock (current-inexact-milliseconds)))
-  (define (record! r)
-    (set! rows (cons (list (add1 (run-epoch r)) (run-metric r 'train/loss)
-                           (run-metric r 'val/loss) (run-metric r 'val/acc)
-                           (/ (- (current-inexact-milliseconds) clock) 1000.0))
-                     rows)))
-  (values (lambda-callback #:on-train-epoch-start start! #:on-train-epoch-end record!)
-          (lambda () (reverse rows))))]
-
-@bold{The headline run.} The full sets, resident on the device, in batches of 128,
-and the test set after every epoch. @racket[train-fashion-mnist] answers the epoch
-rows and the run.
-
-@chunk[<r20-train>
-(define (train-fashion-mnist #:epochs [epochs 5] #:device [device (pick-device)]
-                             #:precision [precision (precision-for device)]
+@chunk[<r20-fit>
+(define (train-fashion-mnist train-set test-set
+                             #:batch-size batch-size #:test-batch-size test-batch-size
+                             #:epochs epochs #:device device #:precision precision
+                             #:log-every-n-steps [log-every 50] #:logger [logger #f]
                              #:callbacks [callbacks '()])
   (manual-seed! seed)
   (define classifier (FashionClassifier))
-  (define train-set (fashion-mnist-dataset 'train #:device device))
-  (define test-set (fashion-mnist-dataset 'test #:device device))
-  (define-values (recorder rows) (epoch-recorder))
   (define run
     (fit classifier
-         (dataloader train-set #:batch-size (hash-ref batch-size 'full) #:shuffle? #t
+         (dataloader train-set #:batch-size batch-size #:shuffle? #t
                      #:generator (make-generator seed))
-         #:val (dataloader test-set #:batch-size 1000)
-         #:device (device-of device) #:precision precision #:max-epochs epochs
-         #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val #:logger #f
-         #:callbacks (cons recorder callbacks)))
-  (values (rows) run))]
+         #:val (dataloader test-set #:batch-size test-batch-size)
+         #:device device #:precision precision #:max-epochs epochs
+         #:accumulate-grad-batches accumulate #:gradient-clip-val clip-val
+         #:log-every-n-steps log-every #:logger logger #:callbacks callbacks))
+  (values run classifier))]
 
 @bold{The result.} @filepath{scripts/fashion-mnist-results.rkt} ran this program and
 its twin at commit @tt{@(hash-ref results 'commit)} on @(hash-ref results 'hardware)
-on @(hash-ref results 'date), @(~a (length (hash-ref (hash-ref results 'racket) 'epochs)))
-epochs at precision @tt{@(hash-ref results 'precision)}, seed
-@(~a (hash-ref results 'seed)). Test accuracy after the last epoch is
-@(percent (hash-ref (hash-ref results 'racket) 'accuracy)) percent here and
-@(percent (hash-ref (hash-ref results 'lightning) 'accuracy)) percent in Lightning
-@(hash-ref results 'lightning-version).
+on @(hash-ref results 'date), @(~a (length (hash-ref ours 'epochs))) epochs at
+precision @tt{@(hash-ref results 'precision)}, seed @(~a (hash-ref results 'seed)).
+Test accuracy after the last epoch is @(percent (hash-ref ours 'accuracy)) percent
+here and @(percent (hash-ref theirs 'accuracy)) percent in Lightning
+@(hash-ref results 'lightning-version) on PyTorch @(hash-ref results 'python-torch).
 
 @(tabular
   #:style 'boxed
   #:sep (hspace 2)
   (cons (list (bold "epoch") (bold "side") (bold "train loss") (bold "test loss")
               (bold "test accuracy") (bold "seconds"))
-        (for*/list ([i (in-range (length (hash-ref (hash-ref results 'racket) 'epochs)))]
-                    [side (in-list '(racket lightning))])
-          (match-define (list epoch train-loss val-loss acc seconds)
-            (list-ref (hash-ref (hash-ref results side) 'epochs) i))
-          (list (~a epoch)
-                (if (eq? side 'racket) "Racket" "Lightning")
-                (~r train-loss #:precision '(= 4))
-                (~r val-loss #:precision '(= 4))
-                (string-append (percent acc) "%")
-                (~r seconds #:precision '(= 1))))))
+        (for*/list ([(our-row their-row) (in-parallel (hash-ref ours 'epochs)
+                                                      (hash-ref theirs 'epochs))]
+                    [side-row (in-list (list (cons "Racket" our-row)
+                                             (cons "Lightning" their-row)))])
+          (match-define (cons side (list epoch train-loss val-loss acc seconds)) side-row)
+          (list (~a epoch) side (fixed train-loss 4) (fixed val-loss 4)
+                (string-append (percent acc) "%") (fixed seconds 1)))))
 
 @chunk[<*>
   <r20-require>
   <r20-provide>
   <r20-model>
   <r20-trainer>
-  <r20-device>
-  <r20-run>
-  <r20-rows>
-  <r20-train>]
+  <r20-fit>]

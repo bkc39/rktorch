@@ -6,12 +6,14 @@ clipping at 0.5, and the precision RKTORCH_PARITY_PRECISION names, on
 RKTORCH_PARITY_DEVICE. RKTORCH_TWIN_MODE=fixture trains on the committed
 fixture and prints a step-by-step trace; full trains on the .gz archives in
 RKTORCH_FASHION_MNIST_DIR and adds one row per epoch. EPOCHS sets the epochs.
+A non-finite float is printed as the string "inf", "-inf" or "nan".
 """
 
 import gzip
 import json
 import math
 import os
+import platform
 import struct
 import tempfile
 import time
@@ -31,6 +33,9 @@ DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 PRECISION = os.environ.get("RKTORCH_PARITY_PRECISION") or "32-true"
 MODE = os.environ.get("RKTORCH_TWIN_MODE") or "fixture"
 EPOCHS = int(os.environ.get("EPOCHS") or "2")
+
+if DEVICE not in ("cpu", "cuda"):
+    raise SystemExit(f"RKTORCH_PARITY_DEVICE={DEVICE}: the twin runs on cpu or cuda")
 
 SEED = 0
 LR = 2e-3
@@ -195,6 +200,16 @@ def flat(named):
     return {n: t.detach().cpu().flatten().tolist() for n, t in named}
 
 
+def jsonable(v):
+    if isinstance(v, float) and not math.isfinite(v):
+        return str(v)
+    if isinstance(v, list):
+        return [jsonable(x) for x in v]
+    if isinstance(v, dict):
+        return {k: jsonable(x) for k, x in v.items()}
+    return v
+
+
 def main():
     warnings.filterwarnings("ignore")
     if MODE == "fixture":
@@ -203,7 +218,7 @@ def main():
                            generator=torch.Generator().manual_seed(SEED))
         val = DataLoader(TensorDataset(vx, vy), batch_size=VAL_BATCH)
     else:
-        target = torch.device("cuda" if DEVICE == "cuda" else "cpu")
+        target = torch.device(DEVICE)
         (xs, ys), (vx, vy) = archive("train"), archive("t10k")
         xs, ys, vx, vy = (t.to(target) for t in (xs, ys, vx, vy))
         train = DataLoader(Batched(xs, ys), batch_size=BATCH, shuffle=True,
@@ -239,10 +254,12 @@ def main():
         "norms": trace.norms,
         "scales": trace.scales,
         "rows": rows.rows,
+        "versions": {"python": platform.python_version(), "torch": torch.__version__,
+                     "lightning": lightning.__version__, "cuda": torch.version.cuda or "none"},
     }
     if MODE == "full":
         out["epochs"] = trace.epochs
-    print(json.dumps(out))
+    print(json.dumps(jsonable(out), allow_nan=False))
 
 
 if __name__ == "__main__":
