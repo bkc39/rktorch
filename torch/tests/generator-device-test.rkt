@@ -2,21 +2,26 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/contract/combinator exn:fail:contract:blame?)
            (only-in racket/match match-define)
-           (only-in racket/sequence sequence->list)
+           (only-in racket/string string-contains?)
            (only-in threading ~>)
            "../data/loader.rkt"
            (only-in "../main.rkt"
                     arange cpu-device cpu-generator/c cuda-available?
                     cuda-device current-generator device draw-seed dtype
-                    generator-device in-flattened-tensor make-generator
-                    mps-available? mps-device multinomial ones rand rand-like randn
-                    randn-like randperm reshape tensor to uniform! zeros)
+                    generator-device generator-state in-flattened-tensor
+                    make-generator mps-available? mps-device multinomial
+                    normal! ones rand rand-like randn randn-like randperm reshape
+                    rng-state tensor tensor->bytes to uniform! zeros)
+           (only-in "../foreign/generator.rkt" check-generator-on!)
            (only-in "../nn.rkt"
-                    Dropout dropout kaiming-uniform trunc-normal-init uniform-init)
+                    Dropout Embedding LSTM Linear MultiheadAttention dropout
+                    kaiming-uniform normal-init trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/host.rkt" host)
            (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/python-env.rkt"
                     call-with-python-env python-check python-cuda-available?
@@ -26,9 +31,6 @@
   (define accelerators
     (append (if (cuda-available?) (list (cuda-device)) '())
             (if (mps-available?) (list (mps-device)) '())))
-
-  (define (host t)
-    (~> t (to 'cpu) in-flattened-tensor sequence->list))
 
   (define (three-draws on g)
     (list (host (rand 5 #:device on #:generator g))
@@ -73,6 +75,23 @@
     (rand-4)
     (zeros-4)
     (check-equal? (op-calls-of rand-4) (op-calls-of zeros-4)))
+
+  (define (explicit-rows accelerator)
+    (list (list "uniform! on the accelerator, cpu generator" (cpu-device)
+                (lambda (g) (uniform! (zeros 3 #:device accelerator) #:generator g)))
+          (list "normal! on cpu, accelerator generator" accelerator
+                (lambda (g) (normal! (zeros 3) #:generator g)))
+          (list "uniform-init, accelerator generator" accelerator
+                (lambda (g) (uniform-init '(3) 0.0 1.0 #:generator g)))
+          (list "kaiming-uniform, accelerator generator" accelerator
+                (lambda (g) (kaiming-uniform '(3 2) #:generator g)))
+          (list "normal-init, accelerator generator" accelerator
+                (lambda (g) (normal-init '(3) #:generator g)))
+          (list "trunc-normal-init, accelerator generator" accelerator
+                (lambda (g) (trunc-normal-init '(3) #:generator g)))
+          (list "trunc-normal-init's uniform branch, accelerator generator"
+                accelerator
+                (lambda (g) (trunc-normal-init '(3) #:a 1.0 #:b 1.5 #:generator g)))))
 
   (define (blamed-on accelerator)
     (define elsewhere (make-generator 1 #:device accelerator))
@@ -141,6 +160,14 @@
           (cons "random-resized-crop, accelerator generator"
                 (lambda ()
                   (random-resized-crop images 4 #:generator elsewhere)))
+          (cons "normal! through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (normal! (zeros 3)))))
+          (cons "normal-init through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (normal-init '(3)))))
           (cons "multinomial on the accelerator, cpu generator"
                 (lambda ()
                   (multinomial probabilities 2
@@ -176,6 +203,34 @@
                                      #:generator (make-generator 1)))))])
       (check-exn (blames-caller? "generator-device-test") thunk)))
 
+  (bounded-test "check-generator-on! names the generator's device and the target's"
+    (check-equal? (check-generator-on! 'w (make-generator 1) 'cpu) (void))
+    (check-equal? (check-generator-on! 'w #f #f) (void))
+    (define ((raised? rx) e)
+      (and (exn:fail:contract? e)
+           (not (exn:fail:contract:blame? e))
+           (regexp-match? rx (exn-message e))))
+    (define target
+      (string-append "^w: contract violation;\n"
+                     " the generator lives on the target device\n"
+                     "  generator device: #<device cpu>\n"
+                     "  target device: #<device cuda"))
+    (check-exn (raised? (regexp target))
+               (lambda () (check-generator-on! 'w (make-generator 1) 'cuda)))
+    (check-exn (raised? (regexp target))
+               (lambda ()
+                 (parameterize ([current-generator (make-generator 1)])
+                   (check-generator-on! 'w #f 'cuda))))
+    (check-exn (raised?
+                (regexp
+                 (string-append "^dropout: contract violation;\n"
+                                " the generator lives on the tensor's device\n"
+                                "  generator device: #<device cpu>\n"
+                                "  tensor device: #<device cuda")))
+               (lambda ()
+                 (check-generator-on! 'dropout (make-generator 1) 'cuda
+                                      #:noun "tensor's" #:label "tensor"))))
+
   (cond
     [(pair? accelerators)
      (bounded-test "R4: a generator on another device blames the caller"
@@ -183,6 +238,12 @@
               [row (in-list (blamed-on accelerator))])
          (match-define (cons label thunk) row)
          (check-exn (blames-caller? "generator-device-test") thunk
+                    (format "~a: ~a" accelerator label)))
+       (for* ([accelerator (in-list accelerators)]
+              [row (in-list (explicit-rows accelerator))])
+         (match-define (list label on draw) row)
+         (check-exn (blames-caller? "generator-device-test")
+                    (lambda () (draw (make-generator 1 #:device on)))
                     (format "~a: ~a" accelerator label))))
      (bounded-test "R4: dropout drawing with a generator on another device is the caller's error"
        (for* ([accelerator (in-list accelerators)]
@@ -196,7 +257,50 @@
                            (rand-like #:device 'cpu
                                       #:generator (make-generator 1))
                            device)
-                       (cpu-device))))]
+                       (cpu-device))))
+     (bounded-test "G7: a refused draw advances no stream"
+       (for* ([accelerator (in-list accelerators)]
+              [row (in-list (explicit-rows accelerator))])
+         (match-define (list label on draw) row)
+         (define g (make-generator 1 #:device on))
+         (define (states)
+           (list (tensor->bytes (generator-state g))
+                 (tensor->bytes (rng-state))
+                 (tensor->bytes (rng-state #:device accelerator))))
+         (define before (states))
+         (check-exn exn:fail:contract? (lambda () (draw g)))
+         (check-equal? (states) before (format "~a: ~a" accelerator label))))
+     (bounded-test "G7b: an explicit generator wins in the device check too"
+       (for ([accelerator (in-list accelerators)])
+         (define t (zeros 3))
+         (parameterize ([current-generator
+                         (make-generator 1 #:device accelerator)])
+           (uniform! t #:generator (make-generator 1)))
+         (check-equal? (host t) (let ([u (zeros 3)])
+                                  (uniform! u #:generator (make-generator 1))
+                                  (host u)))))
+     (bounded-test "G8: a layer built under a generator elsewhere names both devices"
+       (for* ([accelerator (in-list accelerators)]
+              [build (in-list (list (lambda () (Linear 3 2))
+                                    (lambda () (Embedding 4 3))
+                                    (lambda () (LSTM 3 4))
+                                    (lambda () (MultiheadAttention 4 #:heads 2))))])
+         (define (mismatch? e)
+           (define message (exn-message e))
+           (and (exn:fail:contract? e)
+                (not ((blames-caller? "init.rkt") e))
+                (regexp-match? #rx"the generator lives on the target device"
+                               message)
+                (string-contains? message
+                                  (format "generator device: ~a" accelerator))
+                (string-contains? message
+                                  (format "target device: ~a" (cpu-device)))))
+         (check-exn mismatch?
+                    (lambda ()
+                      (parameterize ([current-generator
+                                      (make-generator 1 #:device accelerator)])
+                        (build)))
+                    (format "~a" accelerator))))]
     [else
      (printf "[generator-device-test] skipped R4 rows: needs an ~a\n"
              "accelerator (CUDA or MPS) for a generator on another device")])

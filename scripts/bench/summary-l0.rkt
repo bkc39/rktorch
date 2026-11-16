@@ -39,16 +39,20 @@
     (~> (map (lambda (r) (string->number (ref r 'variant))) records) remove-duplicates (sort <)))
   (define (at state n impl)
     (find-record records #:case state #:impl impl #:variant (number->string n)))
-  (table '("main" "threads" "rktorch ops/s" "rktorch ÷ idle×1" "PyTorch ops/s" "PyTorch ÷ idle×1"
-           "rktorch/PyTorch" "main steps/s rktorch" "main steps/s PyTorch")
+  (table '("main" "workers" "mix" "intra-op threads" "rktorch ops/s" "rktorch ÷ idle×1"
+           "PyTorch ops/s" "PyTorch ÷ idle×1" "rktorch/PyTorch" "main steps/s rktorch"
+           "main steps/s PyTorch" "peak OS threads rktorch" "peak OS threads PyTorch")
          (for*/list ([state (in-list (cases records))] [n (in-list counts)])
            (define rk (at state n "rktorch"))
            (define py (at state n "pytorch"))
+           (define either (or rk py))
            (define (speedup impl)
              (ratio (median-of (at state n impl)) (median-of (at "idle" (car counts) impl))))
            (define (mains r) (~> (ref r 'main_steps_per_s) list-median (num 1)))
-           (list state n (whole (median-of rk)) (speedup "rktorch") (whole (median-of py))
-                 (speedup "pytorch") (ratio (median-of rk) (median-of py)) (mains rk) (mains py)))))
+           (list state n (or (ref either 'mix) "small") (or (ref either 'meta 'threads) "-")
+                 (whole (median-of rk)) (speedup "rktorch") (whole (median-of py))
+                 (speedup "pytorch") (ratio (median-of rk) (median-of py)) (mains rk) (mains py)
+                 (whole (ref rk 'peak_os_threads)) (whole (ref py 'peak_os_threads))))))
 
 (define (twin-name c [suffix ""]) (string-append "py-" c suffix))
 
@@ -225,10 +229,22 @@
                                (row "pytorch" "idle" 1 200.0) (row "pytorch" "idle" 2 400.0)
                                (row "rktorch" "train" 1 1.0) (row "rktorch" "train" 2 50.0)
                                (row "pytorch" "train" 1 2.0) (row "pytorch" "train" 2 100.0))))
-    (check-regexp-match #rx"\\| idle \\| 1 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\| 11\\.0 \\| 11\\.0 \\|" md)
-    (check-regexp-match #rx"\\| idle \\| 2 \\| 185 \\| 1\\.85 \\| 400 \\| 2\\.00 \\| 0\\.46 \\|" md)
-    (check-regexp-match #rx"\\| train \\| 1 \\| 1 \\| 0\\.01 \\| 2 \\| 0\\.01 \\| 0\\.50 \\|" md)
-    (check-regexp-match #rx"\\| train \\| 2 \\| 50 \\| 0\\.50 \\| 100 \\| 0\\.50 \\| 0\\.50 \\|" md))
+    (check-regexp-match #rx"(?m:\\| idle \\| 1 \\| small \\| 8 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\| 11\\.0 \\| 11\\.0 \\| - \\| - \\|$)" md)
+    (check-regexp-match #rx"\\| idle \\| 2 \\| small \\| 8 \\| 185 \\| 1\\.85 \\| 400 \\| 2\\.00 \\| 0\\.46 \\|" md)
+    (check-regexp-match #rx"\\| train \\| 1 \\| small \\| 8 \\| 1 \\| 0\\.01 \\| 2 \\| 0\\.01 \\| 0\\.50 \\|" md)
+    (check-regexp-match #rx"\\| train \\| 2 \\| small \\| 8 \\| 50 \\| 0\\.50 \\| 100 \\| 0\\.50 \\| 0\\.50 \\|" md))
+
+  (test-case "B shows each row's mix, intra-op threads and peak OS threads, null as -"
+    (define (row impl n ops peak)
+      (hasheq 'case "idle" 'variant (number->string n) 'impl impl 'mix "grain" 'peak_os_threads peak
+              'meta (hasheq 'host "lab" 'device "cpu" 'threads 4)
+              'stats (hasheq 'median ops) 'main_steps_per_s '(0.0)))
+    (define md (render 1 (list (row "rktorch" 1 100.0 9) (row "pytorch" 1 200.0 10)
+                               (row "rktorch" 7 300.0 38) (row "pytorch" 7 600.0 'null))))
+    (check-regexp-match #rx"\\| main \\| workers \\| mix \\| intra-op threads \\|" md)
+    (check-regexp-match #rx"\\| peak OS threads rktorch \\| peak OS threads PyTorch \\|\n" md)
+    (check-regexp-match #rx"(?m:\\| idle \\| 1 \\| grain \\| 4 \\| 100 \\| .* \\| 9 \\| 10 \\|$)" md)
+    (check-regexp-match #rx"(?m:\\| idle \\| 7 \\| grain \\| 4 \\| 300 \\| 3\\.00 \\| .* \\| 38 \\| - \\|$)" md))
 
   (test-case "B pairs a run only with the twins of its own invocation and thread setting"
     (define (row run threads impl ops)
@@ -241,9 +257,9 @@
                   (section-context (list-ref l0-sections 1))))
     (check-regexp-match #rx"; cpu, 1 threads; run r1$" c1)
     (check-regexp-match #rx"; cpu, 8 threads; run r2$" c2)
-    (check-regexp-match #rx"\\| idle \\| 1 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\|"
+    (check-regexp-match #rx"\\| idle \\| 1 \\| small \\| 1 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\|"
                         (render 1 r1))
-    (check-regexp-match #rx"\\| idle \\| 1 \\| 300 \\| 1\\.00 \\| - \\| - \\| - \\|"
+    (check-regexp-match #rx"\\| idle \\| 1 \\| small \\| 8 \\| 300 \\| 1\\.00 \\| - \\| - \\| - \\|"
                         (render 1 r2)))
 
   (define (e2e c impl variant s step #:gc [gc '()] #:settings [settings (hasheq)]

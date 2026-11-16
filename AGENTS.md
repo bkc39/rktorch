@@ -79,8 +79,8 @@ with `backward!` outside the form as PyTorch recommends). From
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
-  `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
-  native construction (never construct-then-move), with one exception:
+  `uniform!` and `normal!`, each with `#:generator`, #356); every
+  constructor takes `#:device` / `#:dtype` chosen at native construction (never construct-then-move), with one exception:
   `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which
   no host vector type carries, is built and narrowed on the CPU and moved
   once, so an accelerator never holds the wide copy; `#:requires-grad?`
@@ -95,13 +95,20 @@ with `backward!` outside the form as PyTorch recommends). From
 - device generators (`torch/foreign/generator.rkt`, #389):
   `make-generator #:device` is `torch.Generator(device)`, `generator-device`
   names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
-  `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
-  tensor is on the CPU) blame a caller whose effective generator (the
+  `randn`, `rand-like`, `randn-like`, `multinomial`, `randperm` (whose
+  tensor is on the CPU), `uniform!`, `normal!` and the initializers of
+  `torch/nn/init.rkt` blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
   tensor, and `torch/nn`'s `dropout` and `Dropout` raise for one when they
   draw; `dataloader` and the augmentations of
-  `torch/vision/transforms.rkt` take only a CPU generator
-  (`tr_generator_new_on`, `tr_generator_device`)
+  `torch/vision/transforms.rkt` take only a CPU generator;
+  `rng-state` / `set-rng-state!` read and restore a device's default
+  stream and `generator-state` / `set-generator-state!` a generator's,
+  as uint8 CPU tensors (#481)
+  (`tr_generator_new_on`, `tr_generator_device`, `tr_generator_state`,
+  `tr_generator_set_state`, `tr_default_generator_state`,
+  `tr_default_generator_set_state`); `data.scrbl`'s stream table lists
+  every random op (#356, #347)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
@@ -288,6 +295,7 @@ with `backward!` outside the form as PyTorch recommends). From
   autocast-dtype` (`torch/foreign/autocast.rkt` over
   `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
   grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
+- determinism and precision switches, process-wide: `torch/foreign/switches.rkt` (#482, #483)
 
 **Name shadowing convention:** the 22 ops named like a `racket` export
 (`+ - * / < <= > >= abs argmax cos exp flatten length log max min sin sort
@@ -691,8 +699,8 @@ generator is present but python3 is not.
 `accelerator-if-available` picks CUDA, then MPS, then CPU — what the examples'
 `pick-device` returns, and the analogue of PyTorch's
 `torch.accelerator.current_accelerator()`, except that it picks MPS only once
-one element has been allocated there (#353): GitHub's macos-14 runners
-advertise MPS and cannot allocate on it. `mps-available?` keeps PyTorch's
+one element has been allocated there (#353): GitHub's retired macos-14
+runners advertised MPS and could not allocate on it. `mps-available?` keeps PyTorch's
 meaning, so the device suite guards its CUDA and MPS bodies separately on the
 `-available?` predicates, and on such a host its MPS cases fail; the example
 runners train on whichever accelerator the helper returns. Both verify real
@@ -1186,8 +1194,8 @@ installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
 manual renders with all its deps declared. `platform-macos-build.yml` proves
 `torch-aarch64-macosx` builds, audits, installs and passes the smoke on
 `macos-latest`; `platform-macos.yml` calls it and proves the zip passes the
-CPU suites on `macos-14` (whose runners advertise MPS but cannot allocate on
-it), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
+CPU suites and the accelerator suite on `macos-15` (GitHub retired
+`macos-14`, the package's floor, on 2026-11-02), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
 Linux zip (see [The package build server](#the-package-build-server)).
 `release.yml`, on a `v*` tag, checks the versions and the ABI stamp
 (`scripts/release/`, tested by the `release-test` and `release-current`
