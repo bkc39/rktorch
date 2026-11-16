@@ -900,18 +900,22 @@ the next @racket[backward!] a parameter has no gradient, and
 each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 }
 
-@deftogether[(@defproc[(learning-rate [opt optimizer?]
+@deftogether[(@defproc[(learning-rate [opt lr-optimizer/c]
                                        [#:group group exact-nonnegative-integer? 0])
                         real?]
-              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]
+              @defproc[(set-learning-rate! [opt lr-optimizer/c] [lr (>=/c 0)]
                                            [#:group group
                                             (or/c #f exact-nonnegative-integer?) #f])
                        void?])]{
 The learning rate the next @racket[step!] will use; on a schedule, its
 optimizer's. Without @racket[#:group], @racket[learning-rate] reads group 0
 and @racket[set-learning-rate!] writes every group; a schedule scales each
-group from that group's initial rate. An optimizer without a learning rate, such as a
-@racket[gen:optimizer] of one's own, is a contract violation.
+group from that group's initial rate.
+}
+
+@defthing[lr-optimizer/c flat-contract?]{
+An optimizer or schedule with a learning rate: every optimizer of this library and
+every schedule, and no @racket[gen:optimizer] of one's own.
 }
 
 A schedule wraps an optimizer and answers to @racket[step!] like one: the
@@ -933,7 +937,7 @@ sequential schedules compose as there; they are pinned against
   (step! schedule))
 ]
 
-@defproc[(step-lr [opt optimizer?]
+@defproc[(step-lr [opt lr-optimizer/c]
                   [#:step-size step-size exact-positive-integer?]
                   [#:gamma gamma real? 0.1])
          scheduler?]{
@@ -941,18 +945,18 @@ The base rate times @racket[gamma] to the power of the number of whole
 @racket[step-size] periods elapsed.
 }
 
-@defproc[(multi-step-lr [opt optimizer?]
+@defproc[(multi-step-lr [opt lr-optimizer/c]
                         [#:milestones milestones (listof exact-nonnegative-integer?)]
                         [#:gamma gamma real? 0.1])
          scheduler?]{
 The base rate times @racket[gamma] once per milestone reached.
 }
 
-@defproc[(exponential-lr [opt optimizer?] [#:gamma gamma real?]) scheduler?]{
+@defproc[(exponential-lr [opt lr-optimizer/c] [#:gamma gamma real?]) scheduler?]{
 The base rate times @racket[gamma] to the power of the step.
 }
 
-@defproc[(cosine-annealing-lr [opt optimizer?]
+@defproc[(cosine-annealing-lr [opt lr-optimizer/c]
                               [#:t-max t-max exact-positive-integer?]
                               [#:eta-min eta-min real? 0])
          scheduler?]{
@@ -960,7 +964,7 @@ Half a cosine from the base rate at step 0 to @racket[eta-min] at
 @racket[t-max], and back up beyond it.
 }
 
-@defproc[(linear-lr [opt optimizer?]
+@defproc[(linear-lr [opt lr-optimizer/c]
                     [#:start-factor start-factor (and/c (>/c 0) (<=/c 1)) 1/3]
                     [#:end-factor end-factor (real-in 0 1) 1]
                     [#:total-iters total-iters exact-positive-integer? 5])
@@ -969,7 +973,7 @@ The base rate scaled from @racket[start-factor] to @racket[end-factor]
 linearly over @racket[total-iters] steps, and held there: the warmup.
 }
 
-@defproc[(one-cycle-lr [opt optimizer?]
+@defproc[(one-cycle-lr [opt lr-optimizer/c]
                        [#:max-lr max-lr (>/c 0)]
                        [#:total-steps total-steps exact-positive-integer?]
                        [#:pct-start pct-start (and/c (>=/c 0) (</c 1)) 0.3]
@@ -987,7 +991,7 @@ peak at the last step and leave the descent no steps to spread over, so
 the contract excludes it.
 }
 
-@defproc[(lambda-lr [opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
+@defproc[(lambda-lr [opt lr-optimizer/c] [factor (-> exact-nonnegative-integer? real?)])
          scheduler?]{
 The base rate times @racket[(factor step)].
 }
@@ -998,7 +1002,7 @@ scaling the rate the previous one wrote. The schedules must wrap one
 optimizer.
 }
 
-@defproc[(sequential-lr [opt optimizer?]
+@defproc[(sequential-lr [opt lr-optimizer/c]
                         [schedulers (non-empty-listof scheduler?)]
                         [#:milestones milestones (listof exact-nonnegative-integer?)])
          scheduler?]{
@@ -1021,7 +1025,7 @@ as PyTorch's does.
 ]
 }
 
-@defproc[(cosine-annealing-warm-restarts [opt optimizer?]
+@defproc[(cosine-annealing-warm-restarts [opt lr-optimizer/c]
                                          [#:t-0 t-0 exact-positive-integer?]
                                          [#:t-mult t-mult exact-positive-integer? 1]
                                          [#:eta-min eta-min real? 0])

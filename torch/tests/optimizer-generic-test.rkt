@@ -9,9 +9,10 @@
                     tensor->list)
            (only-in "../nn.rkt"
                     Linear cosine-annealing-lr cosine-annealing-warm-restarts exponential-lr
-                    lambda-lr learning-rate linear-lr mse-loss multi-step-lr one-cycle-lr
-                    optimizer-param-groups param-group-count param-group-hyperparameters
-                    param-group-params parameters sequential-lr set-learning-rate! sgd step-lr)
+                    lambda-lr learning-rate linear-lr lr-optimizer/c mse-loss multi-step-lr
+                    one-cycle-lr optimizer-param-groups param-group-count
+                    param-group-hyperparameters param-group-params parameters sequential-lr
+                    set-learning-rate! sgd step-lr)
            (only-in "../train.rkt"
                     define-init define-optimizers define-trainer define-training-step fit
                     run-grad-scaler)
@@ -123,6 +124,13 @@
   (test-case "G4-L24 (4): the rate readers and every schedule blame the caller"
     (for ([call (in-list (rate-calls opt))])
       (check-exn no-rate? (cdr call) (symbol->string (car call)))))
+
+  (test-case "lr-optimizer/c holds of the library's optimizers and schedules only"
+    (define rated (sgd (list (requires-grad! (ones 2))) #:lr 0.1))
+    (check-true (lr-optimizer/c rated))
+    (check-true (lr-optimizer/c (step-lr rated #:step-size 1)))
+    (check-false (lr-optimizer/c opt))
+    (check-false (lr-optimizer/c 'sgd)))
 
   (define-runtime-path main-path "../main.rkt")
   (define-runtime-path nn-path "../nn.rkt")
