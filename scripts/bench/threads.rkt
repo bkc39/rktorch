@@ -469,7 +469,13 @@
           [runs (in-list '(1 0 2 1))])
       (define ran (box 0))
       (define counted (box 0))
-      (run-worker! (scripted seen) (lambda () (set-box! ran (add1 (unbox ran)))) (lambda (k) (set-box! counted k)))
+      (define worker
+        (thread (lambda ()
+                  (run-worker! (scripted seen)
+                               (lambda () (set-box! ran (add1 (unbox ran))))
+                               (lambda (k) (set-box! counted k))))))
+      (check-not-false (sync/timeout 5 worker) (format "~a: the worker stops" seen))
+      (kill-thread worker)
       (check-equal? (unbox ran) runs (format "~a" seen))
       (check-equal? (unbox counted) runs (format "~a" seen))))
 
@@ -482,7 +488,7 @@
          (lambda () (let loop () (unless (box-cas! ticks (unbox ticks) (add1 (unbox ticks))) (loop)))))
        (check-exn #rx"probe: down"
                   (lambda ()
-                    (scaling-run 2 'idle #:seconds 0 #:mix ticking
+                    (scaling-run 2 'idle #:seconds 0 #:grace 5 #:mix ticking
                                  #:probe (lambda () (raise-user-error 'probe "down")))))
        (check-equal? (unbox ticks) 0))))
 
