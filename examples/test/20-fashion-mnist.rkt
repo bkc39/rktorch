@@ -24,6 +24,7 @@
                     python-cuda-available? python-module-available? python-torch-available? tol)
            (only-in torch/train run-global-step run-grad-scaler run-optimizers)
            (only-in torch/vision/fashion-mnist load-fashion-mnist-fixture)
+           (only-in (submod torch/vision/fashion-mnist private) fashion-mnist-size)
            (only-in "private/fashion-mnist-kit.rkt"
                     epoch-recorder fixture-batch-size full-batch-size run-example twin-config
                     twin-json)
@@ -206,7 +207,8 @@
     (define ours (hash-ref bundle 'racket))
     (define theirs (hash-ref bundle 'lightning))
     (define n (length (hash-ref ours 'epochs)))
-    (define total (~> (/ 60000 full-batch-size) ceiling (/ accumulate) ceiling (* n)))
+    (define total
+      (~> (fashion-mnist-size 'train) (/ full-batch-size) ceiling (/ accumulate) ceiling (* n)))
     (check-equal? (length (hash-ref theirs 'epochs)) n)
     (check-equal? (hash-ref bundle 'seed) seed)
     (check-equal? (hash-ref bundle 'precision) "16-mixed")

@@ -19,6 +19,7 @@
            fashion-mnist-cache-dir
            fashion-mnist-idx
            fashion-mnist-resources
+           fashion-mnist-size
            fixture-files))
 
 (define/contract-out fashion-mnist-classes (listof string?) ;; noqa
@@ -34,8 +35,8 @@
     ("t10k-labels-idx1-ubyte.gz" . "bb300cfdad3c16e7a12a480ee83cd310")))
 
 (define splits
-  '((train "train" 512)
-    (test "t10k" 128)))
+  '((train "train" 60000 512)
+    (test "t10k" 10000 128)))
 
 (define kinds '("images-idx3" "labels-idx1"))
 
@@ -47,7 +48,7 @@
 
 (define fixture-files
   (for*/list ([split (in-list splits)] [kind (in-list kinds)])
-    (match-define (list _ prefix n) split)
+    (match-define (list _ prefix _ n) split)
     (list (archive-name prefix kind) (fixture-name prefix n kind) n)))
 
 (define (fashion-mnist-cache-dir)
@@ -61,7 +62,7 @@
 
 (define (whole-split? idx)
   (and (>= (bytes-length idx) 8)
-       (memv (integer-bytes->integer idx #f #t 4 8) '(60000 10000))))
+       (memv (integer-bytes->integer idx #f #t 4 8) (map fashion-mnist-size '(train test)))))
 
 (define (archive-idx bs name)
   (define expected
@@ -108,9 +109,13 @@
 (define (split-row split)
   (cdr (assq split splits)))
 
+(define (fashion-mnist-size split)
+  (match-define (list _ size _) (split-row split))
+  size)
+
 (define/contract-out (load-fashion-mnist [split 'train] #:device [device #f]) ;; noqa
   split-tensors/c
-  (match-define (list prefix _) (split-row split))
+  (match-define (list prefix _ _) (split-row split))
   (idx->tensors (lambda (kind) (fashion-mnist-idx (archive-name prefix kind))) device))
 
 (define/contract-out (fashion-mnist-dataset [split 'train] #:device [device #f]) ;; noqa
@@ -122,6 +127,6 @@
 
 (define/contract-out (load-fashion-mnist-fixture [split 'train] #:device [device #f]) ;; noqa
   split-tensors/c
-  (match-define (list prefix n) (split-row split))
+  (match-define (list prefix _ n) (split-row split))
   (idx->tensors (lambda (kind) (file->bytes (build-path fixture-dir (fixture-name prefix n kind))))
                 device))
