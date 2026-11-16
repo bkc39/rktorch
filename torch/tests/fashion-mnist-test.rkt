@@ -135,9 +135,11 @@
 
   (test-case "fashion-mnist-cached? asks that the four files be present, as _check_exists"
     (define names (map car fashion-mnist-resources))
-    (with-cache (for/list ([name (in-list names)]) (cons name #"not a gzip"))
+    (define (not-gzips names)
+      (map (lambda (name) (cons name #"not a gzip")) names))
+    (with-cache (not-gzips names)
       (lambda () (check-true (fashion-mnist-cached?))))
-    (with-cache (for/list ([name (in-list (cdr names))]) (cons name #"not a gzip"))
+    (with-cache (not-gzips (cdr names))
       (lambda () (check-false (fashion-mnist-cached?)))))
 
   (define cache (fashion-mnist-cache-dir))
