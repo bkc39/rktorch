@@ -220,7 +220,7 @@
   (and (memq key (hyperparameter-keys opt)) #t))
 
 (define lr-optimizer/c
-  (flat-named-contract "optimizer with a learning rate"
+  (flat-named-contract 'lr-optimizer/c
                        (lambda (v) (and (optimizer? v) (has-hyperparameter? v 'lr)))))
 
 (define (group-index? opt i)

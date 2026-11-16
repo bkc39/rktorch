@@ -8,11 +8,11 @@
                     cpu-device cuda-available? cuda-device manual-seed! ones randn requires-grad!
                     tensor->list)
            (only-in "../nn.rkt"
-                    Linear cosine-annealing-lr cosine-annealing-warm-restarts exponential-lr
-                    lambda-lr learning-rate linear-lr lr-optimizer/c mse-loss multi-step-lr
-                    one-cycle-lr optimizer-param-groups param-group-count
-                    param-group-hyperparameters param-group-params parameters sequential-lr
-                    set-learning-rate! sgd step-lr)
+                    Linear adam adamw cosine-annealing-lr cosine-annealing-warm-restarts
+                    exponential-lr lambda-lr learning-rate linear-lr lr-optimizer/c mse-loss
+                    multi-step-lr one-cycle-lr optimizer-param-groups param-group-count
+                    param-group-hyperparameters param-group-params parameters rmsprop
+                    sequential-lr set-learning-rate! sgd step-lr)
            (only-in "../train.rkt"
                     define-init define-optimizers define-trainer define-training-step fit
                     run-grad-scaler)
@@ -104,13 +104,14 @@
 
   (define no-rate?
     (contract-violation? (blamed "optimizer-generic-test.rkt")
-                         #rx"expected: \"optimizer with a learning rate\""))
+                         #rx"expected: lr-optimizer/c"))
 
-  (define (rate-calls opt)
-    (define other (step-lr (sgd (list (requires-grad! (ones 2))) #:lr 0.1) #:step-size 1))
-    `((learning-rate . ,(lambda () (learning-rate opt)))
-      (set-learning-rate! . ,(lambda () (set-learning-rate! opt 0.1)))
-      (step-lr . ,(lambda () (step-lr opt #:step-size 1)))
+  (define (rated)
+    (sgd (list (requires-grad! (ones 2))) #:lr 0.1))
+
+  (define (schedule-calls opt)
+    (define other (step-lr (rated) #:step-size 1))
+    `((step-lr . ,(lambda () (step-lr opt #:step-size 1)))
       (multi-step-lr . ,(lambda () (multi-step-lr opt #:milestones '(1))))
       (exponential-lr . ,(lambda () (exponential-lr opt #:gamma 0.9)))
       (cosine-annealing-lr . ,(lambda () (cosine-annealing-lr opt #:t-max 2)))
@@ -121,14 +122,30 @@
       (cosine-annealing-warm-restarts
        . ,(lambda () (cosine-annealing-warm-restarts opt #:t-0 2)))))
 
+  (define (rate-calls opt)
+    `((learning-rate . ,(lambda () (learning-rate opt)))
+      (set-learning-rate! . ,(lambda () (set-learning-rate! opt 0.1)))
+      ,@(schedule-calls opt)))
+
   (test-case "G4-L24 (4): the rate readers and every schedule blame the caller"
     (for ([call (in-list (rate-calls opt))])
       (check-exn no-rate? (cdr call) (symbol->string (car call)))))
 
+  (test-case "M1: every schedule refuses a schedule for its optimizer, blaming the caller"
+    (define scheduled?
+      (contract-violation? (blamed "optimizer-generic-test.rkt")
+                           #rx"expected: \\(not/c scheduler\\?\\)"))
+    (for ([call (in-list (schedule-calls (step-lr (rated) #:step-size 1)))])
+      (check-exn scheduled? (cdr call) (symbol->string (car call)))))
+
   (test-case "lr-optimizer/c holds of the library's optimizers and schedules only"
-    (define rated (sgd (list (requires-grad! (ones 2))) #:lr 0.1))
-    (check-true (lr-optimizer/c rated))
-    (check-true (lr-optimizer/c (step-lr rated #:step-size 1)))
+    (define params (list (requires-grad! (ones 2))))
+    (define plain (rated))
+    (for ([opt (in-list (list plain (adam params) (adamw params) (rmsprop params)
+                              (step-lr plain #:step-size 1)
+                              (sequential-lr plain (list (step-lr plain #:step-size 1))
+                                             #:milestones '())))])
+      (check-true (lr-optimizer/c opt)))
     (check-false (lr-optimizer/c opt))
     (check-false (lr-optimizer/c 'sgd)))
 
