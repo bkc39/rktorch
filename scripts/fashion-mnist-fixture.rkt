@@ -1,16 +1,11 @@
 #lang racket/base
 
 (require (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in (submod "../torch/vision/fashion-mnist.rkt" private) fashion-mnist-idx)
+         (only-in (submod "../torch/vision/fashion-mnist.rkt" private)
+                  fashion-mnist-idx fixture-files)
          (only-in "../torch/vision/private/idx.rkt" idx-head))
 
 (define-runtime-path fixture-dir "../torch/vision/fixtures/fashion-mnist")
-
-(define fixture-files
-  '(("train-images-idx3-ubyte.gz" "train-512-images-idx3-ubyte" 512)
-    ("train-labels-idx1-ubyte.gz" "train-512-labels-idx1-ubyte" 512)
-    ("t10k-images-idx3-ubyte.gz" "t10k-128-images-idx3-ubyte" 128)
-    ("t10k-labels-idx1-ubyte.gz" "t10k-128-labels-idx1-ubyte" 128)))
 
 (module+ main
   (require (only-in racket/cmdline command-line)

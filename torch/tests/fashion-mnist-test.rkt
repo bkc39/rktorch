@@ -11,12 +11,13 @@
            (only-in "../main.rkt"
                     * + ~> accelerator-if-available cpu-device device device-type dtype
                     ref reshape shape tensor->list to-dtype to-device)
-           (only-in "../private/util.rkt" cache-dir with-temporary-directory)
+           (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "../vision/fashion-mnist.rkt"
                     fashion-mnist-cached? fashion-mnist-classes fashion-mnist-dataset
                     load-fashion-mnist load-fashion-mnist-fixture)
            (only-in (submod "../vision/fashion-mnist.rkt" private)
-                    archive-valid? fashion-mnist-idx fashion-mnist-resources)
+                    archive-valid? fashion-mnist-cache-dir fashion-mnist-idx
+                    fashion-mnist-resources fixture-files)
            (only-in "../vision/private/idx.rkt" idx-head)
            (only-in "../vision/mnist.rkt" read-idx)
            (only-in "private/blame.rkt" blames-caller?)
@@ -25,7 +26,7 @@
 
   (define-runtime-path fixture-dir "../vision/fixtures/fashion-mnist")
 
-  (define fixture-files
+  (define fixture-splits
     '((train "train-512-images-idx3-ubyte" "train-512-labels-idx1-ubyte" 512)
       (test "t10k-128-images-idx3-ubyte" "t10k-128-labels-idx1-ubyte" 128)))
 
@@ -41,7 +42,7 @@
     (~> xs (* 255.0) (+ 0.5) (to-dtype 'uint8) (reshape -1) tensor->list))
 
   (test-case "G4-L1: the fixture's splits are float32 images in [0, 1] and int64 labels"
-    (for ([entry (in-list fixture-files)])
+    (for ([entry (in-list fixture-splits)])
       (match-define (list split _ _ n) entry)
       (define-values (xs ys) (load-fashion-mnist-fixture split))
       (check-equal? (shape xs) (list n 1 28 28))
@@ -60,7 +61,7 @@
     (check-equal? (list-ref fashion-mnist-classes (ref ys 0)) "Ankle boot"))
 
   (test-case "G4-L2: the images and labels give back the fixture's bytes"
-    (for ([entry (in-list fixture-files)])
+    (for ([entry (in-list fixture-splits)])
       (match-define (list split images labels _) entry)
       (define-values (xs ys) (load-fashion-mnist-fixture split))
       (check-equal? (pixel-bytes xs) (bytes->list (payload images)))
@@ -86,6 +87,14 @@
     (check-equal? (bytes-length (idx-head images 3)) (+ 16 (* 3 784)))
     (check-exn (blames-caller? "fashion-mnist-test.rkt") (lambda () (idx-head images 513))))
 
+  (test-case "G4-L3: a buffer that is not IDX, or is cut short, blames the caller"
+    (define blamed? (blames-caller? "fashion-mnist-test.rkt"))
+    (for ([bs (in-list (list #"" #"not an IDX buffer" (subbytes images 0 6)
+                             (bytes-append (subbytes images 0 3) #"\0")))])
+      (check-exn blamed? (lambda () (idx-head bs 0)) (format "~s" bs)))
+    (check-exn blamed? (lambda () (idx-head (subbytes images 0 (+ 16 (* 3 784) 1)) 4)))
+    (check-equal? (idx-head (subbytes images 0 (+ 16 (* 3 784))) 3) (idx-head images 3)))
+
   (define (gzipped bs)
     (define out (open-output-bytes))
     (gzip-through-ports (open-input-bytes bs) out #f 0)
@@ -102,7 +111,29 @@
     (check-false (valid-bytes? (gzipped images)))
     (check-false (valid-bytes? #"not a gzip")))
 
-  (define cache (cache-dir "RKTORCH_FASHION_MNIST_DIR" "fashion-mnist"))
+  (define (with-cache files proc)
+    (with-temporary-directory (dir)
+      (for ([file (in-list files)])
+        (match-define (cons name bs) file)
+        (call-with-output-file (build-path dir name) (lambda (port) (write-bytes bs port))))
+      (parameterize ([current-environment-variables
+                      (environment-variables-copy (current-environment-variables))])
+        (putenv "RKTORCH_FASHION_MNIST_DIR" (path->string dir))
+        (proc))))
+
+  (define labels-60000
+    (bytes-append #"\0\0\10\1" (integer->integer-bytes 60000 4 #f #t) (make-bytes 60000 0)))
+
+  (test-case "a cached file that is not torchvision's archive is an error naming it"
+    (with-cache (list (cons "train-images-idx3-ubyte.gz" #"not a gzip")
+                      (cons "train-labels-idx1-ubyte.gz" (gzipped labels-60000)))
+      (lambda ()
+        (check-exn #rx"train-images-idx3-ubyte[.]gz is not torchvision's archive"
+                   (lambda () (load-fashion-mnist)))
+        (check-exn #rx"file: .*train-labels-idx1-ubyte[.]gz"
+                   (lambda () (fashion-mnist-idx "train-labels-idx1-ubyte.gz"))))))
+
+  (define cache (fashion-mnist-cache-dir))
 
   (cond
     [(not (fashion-mnist-cached?))
@@ -114,12 +145,11 @@
        (check-equal? (shape ys) '(60000))
        (define-values (txs _tys) (load-fashion-mnist 'test))
        (check-equal? (shape txs) '(10000 1 28 28))
-       (for ([archive (in-list (map car fashion-mnist-resources))]
-             [name (in-list '("train-512-images-idx3-ubyte" "train-512-labels-idx1-ubyte"
-                              "t10k-128-images-idx3-ubyte" "t10k-128-labels-idx1-ubyte"))])
+       (for ([entry (in-list fixture-files)])
+         (match-define (list archive name n) entry)
          (define fixture (file->bytes (build-path fixture-dir name)))
-         (check-equal? (idx-head (fashion-mnist-idx archive) (record-count fixture)) fixture
-                       name)))
+         (check-equal? (record-count fixture) n name)
+         (check-equal? (idx-head (fashion-mnist-idx archive) n) fixture name)))
      (test-case "G4-L4: each cached archive is valid, and a flipped byte is not"
        (for ([archive (in-list (map car fashion-mnist-resources))])
          (define path (build-path cache archive))

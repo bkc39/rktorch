@@ -115,13 +115,15 @@ Zalando's Fashion-MNIST, torchvision's @tt{FashionMNIST}: 28 by 28 grey images o
 clothing in ten classes, in MNIST's IDX layout, 60000 for training and 10000 for
 testing. Fetched once from torchvision's mirror into the cache directory (or
 @envvar{RKTORCH_FASHION_MNIST_DIR}); a file whose MD5 is not torchvision's is not
-cached. MIT-licensed; a real subset ships as the fixture.
+cached, and a cached one that is not torchvision's is an error naming it. MIT-licensed;
+a real subset ships as the fixture.
 
 @defproc[(load-fashion-mnist [split (or/c 'train 'test) 'train]
                              [#:device device (or/c #f device/c) #f])
          (values tensor? tensor?)]{
 As @racket[load-mnist]: float32 images @tt{[N 1 28 28]} in @tt{[0, 1]} and int64
-labels @tt{[N]}, on @racket[device] or else the default device.}
+labels @tt{[N]}, decoded on the CPU as @tt{ToTensor} does and moved to
+@racket[device] or else the default device.}
 
 @defproc[(fashion-mnist-dataset [split (or/c 'train 'test) 'train]
                                 [#:device device (or/c #f device/c) #f]) dataset?]{
