@@ -2,12 +2,13 @@
 
 (require (for-syntax racket/base)
          (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in racket/string string-contains?)
+         (only-in racket/string string-contains? string-prefix? string-split)
          rackunit
          (only-in "markdown.rkt" ref)
          (only-in "summary-op-cost.rkt"
                   attribution crossing-us gap-tolerance k1-overhead k2-pytorch-ratio
-                  k3-thread-scaling k4-heap k5-pipelines k6-gc-share layer-median op-cost-markdown
+                  k3-thread-scaling k4-heap k5-pipelines k6-gc-per-sample layer-median
+                  op-cost-markdown
                   paired-delta piece-label samples-by-rep)
          (only-in "summary.rkt" read-records))
 
@@ -27,6 +28,14 @@
 
 (define (piece-of a layer)
   (row-of (ref a 'pieces) 'layer layer))
+
+(define (k-row md k)
+  (findf (lambda (line) (string-prefix? line (format "| ~a |" k))) (string-split md "\n")))
+
+(define (pipeline-row impl workers #:warmup [warmup 1] #:samples-per-s [rate 100.0]
+                      #:gc-ms [gc-ms #f] #:samples [samples 64] #:elapsed-s [elapsed 1.0])
+  (hasheq 'kind "pipeline" 'impl impl 'pipeline "cifar" 'workers workers 'rep 0
+          'warmup warmup 'samples_per_s rate 'samples samples 'elapsed_s elapsed 'gc_ms gc-ms))
 
 (define tolerance-text (format "~a%" (exact->inexact (* 100 gap-tolerance))))
 
@@ -100,14 +109,28 @@
 
 (test-case "K1 reports the facade's process CPU per op beside its wall time"
   (check-false (ref (k1-overhead records) 'cpu))
+  (check-regexp-match #rx"process CPU n/a µs/op, n/a above wall"
+                      (k-row (op-cost-markdown records) "K1"))
   (define with-cpu
     (cons (hasheq 'kind "op" 'impl "rktorch" 'op "scalar-add" 'layer "facade" 'threads 0
                   'rep 0 'us_per_op 15.0 'cpu_us_per_op 21.0)
           records))
-  (check-near (ref (k1-overhead with-cpu) 'cpu) 21.0))
+  (check-near (ref (k1-overhead with-cpu) 'cpu) 21.0)
+  (check-near (ref (k1-overhead with-cpu) 'above-wall) 6.0)
+  (check-true (string-contains?
+               (k-row (op-cost-markdown with-cpu) "K1")
+               "14.20 wall (facade 15.00, libtorch 0.80); process CPU 21.00 µs/op, 6.00 above wall")))
 
 (test-case "K2 divides rktorch's one-thread facade by PyTorch's"
   (check-near (map (lambda (k) (ref k 'value)) (k2-pytorch-ratio records)) '(5 3)))
+
+(test-case "K2 sets each side's process CPU beside its wall time, n/a for a side without it"
+  (define with-cpu
+    (cons (hasheq 'kind "op" 'impl "pytorch" 'op "scalar-add" 'layer "facade" 'threads 0
+                  'rep 0 'us_per_op 3.0 'cpu_us_per_op 3.5)
+          records))
+  (check-near (ref (row-of (k2-pytorch-ratio with-cpu) 'op "scalar-add") 'pytorch-cpu) 3.5)
+  (check-regexp-match #rx"process CPU n/a / 3.50 µs" (k-row (op-cost-markdown with-cpu) "K2")))
 
 (test-case "K3 divides the per-op cost at the most threads by one thread's, per layer"
   (define facade (row-of (k3-thread-scaling records) 'op "scalar-add"))
@@ -142,10 +165,29 @@
   (check-near (map (lambda (k) (ref k 'value)) (k5-pipelines records)) '(0.25 1))
   (check-true (string-contains? (op-cost-markdown records) "rktorch converts first (#458)")))
 
-(test-case "K6 is the median GC share of wall time at the most workers"
-  (define six (k6-gc-share records))
-  (check-equal? (ref six 'workers) 8)
-  (check-= (ref six 'value) 0.2 1e-12))
+(test-case "K5 at w > 0 is n/a when a side timed its first epoch, worker start-up included"
+  (define cold
+    (append records (list (pipeline-row "rktorch" 4 #:warmup 0) (pipeline-row "pytorch" 4)
+                          (pipeline-row "rktorch" 0 #:warmup 0))))
+  (check-false (ref (row-of (k5-pipelines cold) 'workers 4) 'value))
+  (check-true (ref (row-of (k5-pipelines cold) 'workers 4) 'cold))
+  (check-false (ref (row-of (k5-pipelines cold) 'workers 0) 'cold))
+  (check-true (string-contains? (k-row (op-cost-markdown cold) "K5")
+                                "cifar w=4: n/a (no warm-up epoch)"))
+  (define warm (append records (list (pipeline-row "rktorch" 4) (pipeline-row "pytorch" 4))))
+  (check-near (ref (row-of (k5-pipelines warm) 'workers 4) 'value) 1.0))
+
+(test-case "K6 is the median GC CPU per sample at each worker count"
+  (define six (k6-gc-per-sample records))
+  (check-equal? (map (lambda (k) (ref k 'workers)) six) '(0 8))
+  (check-near (map (lambda (k) (ref k 'value)) six) (list 10.0 (/ 400000.0 1400)))
+  (check-regexp-match #rx"w=0: 10; w=8: 286" (k-row (op-cost-markdown records) "K6")))
+
+(test-case "K6 prints no share of wall time when GC CPU, summed over threads, exceeds it"
+  (define busy (list (pipeline-row "rktorch" 8 #:gc-ms 1130 #:elapsed-s 1.0 #:samples 5000)))
+  (define row (k-row (op-cost-markdown busy) "K6"))
+  (check-regexp-match #rx"w=8: 226" row)
+  (check-false (regexp-match? #rx"%" row)))
 
 (test-case "the markdown lists a failed pipeline run"
   (check-true (string-contains? (op-cost-markdown records)

@@ -110,11 +110,33 @@ It stays @racket['float32] by default, so
          tensor?]{
 As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
 
-@defproc[(uniform! [t tensor?] [low real?] [high real?]) void?]{
-Fills @racket[t] in place with draws uniform on @tt{[low, high)}, as
-@tt{Tensor.uniform_}. It takes no @racket[#:generator]: it draws from
-@racket[(current-generator)], which must live on @racket[t]'s device, or
-from the global stream when that is @racket[#f].}
+@defproc[(uniform! [t (and/c tensor?
+                             (λ (t)
+                               (memq (dtype t)
+                                     '(float16 bfloat16 float32 float64))))]
+                   [low real? 0.0]
+                   [high real? 1.0]
+                   [#:generator generator (or/c generator? #f) #f])
+         void?]{
+@tt{Tensor.uniform_}: fills @racket[t] in place, uniform on @tt{[low, high)}.
+@racket[low] is at most @racket[high], both within @racket[t]'s dtype's finite
+range and at most its largest value apart. @Secref["streams"] gives the stream.
+@torch-examples[
+(define t (zeros 4))
+(uniform! t -1 1 #:generator (make-generator 0))
+t]}
+
+@defproc[(normal! [t (and/c tensor?
+                            (λ (t)
+                              (memq (dtype t)
+                                    '(float16 bfloat16 float32 float64))))]
+                  [mean real? 0.0]
+                  [std (>=/c 0) 1.0]
+                  [#:generator generator (or/c generator? #f) #f])
+         void?]{
+@tt{Tensor.normal_}: fills @racket[t] in place with normal draws. A
+@racket[std] of 0 fills @racket[mean] and still advances the stream, which
+@secref["streams"] gives.}
 
 @defproc[(full [value real?] [dim exact-nonnegative-integer?] ...
                [#:device device device/c #f]

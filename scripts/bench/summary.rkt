@@ -11,7 +11,8 @@
                   by-context commit execution host invocation iqr load-text make-section median
                   meta-text num one-line ref rktorch? section-context section-group section-keep
                   section-render section-suite section-title select settings-text table)
-         (only-in "summary-l0.rkt" l0-sections))
+         (only-in "summary-l0.rkt" l0-sections)
+         (only-in "summary-r.rkt" r-sections))
 
 (provide read-records
          summary-markdown)
@@ -129,7 +130,8 @@
          (make-section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
          (make-section "e2e" "summary" "End to end" e2e-section host)
          (make-section "e2e" "error" "Failures" failure-section host))
-   l0-sections))
+   l0-sections
+   r-sections))
 
 (define (header records)
   (define (all key)

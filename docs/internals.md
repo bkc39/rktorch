@@ -79,7 +79,7 @@ holds. A reaper takes any thread's claim on a dead handle without asking
 progress keeps its handle reachable from the freeing thread, so a thread
 holding a dead handle's lifetime has left the free before its release.
 Killed at `free-unaccounted`, after the unaccounting, it leaves a live,
-usable tensor that is off the ledger, its phantom bytes zeroed,
+usable tensor that is off the ledger and its phantoms,
 until a reaper releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
 
@@ -168,7 +168,10 @@ each is `(-> void?)`.
   publishes its batch this way: a reaper, a thread's first accounting
   after a collection, and a drainer helping, so a drain sees every batch
   taken before it began, whichever thread holds it. Taking and releasing
-  are one uninterruptible region, so a kill waits for the whole batch; the
+  are one uninterruptible region, so a kill waits for the whole batch. A
+  kind's `#:after-batch` hook runs once per batch it appears in, before
+  the ticket's removal: the tensor kind's flushes the thread's tally, so a
+  drain that returns `#t` sees the releases in the shared counters. The
   take lock's release (`with-take-lock`) and the ticket's removal run on a
   raise too, though nothing under either raises today but a test's CAS. A
   reaper that took a full batch while another is parked wakes one more.
@@ -252,8 +255,8 @@ recovery in `torch/train/private/dispatch.rkt`. On 9.3 the restore is a no-op.
 ## Phantom-bytes accounting
 
 `make-phantom-bytes` is Racket-CS's way to charge native allocations
-to the GC. `tensor-allocator` stores one phantom of the tensor's
-`nbytes` in its lifetime's `charge`, in a table keyed weakly by the handle
+to the GC. `tensor-allocator` records each tensor's `nbytes` in its
+lifetime's `charge`, in a table keyed weakly by the handle
 (`lifetimes`); an unaccounting takes the charge by CAS to `#f`, so exactly
 one subtracts it:
 
@@ -264,6 +267,102 @@ one subtracts it:
   for pressure; the approximation is deliberate.
 - a failed size probe charges 0 — accounting is best-effort and never
   a new failure mode on the allocation path.
+
+**One phantom pair per account, moved at a flush (#508).** An entry holds
+no phantom. Every `make-phantom-bytes` and `set-phantom-bytes!` takes Chez's
+process-wide `S_tc_mutex` (`alloc.c`, `S_phantom_bytevector_adjust`), 3.4 µs
+a call at eight threads whichever phantom it touches, so the phantoms move
+only when a tally flushes (`torch/foreign/raw/phantoms.rkt`). Each account
+holds two: an *old* phantom made with the account, and a *young* one made
+again after each collection. Together they hold the account's shared live
+bytes, clamped at 0; the young one holds the bytes charged since the last
+collection, net of that interval's releases, and the old one the rest. The
+young one is the point: Chez fires a collection once gen-0 bytes plus the
+phantom bytes of *gen-0 phantoms* reach 8 MiB, and a phantom made before the
+last collection is no longer in gen 0. One long-lived phantom ran one minor
+collection over 4,000 ops at a steady 10 MiB live, against 332 for a phantom
+per entry; the pair runs the per-entry count (331).
+
+- **Epochs.** A collection is seen through a weak box whose value nothing
+  else holds (`charge-epoch`): a collection clears it, and the next charge
+  installs a fresh one. An entry records the epoch it was charged in, and a
+  release counts against the young bytes only while that epoch is live, as
+  a per-entry phantom released before it was promoted lowered gen 0.
+  `young-count` is the pair of an epoch and its bytes, so the first count
+  after a collection starts a new one, and a young phantom of a dead epoch
+  rolls into the old one at the next sync. A tally's pending young bytes
+  carry the epoch of the entries they count: a gather into a tally whose
+  epoch has ended tags it with the entry's epoch, not the current one, so a
+  release whose epoch ended after it read it as live stays tagged with that
+  epoch. Once the tag's epoch has ended, a later charge or the flush carries
+  only what is above 0 into the next one. A negative gathered into a tally
+  whose tag is another, live epoch counts as 0: no caller gathers one, since
+  a release reads its epoch and gathers in one uninterruptible section on
+  the tally's own thread, the only writer of its tag, and an epoch it reads
+  as live is the newest. A negative count reaches the
+  shared count only when its tag is the shared count's epoch
+  (`note-young!`); otherwise it counts as 0. So a collection that lands
+  between a release reading its epoch as live and its bytes reaching the
+  shared count drops the release, whether it lands before the gather, in a
+  flush between taking the pending bytes and counting them, or on an
+  adopted release, which counts straight into the shared count; it never
+  lowers the next epoch's count.
+  The tag is a box beside the count, not a pair with it, so a charge
+  allocates nothing (a pair per op cost 40 ns at eight threads): only the
+  tally's own thread writes the tag or adds to the count (a flush on
+  another thread only takes the count), clamping the count before it
+  re-tags it, with `memory-order-release` between; a flush reads the tag, then
+  `memory-order-acquire`, then takes the count, so a count it reads as live
+  was clamped first, and a re-tag it misses drops a release's negative
+  bytes, which only over-counts.
+  Pending charges do carry over, so across a collection the young figure can
+  over-count by what the tallies held pending, which only adds pressure; it
+  never under-counts. The shared count never goes below 0 either. A
+  release counted young and flushed after its epoch ended would otherwise
+  start the next epoch below 0, and that epoch's charges would land on the
+  old phantom, the only pressure that could end it: charging 8 MiB and
+  releasing it at once ran 2 minor collections per 100 calls against
+  master's 11. A count held at 0 can only put bytes on the young phantom
+  that the old one should hold, which adds pressure and ends the epoch.
+- **The sync.** A flush moves its tally's pending live and young bytes to the
+  shared counters, then `sync-phantoms!` sets the pair to the counters, one
+  or two `set-phantom-bytes!`, lowering before raising. The sync is claimed
+  by a CAS; a thread that finds it claimed leaves its bytes to the claimant,
+  which looks again after letting go (fenced, so the look cannot pass it)
+  and at most four rounds in all, so threads that keep flushing cannot keep
+  it there. Every reader's `flush-tallies!` syncs every account it has a
+  slot for, so what a claimant left reaches the pair at the next reader or
+  flush. Concurrent flushes of one account cost one claimant's sets, not
+  one per thread. A sync that finds the claim free and the pair already at
+  its targets returns without claiming: a reader's `flush-tallies!` syncs
+  every slot, and a claim, which installs a cleanup, allocates (about 12 KB
+  per item on `librispeech-dataset-test`'s heap check without the shortcut). The claim is taken inside the flush's uninterruptible
+  region, so a kill never strands it; `with-claim`
+  (`torch/foreign/raw/cas.rkt`) lets it go in a cleanup, so an exception
+  does not either. It is no lock: nobody waits on it, and the lock order
+  (take lock, then ledger lock) is unchanged.
+- **Fences.** The claim guards plain fields (the cached byte counts, the
+  young phantom, its epoch), and Chez's CAS on arm64 is a bare
+  `ldxr`/`stxr` with no barrier (`asm-cas`, `s/arm64.ss:1991-2003`, Racket
+  9.3), so `with-claim` fences as rumble's own lock does
+  (`rumble/lock.ss:94,129`):
+  `memory-order-acquire` after taking the claim, `memory-order-release`
+  before letting it go. The look again is a store-load race on both sides
+  (a flusher adds to live and then reads the claim; the claimant lets go and
+  then reads live), which needs a full fence, and Racket has no
+  `memory-order-full`. `memory-order-release` is one where it matters: on
+  arm64 it emits `dmb ish`, a full barrier, while acquire emits only
+  `dmb ishld` (`asm-fence`, `s/arm64.ss:2008-2014`); on x86_64 both are no-ops
+  (`cpprim.ss:3339-3350`), and the store before each look is a CAS, which
+  is `lock cmpxchg` there (`s/x86_64.ss:1194-1198`) and so already a full
+  barrier. `with-claim` therefore issues `memory-order-release` before
+  taking the claim, after the caller's add to live, and again after letting
+  it go, before the claimant's look. The settled check reads the cached
+  fields outside the claim only after the same fence, a free claim and
+  `memory-order-acquire`, so it sees the last claimant's writes. riscv64 and loongarch64 take the same
+  inline but are not checked here.
+- Adoptions and adopted releases, which write the shared counters under the
+  ledger, sync the pair there.
 
 **GPU bytes charge 1:1 with host bytes into the same pool.** This is
 the point of the design: pressure scales with total native footprint,
@@ -290,7 +389,7 @@ mid-collection, whose `dynamic-wind` exit never runs, stops holding it.
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
 the step, provided the reapers release them. A collection only finds a
-dead handle; its storage and its phantom stay until a reaper releases
+dead handle; its storage and its charge stay until a reaper releases
 it. Without that the charge of every dead result piles up until Racket's
 next major, which reclaims nothing but that backlog: 8 MiB results ran
 three majors per hundred calls, about 1 ms a call on any device (#377).
@@ -377,9 +476,98 @@ the last defence when a trough collection is not yet due:
   record, the two next-collection times and the thread inside a
   collection a `schedule` record, and the three device queries handed
   down from `torch/foreign/raw/device.rkt` (capacity, allocated, release) a `queries`
-  record in `torch/foreign/raw/device-queries.rkt`. The three byte counts are
-  boxes updated by CAS; every other field is written inside
-  `with-ledger`.
+  record in `torch/foreign/raw/device-queries.rkt`. The three byte counts
+  and the entry count are boxes updated by CAS; every other field is
+  written inside `with-ledger`.
+- **Tallies (#508).** A charge or release writes its counts not to the
+  shared boxes but to its thread's tally (`torch/foreign/raw/tallies.rkt`),
+  reached through a non-preserved thread cell and registered in a strong
+  list that a CAS updates. Eight threads CASing one shared box cost
+  0.7 µs a CAS; a thread's own box costs 14–30 ns. A tally flushes after
+  64 ops, once its pending live bytes reach the device's limit
+  (`min(1 MiB, mark/512)`, or 1 MiB on a device with no mark, such as the
+  CPU by default; 0 until the device's first gate, so before it every op
+  flushes), once its pending since-check bytes reach it (so alloc/free
+  churn, which leaves live near 0, cannot hold back more than a limit of
+  the gate's count; `tally-checked!` adds the same bytes to since-check
+  and since-sample and a flush takes both, so pending since-sample always
+  equals pending since-check and needs no trigger of its own), and for any
+  one tensor of the limit or more. A device's limit only falls: a gate
+  whose mark gives a larger limit leaves it as it is, so threads that see
+  different marks (a per-thread `native-memory-limit` or
+  `native-memory-fraction`) do not flush every tally at every other gate;
+  only a reset (`forget-mark!`) unsets it, back to the first gate's start.
+  Each fall, and each reset, sets the limit and flushes every tally in
+  one uninterruptible region, so no tally holds counts built up under a
+  larger limit once the smaller one is visible and the bound below holds
+  with the current one: a kill of the gate's thread waits for the whole
+  flush, where a kill between tallies would leave the smaller limit
+  published with larger counts pending and no later gate to flush them.
+  That flush runs in atomic mode, so it prunes only the tallies of
+  collected threads. Each
+  flush moves every pending count with a `cas-take!` and a `cas-add!` in
+  one uninterruptible region, so a kill never strands an amount between
+  them, and takes no lock. A flush counts itself in its tally's `moving`
+  box around each slot's transfer, from before its first take until its
+  young bytes are counted: the live and entry moves with their
+  `tally-moving` points, the young take, the `young-taken` point and the
+  `note-young!` all sit between the raise and the lowering. The sync comes
+  after the lowering, so a sync that raises (with its claim held) leaves
+  the count at 0 rather than every later wait on that tally spinning, and
+  the bracket costs no cleanup frame (a `dynamic-wind` around the region
+  took `librispeech-dataset-test`'s heap check from under 32 KB to 35.6 KB
+  a ref). A count not yet taken is still pending, so a gap between slots
+  hides nothing in flight. Every flush that promises its
+  counts have landed (`flush-tally!`, so the reaper's `#:after-batch`
+  hook, and each tally of `flush-tallies!`) waits after its own transfer
+  for that count to reach 0: another thread's flush may have taken the
+  tally's counts and not yet added them, and without the wait a drain
+  could return `#t` with those releases still missing from the shared
+  counters. The wait spins, since the transfer it waits for is a few
+  CASes in an uninterruptible region on another OS thread (one on its own
+  OS thread cannot be swapped out mid-region), and costs one `unbox` a
+  flush when nothing is moving. Adoptions and adopted releases still write
+  the shared counters, under the ledger. Every
+  reader that decides or reports (`live-bytes`, `checks-seen`, the
+  `native-memory-*` readers, `finalizer-diagnostics` and the sampler,
+  before it takes the ledger) runs `flush-tallies!` first, which also prunes
+  the tallies of dead threads once it has taken their counts: a killed
+  thread has no exit hook, so its counts arrive at the next such flush.
+  A tally is judged prunable before its flush, never after. Judged after,
+  a thread that adds to its tally and dies between the flush and the
+  judgement would be pruned with those counts still in it; judged before,
+  a thread that dies after the judgement is kept, and that flush or the
+  next takes its counts. A tally holds its thread weakly, and `thread-dead?` is asked
+  whenever the flush is outside atomic mode, on any OS thread: a parallel
+  thread asking it suspends to enter atomic mode, which is an internal
+  error inside an uninterruptible region (the ledger's, or
+  `with-uninterruptible`'s, both of which `in-atomic-mode?` reports) and
+  safe outside one (a stress of six parallel threads flushing while
+  killed and finished threads die, 60 s on 9.1 and 9.3, conserved every
+  count and pruned every tally). Inside atomic mode a flush prunes only the
+  tallies whose threads were collected. Registering a tally prunes as
+  well, once the registry holds more than twice what the last prune left
+  (and more than 32): CPU threads that each allocate and free without a
+  mark never reach a flush of every tally, and without it the registry
+  would keep every tally they made. That prune judges every tally the
+  same way, flushes only the prunable ones (their young bytes with the
+  rest, the same flush as everywhere else) and records what it leaves, so
+  its walk is amortised O(1) a registration. The registry keeps its count beside the
+  list, so the bound below reads R without walking it.
+  The per-op gate reads the shared counts plus its own thread's pending
+  ones, so the op that crosses the interval still opens it. Only a
+  collection closes the gate, so an open gate flushes every tally only
+  when it samples or when the unflushed reading plus twice R times the
+  limit (`tally-staleness`, which leaves out the bound's in-flight tensor
+  per thread) could be over the mark; flushing on every op of an open gate measured 2.3x
+  slower than the shared counters at eight threads. Shared live is signed,
+  since a release can be flushed before its charge, and readers clamp it,
+  and each account's entry count, at 0. Between flushes the shared live
+  count is off from the fold by at most the number of registered tallies
+  times the device's current limit,
+  plus one tensor per thread inside a charge or release; the current limit
+  suffices because every fall is followed by a flush. The gate's interval and
+  sample counts lag by at most the same tallies times the limit.
 - `accounted`, which runs outside the registration region, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
@@ -445,7 +633,12 @@ the last defence when a trough collection is not yet due:
   the shadow alone. The lowering reads the ledger before the allocator and
   skips if the ledger has moved by the time it would apply, since another
   thread's tensor accounted or released in between would leave the two
-  figures describing different moments. Tensors that a finished collection moves into the
+  figures describing different moments. Both that check and the refresh's
+  subtraction read the ledger through `live-bytes`, which flushes every
+  tally first: a release still pending in another thread's tally when the
+  allocator answered has already left the allocator's figure, and the
+  unflushed ledger would count it, charging too little or lowering too
+  far. Tensors that a finished collection moves into the
   cache are charged again by the trough's refresh after its collection;
   a backstop collection, mid-forward, does not raise the charge for them,
   and the backstop itself still reads `driver-allocated` in full.
@@ -499,7 +692,7 @@ the last defence when a trough collection is not yet due:
   all kinds).
 
 **The shadow** (#213). Storage that only the autograd graph or libtorch
-holds reaches no wrapper, so the per-tensor phantoms never charge it:
+holds reaches no wrapper, so the ledger never charges it:
 saved state such as a dropout mask or `layer_norm`'s statistics, and the
 storage of a wrapper that died while the graph still holds it. At the
 #145 failure that was 12.6 GB on the ledger against 21.4 GB on the card.
@@ -695,6 +888,14 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `account-created` | a device's first account made, before the CAS that inserts it | device |
 | `gate-read` | the backstop has read its gate, before it acts | device |
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
+| `tallies-flushing` | `flush-tallies!` entered, before it walks the registry | whether it may ask `thread-dead?` |
+| `tally-judged` | `flush-tallies!` or a registration's prune has judged a tally prunable or not, before it flushes it | the tally |
+| `tallies-pruning` | a registration's prune entered, before it walks the registry | whether it may ask `thread-dead?` |
+| `tally-moving` | a flush has taken one of a tally's pending counts and not yet added it to the shared counter | the tally |
+| `young-clamped` | a gather into a tally whose tag has ended, the pending young count clamped at 0, before the new tag is published | the pending slot |
+| `young-retagged` | the same gather, the new tag published, before the young bytes are added | the pending slot |
+| `young-taken` | a flush has taken a slot's pending counts, before it counts the young bytes | the pending slot |
+| `phantoms-applied` | the sync claim held, the pair set to its targets, before the claim is let go | the account's phantoms |
 | `unaccount-entry-read` | a charge read, before the CAS that takes it | handle |
 | `entry-unaccounted` | inside the unaccounting region, the CAS won | handle |
 | `free-taken` | an explicit free has taken the handle, before it unaccounts | handle |
