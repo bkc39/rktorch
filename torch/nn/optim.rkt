@@ -82,9 +82,15 @@
 (define (tracked-parameters opt)
   (store-params (tracked-store opt)))
 
-(define-syntax-parse-rule (define-tracked-optimizer (name:id field:id ...) step:id option ...)
+(begin-for-syntax
+  (define-splicing-syntax-class struct-names
+    (pattern (~seq #:constructor-name constructor:id #:name name:id))))
+
+(define-syntax-parse-rule (define-tracked-optimizer (name:id field:id ...) step:id
+                            names:struct-names)
   (struct name tracked (field ...)
-    option ...
+    #:constructor-name names.constructor
+    #:name names.name
     #:methods gen:optimizer
     [(define (optimizer-step! opt) (step opt))
      (define (optimizer-parameters opt) (tracked-parameters opt))]))
