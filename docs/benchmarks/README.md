@@ -16,7 +16,9 @@ racket scripts/bench/summary.rkt results.jsonl > results.md
 
 `micro` is `crossings layers ops contracts`; `pytorch-ops`, `threads`,
 `pytorch-threads`, `calls` and `host-gpu` are the L0 suites (#254), and
-`scripts/bench/l0-baseline.sh` runs them all (see [L0 tables](#l0-tables)).
+`scripts/bench/l0-baseline.sh` runs them all (see [L0 tables](#l0-tables));
+`runtime` is `runtime-scaling runtime-native runtime-places runtime-ops`
+(see [Table R](#table-r)).
 Options go before or after
 the suite names, and an unknown suite stops the run before anything is
 measured. Records go to `--out` (appended) or standard output; a readable
@@ -24,9 +26,12 @@ line per case goes to standard error.
 
 | option | |
 |---|---|
-| `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
-| `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
+| `--rounds N` | timed rounds; 5 by default for the micro suites, 3 for `runtime`, 1 for `e2e` |
+| `--warmup N` | untimed rounds first, 1 by default, 2 for `calls` and 0 for `runtime`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
+| `--workers 1,4,7` | the `runtime` suites' worker counts; by default 1, 4 and 7, less those above one short of the CPUs the process may run on |
+| `--trip default,64` | the `runtime` suites' collect trip settings, in MB (`collect-trip-bytes`), `default` leaving Racket's own; one row per setting |
+| `--mix grain` | the op mix of `threads` and `pytorch-threads`: `small` (the default) or `grain` |
 | `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU. For `e2e`, the device every child must report: a child on another fails its variant with an `error` record naming both |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
 | `--full` | the examples' full settings instead of the short ones |
@@ -212,11 +217,33 @@ median, quartiles and IQR, and the load average before and after.
   their custodian (racket/racket#5614); `stopped` counts those that
   stopped in time. A worker that raises stops the others, and the run
   raises it, so the case fails rather than reporting fewer ops. Warmup
-  runs are not kept.
+  runs are not kept. `--mix grain` runs a mix above ATen's grain size
+  (`at::internal::GRAIN_SIZE`, 32768 elements) instead, a 256×256 matmul
+  and a 256×256 add, so each worker's ops start an OpenMP team of
+  `OMP_NUM_THREADS` threads, or of MKL's thread count where that is lower
+  (ATen sizes each thread's team by `mkl_get_max_threads`). The small mix's elementwise ops stay below
+  it, but its 64×64 matmul goes to MKL, which starts a team of its own, so
+  above one intra-op thread the small mix peaks with the grain mix. The
+  grain mix builds its tensors on its worker's first call, so the main
+  thread starts no team for it. A process's first run starts the
+  collector's sweeper threads, which Chez starts lazily and keeps, with
+  a collection over 32 allocating threads, so no run's peak counts one it
+  started. A run first waits (up to 2 s) for the process's OS
+  thread count to stop falling, since the last run's workers and their
+  teams take a moment to exit, and records it as `baseline_os_threads`. A
+  green thread on the main pool then counts the entries of
+  `/proc/self/task` every 100 ms of the run, and the row keeps the most it
+  saw over its rounds as `peak_os_threads` (both null without `/proc`, as
+  on macOS): a team per worker shows as a peak that grows with workers ×
+  intra-op threads. The
+  Racket process holds more OS threads of its own than Python's at one
+  worker, so read a side's peak down its column, not across the two.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
   count, released and counted the same way, and failing the same way. Its
   main loop drops the gradients (`zero_grad()`), as `zero-grads!` does.
+  It takes the same `--mix` and records the same baseline, and its
+  `peak_os_threads` counts its sampler, a Python thread, as one of them.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -263,6 +290,41 @@ median, quartiles and IQR, and the load average before and after.
   untimed; with `--warmup 0`, as in a smoke run, none runs, so the first
   round's first mode pays the first-call costs (cuDNN, the caching
   allocator's growth).
+- **runtime-scaling** — pure Racket, no rktorch: k `#:pool 'own` threads
+  each run a fixed amount of one workload, and the row times them from
+  release to the last finishing (`wall_ms`). The workloads: `cpu`, a
+  fixnum loop that allocates nothing (the CPU floor); `alloc`, short-lived
+  8-element vectors; `alloc-retain`, the same vectors kept in a 20,000-slot
+  ring, as prefetched batches are; `alloc-guarded`, each vector registered
+  with a Chez guardian, drained every 1024; `sema`, a Racket semaphore's
+  post and wait; `os-sema`, an OS semaphore's; `cas`, a `box-cas!`
+  increment. Main is `idle` (waiting on the workers) or `alloc`ates
+  vectors until they finish, keeping its rate and its pauses. `--scale`
+  multiplies each workload's units.
+- **runtime-native** — k threads loop on libc `usleep` (2000 or 200 µs)
+  while main allocates for `--scale` × 3 s (at least 0.5 s). A `plain`
+  call is an ordinary foreign call, `collect-safe` is the same call bound
+  `#:blocking? #t`, and `poll` follows the plain call with
+  `disable-interrupts` and `enable-interrupts` (`ffi/unsafe/vm`), which
+  joins a pending collection at once; `between` is `alloc` when the worker
+  allocates a vector after each call. A `none` row runs no worker. Main
+  reads the clock every 4096 allocations; the gaps between reads are its
+  pauses (p50, p99, max). Workers are released and stopped as `threads`'s
+  are.
+- **runtime-places** — `alloc-retain` in k places against k threads, main
+  idle, timing the work phase only: every place is started and has its
+  units before the clock starts. The place worker is `place-worker` in
+  `scripts/bench/runtime-work.rkt`, found by its path, not the working
+  directory; a place that fails reports its error rather than leaving main
+  waiting.
+- **runtime-ops** — the real shim ops at the raw layer (`tr-add/raw` on
+  32×32, `tr-matmul/raw` on 256×256 and 1024×1024, through
+  `tensor-allocator`) in k workers, `plain`, `poll`, or `collect-safe`
+  (the same C symbol rebound `#:blocking? #t` with `define-torch`), while
+  main allocates or trains `threads`'s MLP; a `none` row per main runs no
+  worker. Rows keep main's rate (M allocs/s or steps/s), its pauses (for a
+  training main, its step times), the workers' ops per second and µs per
+  op per worker.
 
 | example | short | full | timed |
 |---|---|---|---|
@@ -307,10 +369,14 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 - **A. Per op against PyTorch** — `ops` facade and raw beside
   `pytorch-ops`, in µs per call, and their ratios, one table per device and
   thread count and invocation (`run_id`).
-- **B. Thread scaling** — ops per second at each thread count, each
+- **B. Thread scaling** — ops per second at each worker count, each
   implementation's ops over its own idle-main one-thread ops, rktorch over
-  PyTorch, and the main thread's steps per second, one table per thread
-  count and invocation (`run_id`). An idle row's ratio is
+  PyTorch, the main thread's steps per second, and each side's peak OS
+  threads, one table per intra-op thread count and invocation (`run_id`).
+  Each row names its mix and intra-op thread count, so the tables of the
+  `OMP_NUM_THREADS` passes read as an intra-op × workers grid; a row
+  recorded before the mix and the peak existed shows `small` and `-`. An
+  idle row's ratio is
   the speedup over one thread. A train row measures how far a training
   main slows the workers: rktorch's workers run their ops on their own OS
   threads, sharing only the collector with main, PyTorch's wait on the GIL.
@@ -352,13 +418,15 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   its batches (rktorch has no pinned memory, #307), `twin crops per image`
   on the `batched` rows, and `load L ≥ M` when a run of the pair ended
   with the one-minute load at or above `--max-load`. Its heading is the
-  host and run, not the device, so a split pair stays in one table; the
-  loader rows and the ResNet rows are two invocations, so two tables.
+  host, `OMP_NUM_THREADS` and run, not the device, so a split pair stays
+  in one table; the loader rows and the ResNet rows are two invocations,
+  so two tables.
 
 `scripts/bench/l0-baseline.sh` (unsets `OMP_NUM_THREADS` and
 `MKL_NUM_THREADS`) takes the baseline from the host shell, entering one dev
 shell at a time: in `nix develop`, A on the CPU at the default thread count
-and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
+and at `OMP_NUM_THREADS=1`, and B at one ATen thread on the small mix and
+at `OMP_NUM_THREADS` 1, 4 and 8 on the grain mix, one invocation each;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
@@ -366,8 +434,13 @@ default), 0.2 and 1; then, in the same shell, the `loader` stage writes
 the CIFAR-10 PNG tree under `BASELINE_CACHE` and runs H with
 `--device cuda`: `cifar-loader` at `WORKERS` 0, 1, 2, 4 and 8 and
 `cifar-resnet` at 0, 2 and 4, each `PIPELINE` `per-sample` and `batched`,
-beside their twins, with `PNG_DIGEST` set to the tree's. Every stage runs
-at libtorch's default thread count unless a pass or variant sets one. An
+beside their twins, with `PNG_DIGEST` set to the tree's. C and H run at
+`OMP_NUM_THREADS=1`, both sides: each rktorch worker on its own OS thread
+(`#:pool 'own`) would otherwise start its own OpenMP team, where
+PyTorch's DataLoader workers call `torch.set_num_threads(1)` (#533). C
+and H baselines taken before this ran at the default and are not
+comparable. Every other stage runs at libtorch's default thread count
+unless a pass or variant sets one. An
 example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
@@ -392,6 +465,70 @@ a pair read: the loader on the MNIST fixture, 05 and 09 on the cached datasets a
 H on the fixture's PNG tree at `WORKERS` 0 and 2, `cifar-resnet` at
 `BASE=4`.
 
+## Table R
+
+Table R isolates the Racket runtime from rktorch: what k parallel threads
+cost each other through the collector, and what a foreign call in one
+thread costs a thread that allocates. Table B mixes native ops, the
+ledger and GC; R1-R3 have no native op at all, and R4 has the shim op and
+nothing above the raw layer.
+
+- **R1. Pure-Racket scaling** — each workload's wall time at k over its
+  time at the lowest k (`÷ k=1`; 1.00 is perfect scaling, since each
+  worker does a fixed amount), beside the `cpu` workload's at the same k,
+  main mode and trip: the CPU floor, what the host's cores give a loop
+  that never allocates. A workload's excess over its floor is the
+  runtime's share. `GC ms` is the collector's time over the run, and
+  `main M allocs/s` main's rate when it allocates.
+- **R2. Native calls beside an allocating main** — main's allocation rate,
+  over the `none` row's, and its pauses, per call, `between` and mode.
+- **R3. Places against threads** — the same rows side by side, each over
+  its own lowest k, with each run's GC time; Racket CS counts every
+  place's collections in it, not the main place's alone.
+- **R4. Real ops in workers** — main's rate over its `none` row's, its
+  pauses, and the workers' throughput, per op, mode and main.
+
+Every row names its trip setting, and the heading the host, its CPU list,
+`OMP_NUM_THREADS`, how many CPUs the process may use (`affinity_cpus`) of
+the host's, and the run. `spread` is the IQR over the median of the
+row's rounds, and needs 3; identical cells on the lab host vary by ±15%,
+so read ratios, not absolutes, and repeat a run before trusting a gap
+inside its spread. Each round measures the load from outside the suite:
+the host's busy cores over the round less the suite's own CPU time
+(`/proc/stat` less `/proc/self/stat`, so its k workers and main do not
+count), or, without `/proc`, the 1-minute load less k + 1. A row whose
+outside load reached `--max-load` in any round is noted `load L ≥ M`.
+
+On a hyperthreaded host, two threads on one core's siblings share its
+execution units, and the CPU floor itself stops scaling past the
+physical cores. Run under `taskset` over one hyperthread per physical
+core (`/sys/devices/system/cpu/cpuN/topology/thread_siblings_list` names
+each CPU's siblings; on the lab's i9-9900K, CPUs 0-7 are one per core), with
+k at most cores − 1, so main has a core of its own; the default
+`--workers` stops one short of the CPUs `taskset` leaves. Under
+`OMP_NUM_THREADS=1`, as R4 needs, no op starts a team.
+
+```bash
+OMP_NUM_THREADS=1 taskset -c 0-7 racket scripts/bench/run.rkt runtime \
+  --max-load 4 --rounds 3 --out runtime.jsonl
+```
+
+What it reproduces:
+
+- retained allocation gets no parallel speedup: `alloc-retain` runs
+  7-9× slower at k = 7 than at k = 1, against a CPU floor of about 2×,
+  and summed GC time grows from 0.1-0.2 s to 8-13 s (#532, E1);
+- one worker in a plain 2 ms foreign call stalls an allocating main for
+  hundreds of milliseconds at a time, about 150 calls, and a
+  collect-safe call removes the stall (#532, E2; the mechanism in #538);
+- places share the collector, so `alloc-retain` slows in k places about
+  as it does in k threads (#532, E5);
+- on real ops, long native calls hurt: 1024² matmuls in plain calls cut a
+  training main's rate several-fold at k = 7, collect-safe calls do not,
+  and the poll only bounds the pause to one call; small ops lose the same
+  in every mode, so that loss is allocation and GC, not the FFI (#538,
+  and the recommendation in #263).
+
 ## Records
 
 One JSON object per line: `suite` (`micro`, `e2e`, `scaling`, `calls`,
@@ -404,7 +541,8 @@ and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 `CUDA_DEVICE_ORDER=PCI_BUS_ID` or on a host whose GPUs are all one model), `threads`
 and where that came from (`at::get_num_threads`, else `MKL_NUM_THREADS`,
 `OMP_NUM_THREADS` or the core count), `omp_num_threads` and
-`mkl_num_threads` as set, `cores`, `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
+`mkl_num_threads` as set, `cores`, `cpu`, `affinity` and its count
+`affinity_cpus` (null without `/proc`), `host`, `os`; `run_id` is shared by every record one
 `scripts/bench/run.rkt` invocation writes, and the summary pairs A/B ratios only within
 one. The summary gives each micro invocation its own section, headed by its
 commit, host, execution (device, threads and their source, GPU) and run id,
@@ -418,12 +556,23 @@ record adds each run's mean `epoch_gc_ms`, median `step_ms` and
 `host_ms`, its one-minute load (`run_loads`), the `--max-load` it ran
 under (`max_load`), and `reads`, the settings its runner reads. A twin's `meta` is the parent's
 with the child's `impl`, `python`, `libtorch` (the torch version),
-`device`, `threads` (`torch.get_num_threads`) and, for the e2e twins,
+`device`, `threads` (`torch.get_num_threads`), `omp_num_threads` and
+`mkl_num_threads` as the child saw them (null when unset, which H reads
+as rktorch's false) and, for the e2e twins,
 `optimizer` and `foreach` over it; torch's name for the GPU
 goes to `torch_gpu`, so `gpu` stays the parent's and a twin pairs with the
 rktorch records of its device. `scaling` records add `threads_run`,
-`main_steps_per_s` and `stopped` (one per round) and `settings` (`seconds`
-per round, `warmup` rounds); `host-gpu` step records add `gc_ms` per step,
+`main_steps_per_s` and `stopped` (one per round), `settings` (`seconds`
+per round, `warmup` rounds), `mix` (`small` or `grain`) and
+`peak_os_threads` and `baseline_os_threads` (the most over its rounds,
+null without `/proc`); `runtime` records (`group` `scaling`, `native`,
+`places` or `ops`) add the row's `workload`, `k`, `main`, `trip_mb`
+(`default` or MB), `ffi` (`none`, `plain`, `poll` or `collect-safe`),
+`between`, `runner` (`threads` or `places`), `units` or `seconds`,
+`max_load`, and per round `wall_ms`, `work_gc_ms`, `main_rate`,
+`pause_p50_ms`, `pause_p99_ms`, `pause_max_ms`, `worker_ops_per_s`,
+`us_per_op`, `stopped` and `load_outside` (the busy cores outside the
+suite over the run, as Table R notes it); `host-gpu` step records add `gc_ms` per step,
 one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and
@@ -462,7 +611,12 @@ It writes `op-cost-<stamp>.jsonl` and `op-cost-<stamp>.md` to `--out-dir`
 directory inside the repository, a records file that already exists (one
 file is one run; a reused `BASELINE_DATE` needs a new value), and more than
 one ATen intra-op thread. `taskset` is optional; the meta row records the affinity. Pin
-n+1 CPUs for n threads: main runs the finalizers beside the workers.
+n+1 CPUs for n threads or workers: main and the reapers run beside them. The
+driver warns on stderr when the affinity mask (`Cpus_allowed_list`) has n
+or fewer, or, without one, when `nproc` (else `sysctl -n hw.ncpu`) counts n
+or fewer CPUs available. `--smoke` takes the smallest settings (one rep, one
+64-sample epoch) and keeps the pipelines' warm-up epoch; flags after it
+override it.
 
 - **Ops:** scalar add (`(+ (zeros 1) 1.0)`), 8×8 add, `zeros 8 8`,
   `narrow`, `stack` of 32 random 3×32×32 tensors, and one cifar sample
@@ -499,6 +653,14 @@ n+1 CPUs for n threads: main runs the finalizers beside the workers.
   `scripts/bench/python/pipelines.py` at `--pipeline-workers` (default 0
   and 8), one child process per cell. The jpeg twin crops uint8 before
   converting; rktorch converts first (#458).
-  `--samples`, `--warmup` and `--epochs` shorten them.
+  `--samples`, `--warmup` and `--epochs` shorten them. PyTorch's persistent
+  workers start inside the first epoch, so K5 at w > 0 reads n/a for a cell
+  timed without a warm-up epoch. Records written before #505 carry no
+  `warmup` field, so K5 on an old `--warmup 0` smoke run still shows the
+  inflated ratio. K6 is GC CPU µs per sample at each worker
+  count: `current-gc-milliseconds` sums GC CPU over OS threads, so it is no
+  share of wall time.
 
-The summary's K1–K6 table follows the #255 metrics comment.
+The summary's K1–K6 table follows the #255 metrics comment. K1 and K2 set
+process CPU per op (every OS thread, the reapers included) beside wall time,
+n/a for records written before it was recorded.

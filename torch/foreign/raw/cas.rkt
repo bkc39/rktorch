@@ -2,7 +2,8 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in racket/unsafe/ops unsafe-struct*-cas! unsafe-struct*-ref)
-         (only-in syntax/parse/define define-syntax-parse-rule))
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "regions.rkt" with-cleanup))
 
 (provide cas-add!
          cas-claim!
@@ -10,14 +11,15 @@
          cas-field-claim!
          cas-sites
          cas-take!
-         cas-update!)
+         cas-update!
+         with-claim)
 
 (module+ private
   (provide site-cas))
 
 (begin-for-syntax
   (define known-sites
-    '(update claim collector lifetime probe gate lock tensor-state reaper))
+    '(update claim collector lifetime probe gate lock tensor-state reaper tally phantom))
 
   (define-syntax-class site
     #:description "a CAS site named in raw/cas.rkt"
@@ -76,12 +78,16 @@
                                                   #:defaults ([s #''update])))
   (update-loop s b f))
 
-(define-syntax-parse-rule (cas-add! b:expr n:expr)
+(define-syntax-parse-rule (cas-add! b:expr n:expr
+                                   (~optional (~seq #:site s:site)
+                                              #:defaults ([s #''update])))
   (let ([by n])
-    (update-loop 'update b (lambda (old) (+ old by)))))
+    (update-loop s b (lambda (old) (+ old by)))))
 
-(define-syntax-parse-rule (cas-take! b:expr)
-  (take-loop 'update b))
+(define-syntax-parse-rule (cas-take! b:expr
+                                    (~optional (~seq #:site s:site)
+                                               #:defaults ([s #''update])))
+  (take-loop s b))
 
 (define-syntax-parse-rule (cas-claim! b:expr from:expr to:expr
                                       (~optional (~seq #:site s:site)
@@ -94,3 +100,18 @@
 (define-syntax-parse-rule (cas-field-claim! owner:expr index:expr from:expr to:expr
                                             #:site s:site)
   (claim-loop s (slot owner index) slot-ref (holding from) to))
+
+(define (release-claim! site b)
+  (memory-order-release)
+  (claim-loop site b unbox (holding #t) #f)
+  (memory-order-release))
+
+(define (call-with-claim site b body)
+  (memory-order-release)
+  (and (claim-loop site b unbox (holding #f) #t)
+       (begin
+         (memory-order-acquire)
+         (with-cleanup (body) #:finally (release-claim! site b)))))
+
+(define-syntax-parse-rule (with-claim b:expr #:site s:site body:expr ...+)
+  (call-with-claim s b (lambda () body ...)))

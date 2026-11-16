@@ -1,4 +1,5 @@
-/* Compile-only: pins C linkage for every public entry point. */
+/* Compile-only: pins C linkage for every public entry point; the global.h
+   family is pinned in c_api_compile_global_test.c. */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -17,11 +18,6 @@ void torchrkt_c_api_compile_check(void) {
       tr_hann_window;
   tr_tensor* (*stft)(const tr_tensor*, int64_t, int64_t, int64_t,
                      const tr_tensor*, bool, bool) = tr_stft;
-  const char* (*version)(void) = tr_version;
-  const char* (*abi_stamp)(void) = tr_abi_stamp;
-  const char* (*last_error)(void) = tr_last_error;
-  int (*last_error_kind)(void) = tr_last_error_kind;
-  int (*manual_seed)(uint64_t) = tr_manual_seed;
   tr_tensor* (*randn)(const int64_t*, int64_t) = tr_randn;
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
   int (*numel)(const tr_tensor*, int64_t*) = tr_tensor_numel;
@@ -110,6 +106,14 @@ void torchrkt_c_api_compile_check(void) {
   void (*generator_free)(tr_generator*) = tr_generator_free;
   tr_tensor* (*randperm)(int64_t, tr_generator*) = tr_randperm;
   int (*draw_seed)(tr_generator*, int64_t*) = tr_generator_draw_seed;
+  tr_tensor* (*generator_state)(const tr_generator*) = tr_generator_state;
+  int (*generator_set_state)(tr_generator*, const tr_tensor*) =
+      tr_generator_set_state;
+  tr_tensor* (*default_generator_state)(tr_device_type, int64_t) =
+      tr_default_generator_state;
+  int (*default_generator_set_state)(tr_device_type, int64_t,
+                                     const tr_tensor*) =
+      tr_default_generator_set_state;
   int (*requires_grad_set)(tr_tensor*, int) = tr_tensor_requires_grad_;
   int (*has_grad)(const tr_tensor*, int*) = tr_tensor_has_grad;
   int (*backward)(tr_tensor*) = tr_tensor_backward;
@@ -307,11 +311,6 @@ void torchrkt_c_api_compile_check(void) {
   int (*tensor_device)(const tr_tensor*, tr_device_type*, int64_t*) =
       tr_tensor_device;
 
-  (void)version;
-  (void)abi_stamp;
-  (void)last_error;
-  (void)last_error_kind;
-  (void)manual_seed;
   (void)randn;
   (void)tensor_free;
   (void)numel;
@@ -367,6 +366,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)generator_free;
   (void)randperm;
   (void)draw_seed;
+  (void)generator_state;
+  (void)generator_set_state;
+  (void)default_generator_state;
+  (void)default_generator_set_state;
   (void)requires_grad_set;
   (void)has_grad;
   (void)backward;
