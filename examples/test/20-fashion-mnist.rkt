@@ -206,7 +206,7 @@
     (define ours (hash-ref bundle 'racket))
     (define theirs (hash-ref bundle 'lightning))
     (define n (length (hash-ref ours 'epochs)))
-    (define total (* n (ceiling (/ (ceiling (/ 60000 full-batch-size)) accumulate))))
+    (define total (~> (/ 60000 full-batch-size) ceiling (/ accumulate) ceiling (* n)))
     (check-equal? (length (hash-ref theirs 'epochs)) n)
     (check-equal? (hash-ref bundle 'seed) seed)
     (check-equal? (hash-ref bundle 'precision) "16-mixed")
