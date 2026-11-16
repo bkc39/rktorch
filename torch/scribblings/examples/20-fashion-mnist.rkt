@@ -1,20 +1,18 @@
 #lang scribble/lp2
 
 @(require (only-in racket/file file->value)
-          (only-in racket/format ~a ~r)
+          (only-in racket/format ~a)
           (only-in racket/match match-define)
           torch/scribblings/labels
           (for-label torch/data/loader torch/vision/fashion-mnist))
 
-@(define results
+@(match-define (hash-table ('racket ours) ('lightning theirs) ('commit commit)
+                           ('hardware hardware) ('date run-date) ('precision precision)
+                           ('seed run-seed) ('lightning-version lightning-version)
+                           ('python-torch python-torch))
    (file->value (collection-file-path "fashion-mnist.rktd" "torch" "scribblings" "results")))
 
-@(define ours (hash-ref results 'racket))
-@(define theirs (hash-ref results 'lightning))
-
-@(define (fixed x digits) (~r x #:precision (list '= digits)))
-
-@(define (percent x) (fixed (* 100 x) 1))
+@(define (percent x) (real->decimal-string (* 100 x) 1))
 
 @title[#:tag "ex-fashion-mnist"]{Fashion-MNIST, step for step with Lightning}
 
@@ -27,7 +25,8 @@ gradients accumulated over two batches and clipped, and mixed precision. Its twi
 2.6.5, and the tests hold the two to each other step for step.
 
 @chunk[<r20-require>
-(require (only-in racket/math exact-ceiling)
+(require (only-in racket/match match-define)
+         (only-in racket/math exact-ceiling)
          torch torch/nn torch/data/loader torch/train)]
 
 @chunk[<r20-provide>
@@ -59,14 +58,12 @@ rate over the first quarter of the optimizer steps and then follows a cosine dow
 Lightning's @tt{estimated_stepping_batches}.
 
 @chunk[<r20-trainer>
-(define seed 0)
-(define lr 2e-3)
-(define weight-decay 0.05)
-(define accumulate 2)
-(define clip-val 0.5)
-
 (define fashion-recipe
-  (hasheq 'seed seed 'lr lr 'weight-decay weight-decay 'accumulate accumulate 'clip clip-val))
+  (hasheq 'seed 0 'lr 2e-3 'weight-decay 0.05 'accumulate 2 'clip 0.5))
+
+(match-define (hash-table ('seed seed) ('lr lr) ('weight-decay weight-decay)
+                          ('accumulate accumulate) ('clip clip-val))
+  fashion-recipe)
 
 (define (warmup-steps total)
   (exact-ceiling (/ total 4)))
@@ -97,10 +94,9 @@ Lightning's @tt{estimated_stepping_batches}.
 @bold{The fit.} One seeded @racket[fit] over a training and a test
 @racket[tensor-dataset]: shuffled training batches from a seeded generator, the test
 set after every epoch, two batches accumulated per step, the gradient norm clipped at
-@racket[clip-val], at the precision and on the device given. The tests run it on 512
-training and 128 test pictures of the committed fixture, in batches of 32, for 16
-optimizer steps; the headline runs it on the full sets, resident on the device, in
-batches of 128. It answers the run and the trained classifier.
+@racket[clip-val], at the precision and on the device given. The tests run it on the
+committed fixture and the headline on the full sets. It answers the run and the
+trained classifier.
 
 @chunk[<r20-fit>
 (define (train-fashion-mnist train-set test-set
@@ -121,12 +117,12 @@ batches of 128. It answers the run and the trained classifier.
   (values run classifier))]
 
 @bold{The result.} @filepath{scripts/fashion-mnist-results.rkt} ran this program and
-its twin at commit @tt{@(hash-ref results 'commit)} on @(hash-ref results 'hardware)
-on @(hash-ref results 'date), @(~a (length (hash-ref ours 'epochs))) epochs at
-precision @tt{@(hash-ref results 'precision)}, seed @(~a (hash-ref results 'seed)).
+its twin at commit @tt{@commit} on @hardware on @run-date,
+@(~a (length (hash-ref ours 'epochs))) epochs at precision @tt{@precision}, seed
+@(~a run-seed).
 Test accuracy after the last epoch is @(percent (hash-ref ours 'accuracy)) percent
 here and @(percent (hash-ref theirs 'accuracy)) percent in Lightning
-@(hash-ref results 'lightning-version) on PyTorch @(hash-ref results 'python-torch).
+@lightning-version on PyTorch @|python-torch|.
 
 @(tabular
   #:style 'boxed
@@ -135,11 +131,11 @@ here and @(percent (hash-ref theirs 'accuracy)) percent in Lightning
               (bold "test accuracy") (bold "seconds"))
         (for*/list ([(our-row their-row) (in-parallel (hash-ref ours 'epochs)
                                                       (hash-ref theirs 'epochs))]
-                    [side-row (in-list (list (cons "Racket" our-row)
-                                             (cons "Lightning" their-row)))])
-          (match-define (cons side (list epoch train-loss val-loss acc seconds)) side-row)
-          (list (~a epoch) side (fixed train-loss 4) (fixed val-loss 4)
-                (string-append (percent acc) "%") (fixed seconds 1)))))
+                    [(side row) (in-parallel '("Racket" "Lightning") (list our-row their-row))])
+          (match-define (list epoch train-loss val-loss acc seconds) row)
+          (list (~a epoch) side (real->decimal-string train-loss 4)
+                (real->decimal-string val-loss 4) (string-append (percent acc) "%")
+                (real->decimal-string seconds 1)))))
 
 @chunk[<*>
   <r20-require>

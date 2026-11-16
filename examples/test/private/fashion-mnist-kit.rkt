@@ -1,8 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/format ~r)
-         (only-in racket/list fourth last)
-         (only-in racket/match match match-define)
+(require (only-in racket/list fourth last)
+         (only-in racket/match match-define)
          (only-in torch cpu-device cuda-available? cuda-device device-type)
          (only-in torch/data/loader tensor-dataset)
          (only-in torch/scribblings/examples/20-fashion-mnist fashion-recipe train-fashion-mnist)
@@ -32,9 +31,7 @@
   (symbol->string (device-type device)))
 
 (define (precision-for device)
-  (match (device-type device)
-    ['cuda '16-mixed]
-    [_ '32-true]))
+  (if (eq? (device-type device) 'cuda) '16-mixed '32-true))
 
 (define (headline-device)
   (if (cuda-available?) (cuda-device) (cpu-device)))
@@ -52,15 +49,13 @@
   (values (lambda-callback #:on-train-epoch-start start! #:on-train-epoch-end record!)
           (lambda () (reverse rows))))
 
-(define (fixed x digits)
-  (~r x #:precision (list '= digits)))
-
 (define (print-epoch-rows rows)
   (for ([row (in-list rows)])
     (match-define (list epoch train-loss val-loss acc seconds) row)
     (printf "epoch ~a: loss ~a, val loss ~a, val acc ~a, ~as\n" epoch
-            (fixed train-loss 4) (fixed val-loss 4) (fixed acc 4) (fixed seconds 1)))
-  (printf "test acc ~a\n" (fixed (fourth (last rows)) 4)))
+            (real->decimal-string train-loss 4) (real->decimal-string val-loss 4)
+            (real->decimal-string acc 4) (real->decimal-string seconds 1)))
+  (printf "test acc ~a\n" (real->decimal-string (fourth (last rows)) 4)))
 
 (define (stepping-recorder)
   (define total (box #f))
@@ -93,11 +88,8 @@
   (values (rows) run (total)))
 
 (define (twin-config #:batch batch #:epochs epochs #:total total #:warmup warmup)
-  (match-define (hash-table ('seed seed) ('lr lr) ('weight-decay wd) ('accumulate a)
-                            ('clip clip))
-    fashion-recipe)
-  (hasheq 'lr lr 'wd wd 'clip clip 'A a 'batch batch 'epochs epochs 'W warmup 'T total
-          'seed seed 'lightning lightning-version))
+  (hash-set* fashion-recipe 'batch batch 'epochs epochs 'total total 'warmup warmup
+             'lightning lightning-version))
 
 (define (twin-json device precision mode epochs)
   (call-with-python-env

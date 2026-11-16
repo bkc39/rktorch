@@ -239,9 +239,10 @@ def main():
     total = trainer.estimated_stepping_batches
     decay, no_decay = decay_split(model.net)
     out = {
-        "config": {"lr": LR, "wd": WEIGHT_DECAY, "clip": CLIP, "A": ACCUMULATE,
-                   "batch": BATCH, "epochs": EPOCHS, "W": math.ceil(total / 4), "T": total,
-                   "seed": SEED, "lightning": lightning.__version__},
+        "config": {"seed": SEED, "lr": LR, "weight-decay": WEIGHT_DECAY,
+                   "accumulate": ACCUMULATE, "clip": CLIP, "batch": BATCH, "epochs": EPOCHS,
+                   "total": total, "warmup": math.ceil(total / 4),
+                   "lightning": lightning.__version__},
         "names": {"parameters": [n for n, _ in model.named_parameters()],
                   "buffers": [n for n, _ in model.named_buffers()],
                   "decay": ["net." + n for n, _ in decay],

@@ -198,7 +198,7 @@
       (check-equal? (hash-ref (hash-ref record 'lightning) 'seconds) 30.0)
       (check-equal? (hash-ref record 'seed) seed)
       (check-equal? (hash-ref record 'python-torch) "2.14.0")
-      (match-define (hash-table ('T total) ('W w)) (hash-ref record 'config))
+      (match-define (hash-table ('total total) ('warmup w)) (hash-ref record 'config))
       (check-equal? (list total w) '(470 118))))
 
   (test-case "G4-L22: the committed headline, both sides within 0.01"
@@ -211,8 +211,9 @@
     (check-equal? (hash-ref bundle 'seed) seed)
     (check-equal? (hash-ref bundle 'precision) "16-mixed")
     (check-equal? config (twin-config #:batch full-batch-size #:epochs n
-                                      #:total (hash-ref config 'T) #:warmup (hash-ref config 'W)))
-    (check-equal? (hash-ref config 'W) (warmup-steps (hash-ref config 'T)))
+                                      #:total (hash-ref config 'total)
+                                      #:warmup (hash-ref config 'warmup)))
+    (check-equal? (hash-ref config 'warmup) (warmup-steps (hash-ref config 'total)))
     (check-true (string? (hash-ref bundle 'python-torch)))
     (check-true (<= (abs (- (hash-ref ours 'accuracy) (hash-ref theirs 'accuracy))) 0.01))
     (check-true (>= (hash-ref ours 'accuracy) 0.88)))
