@@ -856,9 +856,9 @@ The interface every optimizer and schedule implements, a subclass of
 must define @racketidfont{optimizer-step!}, one update, and
 @racketidfont{optimizer-parameters}, the tensors it updates; leaving either out is an
 error when the structure is defined. Such an optimizer has one parameter group and no
-hyperparameters, an @tt{Optimizer} built with @tt{defaults={}}: @racket[step!],
-@racket[zero-grads!] and @racket[fit], with clipping, accumulation and
-@racket[grad-scaler], accept it; @racket[learning-rate] and the schedules reject it.
+hyperparameters: @racket[step!], @racket[zero-grads!] and @racket[fit], with clipping,
+accumulation and @racket[grad-scaler], accept it; @racket[learning-rate] and the
+schedules reject it.
 
 @torch-examples[
 (struct plain-sgd (params lr)
@@ -866,8 +866,8 @@ hyperparameters, an @tt{Optimizer} built with @tt{defaults={}}: @racket[step!],
   [(define (optimizer-parameters opt) (plain-sgd-params opt))
    (define (optimizer-step! opt)
      (with-no-grad
-       (for* ([p (in-list (plain-sgd-params opt))] [g (in-value (maybe-grad p))] #:when g)
-         (copy! p (- p (* (plain-sgd-lr opt) g))))))])
+       (for ([p (in-list (plain-sgd-params opt))] #:when (has-grad? p))
+         (copy! p (- p (* (plain-sgd-lr opt) (grad p)))))))])
 (define w (requires-grad! (ones 2)))
 (define opt (plain-sgd (list w) 0.5))
 (backward! (sum (* w w)))
