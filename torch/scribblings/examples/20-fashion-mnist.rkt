@@ -21,7 +21,9 @@ bags in place of digits. This chapter trains a small convnet on it with
 biases left undecayed, a warmup into a cosine schedule stepped per optimizer step,
 gradients accumulated over two batches and clipped, and mixed precision. Its twin,
 @filepath{examples/python/20_fashion_mnist.py}, is the same program in Lightning
-2.6.5, and the tests hold the two to each other step for step.
+2.6.5, and the tests hold the two to each other step for step: live where Lightning
+is installed, and elsewhere against the twin's trace of the CPU fits, committed beside
+the tests.
 
 @chunk[<r20-require>
 (require (only-in racket/math exact-ceiling)

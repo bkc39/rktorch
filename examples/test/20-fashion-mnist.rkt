@@ -15,13 +15,16 @@
                     second third)
            (only-in racket/match match match-define match-lambda)
            (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/system system*)
            rackunit
            torch
            torch/data/loader
            torch/nn
            torch/scribblings/examples/20-fashion-mnist
+           (only-in torch/private/util with-temporary-directory)
            (only-in torch/tests/private/python-env
-                    python-cuda-available? python-module-available? python-torch-available? tol)
+                    call-with-python-env python python-cuda-available? python-module-available?
+                    python-torch-available? tol)
            (only-in torch/train run-global-step run-grad-scaler run-optimizers)
            (only-in torch/vision/fashion-mnist load-fashion-mnist-fixture)
            (only-in (submod torch/vision/fashion-mnist private) fashion-mnist-size)
@@ -29,13 +32,15 @@
                     epoch-recorder fixture-batch-size full-batch-size print-epoch-rows
                     run-example twin-config twin-json)
            (only-in "private/lightning-trace.rkt"
-                    compare-trace flat-state lightning-name trace-callback trace-gaps
-                    trace-labels trace-logger trace-losses trace-lrs trace-norms trace-recorder
-                    trace-rows)
+                    compare-golden compare-trace flat-state golden-gaps lightning-name
+                    state-summary trace-callback trace-gaps trace-labels trace-logger trace-losses
+                    trace-lrs trace-norms trace-recorder trace-rows)
            (only-in "../../scripts/fashion-mnist-results.rkt" fashion-mnist-record)
            (only-in racket/port with-output-to-string))
 
   (define-runtime-path bundle-path "../../torch/scribblings/results/fashion-mnist.rktd")
+  (define-runtime-path golden-path "20-fashion-mnist-lightning.rktd")
+  (define-runtime-path twin-path "../python/20_fashion_mnist.py")
 
   (match-define (hash-table ('seed seed) ('lr lr) ('weight-decay weight-decay)
                             ('accumulate accumulate) ('clip clip-val))
@@ -45,8 +50,11 @@
   (define total-steps 16)
   (define warmup 4)
 
+  (define (named-state classifier)
+    (append (named-parameters classifier) (named-buffers classifier)))
+
   (define (state-of classifier)
-    (flat-state (append (named-parameters classifier) (named-buffers classifier))))
+    (flat-state (named-state classifier)))
 
   (define (traced device precision)
     (define tr (trace-recorder))
@@ -224,9 +232,12 @@
     (check-true (<= (abs (- (hash-ref ours 'accuracy) (hash-ref theirs 'accuracy))) 0.01))
     (check-true (>= (hash-ref ours 'accuracy) 0.88)))
 
-  (define (initial-state)
+  (define (initial-named)
     (manual-seed! seed)
-    (state-of (FashionClassifier)))
+    (named-state (FashionClassifier)))
+
+  (define (initial-state)
+    (flat-state (initial-named)))
 
   (define (check-names r classifier json)
     (define names (hash-ref json 'names))
@@ -264,10 +275,112 @@
       (check-equal? (count values (hash-ref json 'scales))
                     (if (run-grad-scaler r) total-steps 0))))
 
+  (define golden (file->value golden-path))
+  (define initial-summary (state-summary (initial-named)))
+  (define adam-drift (* 2 total-steps lr))
+
+  (define golden-tolerances
+    (hasheq '32-true
+            (hasheq 'losses tol 'norms tol 'rows 3e-3 'acc 1/128
+                    'values adam-drift 'sum 0.03 'sum-sq 0.1)
+            'bf16-mixed
+            (hasheq 'losses 0.04 'norms 0.5 'rows 0.06 'acc 1/32
+                    'values adam-drift 'sum 0.15 'sum-sq 0.25)))
+
+  (define (golden-config precision)
+    (hash-ref (hash-ref golden 'configs) precision))
+
+  (define (check-golden label precision tr r classifier)
+    (define g (golden-config precision))
+    (test-case (format "G4-L23: ~a: the committed Lightning trace's config, names and groups" label)
+      (check-equal? (hash-ref g 'config)
+                    (twin-config #:batch fixture-batch-size #:epochs epochs
+                                 #:total total-steps #:warmup warmup))
+      (check-names r classifier g))
+    (define final (state-summary (named-state classifier)))
+    (printf "[20-fashion-mnist] ~a golden largest gaps: ~s\n" label
+            (golden-gaps tr g initial-summary final))
+    (test-case (format "G4-L24: ~a: the fit is the committed Lightning trace" label)
+      (compare-golden label tr g initial-summary final (hash-ref golden-tolerances precision))))
+
+  (check-golden "(a)" '32-true trace-a run-a classifier-a)
+  (check-golden "(b)" 'bf16-mixed trace-b run-b classifier-b)
+
+  (define (failures thunk)
+    (define n 0)
+    (parameterize ([current-check-around
+                    (lambda (check)
+                      (with-handlers ([exn:test:check? (lambda (_) (set! n (add1 n)))])
+                        (check)))])
+      (thunk))
+    n)
+
+  (define (hash-update-in h path f)
+    (match path
+      [(list k) (hash-update h k f)]
+      [(cons k more) (hash-update h k (lambda (v) (hash-update-in v more f)))]))
+
+  (define final-a (state-summary (named-state classifier-a)))
+  (define tolerances-a (hash-ref golden-tolerances '32-true))
+
+  (define (golden-failures path f)
+    (define g (hash-update-in (golden-config '32-true) path f))
+    (failures (lambda () (compare-golden "(a)" trace-a g initial-summary final-a tolerances-a))))
+
+  (define ((past quantity [scale 1.0]) x)
+    (+ x (* 2 (hash-ref tolerances-a quantity) scale)))
+
+  (define ((first-of f) xs)
+    (match-define (cons x more) xs)
+    (cons (f x) more))
+
+  (define ((each-row key f) rows)
+    (for/list ([row (in-list rows)])
+      (match-define (list step m) row)
+      (list step (if (hash-has-key? m key) (hash-update m key f) m))))
+
+  (match-define (hash-table ('shape weight-dims) ('sum-sq weight-sum-sq))
+    (~> (golden-config '32-true) (hash-ref 'state) (hash-ref 'net.3.weight)))
+  (define weight-numel (apply * weight-dims))
+
+  (define perturbations
+    `(((losses) ,(first-of (past 'losses)))
+      ((norms) ,(first-of (past 'norms)))
+      ((rows) ,(each-row 'train/loss_step (past 'rows)))
+      ((rows) ,(each-row 'val/acc (past 'acc)))
+      ((rows) ,(first-of (first-of add1)))
+      ((state net.3.weight head) ,(first-of (past 'values)))
+      ((init net.5.bias tail) ,(first-of (past 'values)))
+      ((state net.3.weight sum) ,(past 'sum (sqrt (* weight-numel weight-sum-sq))))
+      ((state net.3.weight sum-sq) ,(past 'sum-sq weight-sum-sq))
+      ((state net.3.weight shape) ,reverse)
+      ((state net.0.bn.num_batches_tracked sum) ,add1)
+      ((labels) ,(first-of (first-of (lambda (y) (- 9 y)))))
+      ((lrs) ,(first-of (first-of (lambda (x) (* x (+ 1 1e-12))))))
+      ((scales) ,(lambda (_) '(65536.0)))))
+
+  (test-case "G4-L25: a value perturbed past its tolerance fails G4-L24"
+    (check-equal? (golden-failures '(losses) values) 0)
+    (for ([p (in-list perturbations)])
+      (match-define (list path f) p)
+      (check-true (positive? (golden-failures path f)) (format "~a" path))))
+
   (cond
     [(not (and (python-torch-available?) (python-module-available? "lightning")))
-     (displayln "[20-fashion-mnist] parity skipped: python3 torch or lightning not available")]
+     (displayln (string-append "[20-fashion-mnist] twin parity and fixture freshness skipped:"
+                               " python3 torch or lightning not available"))]
     [else
+     (test-case "G4-L26: the committed Lightning trace is the twin's golden output"
+       (with-temporary-directory (root #:template "fashion-golden-~a")
+         (define out (build-path root "golden.rktd"))
+         (define log (open-output-string))
+         (define ok?
+           (parameterize ([current-output-port log] [current-error-port log])
+             (call-with-python-env #:env '(("RKTORCH_TWIN_MODE" . "golden"))
+                                   (lambda () (system* python "-I" twin-path out)))))
+         (check-true ok? (get-output-string log))
+         (check-equal? (hash-remove (file->value out) 'torch) (hash-remove golden 'torch)
+                       "examples/test/20-fashion-mnist-lightning.rktd differs from the twin's")))
      (check-twin "(a)" (cpu-device) '32-true trace-a run-a classifier-a tol tol)
      (check-twin "(b)" (cpu-device) 'bf16-mixed trace-b run-b classifier-b tol tol)])
 

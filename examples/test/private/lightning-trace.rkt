@@ -1,14 +1,16 @@
 #lang racket/base
 
-(require (only-in racket/list append* append-map count)
+(require racket/contract/base
+         (only-in racket/list append* append-map count first second take take-right)
          (only-in racket/match == match-define match-lambda)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-prefix? string-replace)
          (only-in rackunit check-equal? check-true)
-         (only-in torch ~> item reshape tensor->list)
+         (only-in torch ~> item reshape shape tensor->list tensor?)
          (only-in torch/nn
                   clip-grad-norm! grad-scaler-scale learning-rate optimizer-param-groups
                   param-group-count param-group-params)
+         (only-in torch/private/contract define/contract-out)
          (only-in torch/train
                   gen:training-logger lambda-callback run-grad-scaler))
 
@@ -124,18 +126,6 @@
   (append-map (match-lambda [(list _ m) (map (lambda (k) (hash-ref m k)) (sorted-keys m))])
               rows))
 
-(define (check-rows label ours theirs epochs tolerance acc-tolerance)
-  (check-equal? (row-steps ours) (row-steps theirs) (format "~a: row steps" label))
-  (check-equal? (row-keys ours) (row-keys theirs) (format "~a: row keys" label))
-  (check-equal? (count val-row? ours) epochs (format "~a: validation rows" label))
-  (check-equal? (count val-row? theirs) epochs (format "~a: twin validation rows" label))
-  (for ([o (in-list ours)] [t (in-list theirs)] [i (in-naturals)])
-    (match-define (list _ om) o)
-    (match-define (list _ tm) t)
-    (for ([(k v) (in-hash tm)] #:when (hash-has-key? om k))
-      (check-close (format "~a: row ~a ~a" label i k) (list (hash-ref om k)) (list v)
-                   (if (equal? k "val/acc") acc-tolerance tolerance)))))
-
 (define (check-state label state json tolerance)
   (for ([entry (in-list state)])
     (match-define (cons name vals) entry)
@@ -145,17 +135,34 @@
        (check-equal? vals theirs (format "~a: ~a" label name))]
       [else (check-close (format "~a: ~a" label name) vals theirs tolerance)])))
 
-(define (compare-trace label tr json state tolerance #:acc-tolerance [acc-tolerance tolerance])
+(define (check-steps label tr json)
   (define epochs (hash-ref (hash-ref json 'config) 'epochs))
+  (define ours (map lightning-row (trace-rows tr)))
+  (define theirs (map json-row (hash-ref json 'rows)))
   (check-equal? (trace-labels tr) (hash-ref json 'labels) (format "~a: labels" label))
-  (check-close (format "~a: losses" label) (trace-losses tr) (hash-ref json 'losses) tolerance)
   (check-equal? (trace-lrs tr) (hash-ref json 'lrs) (format "~a: lrs" label))
-  (check-close (format "~a: norms" label) (trace-norms tr) (hash-ref json 'norms) tolerance)
   (check-equal? (trace-scales tr) (hash-ref json 'scales) (format "~a: scales" label))
+  (check-equal? (row-steps ours) (row-steps theirs) (format "~a: row steps" label))
+  (check-equal? (row-keys ours) (row-keys theirs) (format "~a: row keys" label))
+  (check-equal? (count val-row? ours) epochs (format "~a: validation rows" label))
+  (check-equal? (count val-row? theirs) epochs (format "~a: twin validation rows" label)))
+
+(define (check-rows label ours theirs tolerance acc-tolerance)
+  (for ([o (in-list ours)] [t (in-list theirs)] [i (in-naturals)])
+    (match-define (list _ om) o)
+    (match-define (list _ tm) t)
+    (for ([(k v) (in-hash tm)] #:when (hash-has-key? om k))
+      (check-close (format "~a: row ~a ~a" label i k) (list (hash-ref om k)) (list v)
+                   (if (equal? k "val/acc") acc-tolerance tolerance)))))
+
+(define (compare-trace label tr json state tolerance #:acc-tolerance [acc-tolerance tolerance])
+  (check-steps label tr json)
+  (check-close (format "~a: losses" label) (trace-losses tr) (hash-ref json 'losses) tolerance)
+  (check-close (format "~a: norms" label) (trace-norms tr) (hash-ref json 'norms) tolerance)
   (check-rows label
               (map lightning-row (trace-rows tr))
               (map json-row (hash-ref json 'rows))
-              epochs tolerance acc-tolerance)
+              tolerance acc-tolerance)
   (check-state label state (hash-ref json 'state) tolerance))
 
 (define (trace-gaps tr json state)
@@ -169,6 +176,98 @@
           'state (for/fold ([widest 0.0]) ([entry (in-list state)])
                    (match-define (cons name vals) entry)
                    (max widest (largest-gap vals (hash-ref theirs (string->symbol name)))))))
+
+(define (tensor-summary t)
+  (define vals (~> t (reshape -1) tensor->list))
+  (define n (min 8 (length vals)))
+  (hasheq 'shape (shape t)
+          'sum (for/sum ([v (in-list vals)]) v)
+          'sum-sq (for/sum ([v (in-list vals)]) (* v v))
+          'head (take vals n)
+          'tail (take-right vals n)))
+
+(define/contract-out (state-summary named)
+  (-> (listof (cons/c string? tensor?)) (and/c hash? hash-eq?))
+  (for/hasheq ([np (in-list named)])
+    (match-define (cons name t) np)
+    (values (string->symbol (lightning-name name)) (tensor-summary t))))
+
+(define golden-quantities '(losses norms rows acc values sum sum-sq))
+
+(define (counter? name)
+  (regexp-match? #rx"num_batches_tracked$" (symbol->string name)))
+
+(define (nonzero-or-1 x)
+  (if (and (real? x) (positive? x)) x 1.0))
+
+(define (entry-gap e)
+  (match-define (list _ _ x y scale) e)
+  (/ (gap x y) scale))
+
+(define (series-entries quantity xs ys)
+  (for/list ([x (in-list xs)] [y (in-list ys)] [i (in-naturals)])
+    (list quantity (format "~a[~a]" quantity i) x y 1.0)))
+
+(define (row-entries ours theirs)
+  (for*/list ([(o t) (in-parallel (in-list ours) (in-list theirs))]
+              [(k v) (in-hash (second t))])
+    (list (if (equal? k "val/acc") 'acc 'rows) (format "row ~a ~a" (first t) k)
+          (hash-ref (second o) k #f) v 1.0)))
+
+(define (tensor-entries o t)
+  (match-define (hash-table ('shape dims) ('sum-sq sum-sq)) t)
+  (define n (apply * dims))
+  (append
+   (list (list 'sum 'sum (hash-ref o 'sum #f) (hash-ref t 'sum)
+               (~> (* n sum-sq) sqrt nonzero-or-1))
+         (list 'sum-sq 'sum-sq (hash-ref o 'sum-sq #f) sum-sq (nonzero-or-1 sum-sq)))
+   (for*/list ([k (in-list '(head tail))]
+               [(x y) (in-parallel (in-list (hash-ref o k '())) (in-list (hash-ref t k)))])
+     (list 'values k x y 1.0))))
+
+(define (summary-entries kind ours theirs)
+  (for*/list ([name (in-list (sort (hash-keys theirs) symbol<?))]
+              #:unless (counter? name)
+              [e (in-list (tensor-entries (hash-ref ours name (hasheq)) (hash-ref theirs name)))])
+    (match-define (list quantity k x y scale) e)
+    (list quantity (format "~a ~a ~a" kind name k) x y scale)))
+
+(define (golden-entries tr golden init state)
+  (append (series-entries 'losses (trace-losses tr) (hash-ref golden 'losses))
+          (series-entries 'norms (trace-norms tr) (hash-ref golden 'norms))
+          (row-entries (map lightning-row (trace-rows tr)) (map json-row (hash-ref golden 'rows)))
+          (summary-entries "init" init (hash-ref golden 'init))
+          (summary-entries "state" state (hash-ref golden 'state))))
+
+(define (check-summary-layout label kind ours theirs)
+  (check-equal? (sort (hash-keys ours) symbol<?) (sort (hash-keys theirs) symbol<?)
+                (format "~a: ~a names" label kind))
+  (for ([(name t) (in-hash theirs)])
+    (define o (hash-ref ours name (hasheq)))
+    (check-equal? (hash-ref o 'shape #f) (hash-ref t 'shape)
+                  (format "~a: ~a ~a shape" label kind name))
+    (when (counter? name)
+      (check-equal? o t (format "~a: ~a ~a" label kind name)))))
+
+(define/contract-out (compare-golden label tr golden init state tolerances)
+  (-> string? trace-recorder? hash? hash? hash? (hash/c symbol? (>=/c 0)) void?)
+  (check-steps label tr golden)
+  (check-equal? (length (trace-losses tr)) (length (hash-ref golden 'losses))
+                (format "~a: losses count" label))
+  (check-equal? (length (trace-norms tr)) (length (hash-ref golden 'norms))
+                (format "~a: norms count" label))
+  (check-summary-layout label "init" init (hash-ref golden 'init))
+  (check-summary-layout label "state" state (hash-ref golden 'state))
+  (for ([e (in-list (golden-entries tr golden init state))])
+    (match-define (list quantity where x y _) e)
+    (check-true (<= (entry-gap e) (hash-ref tolerances quantity))
+                (format "~a: ~a: ~a against ~a" label where x y))))
+
+(define/contract-out (golden-gaps tr golden init state)
+  (-> trace-recorder? hash? hash? hash? (hash/c symbol? real?))
+  (for/fold ([widest (for/hasheq ([q (in-list golden-quantities)]) (values q 0.0))])
+            ([e (in-list (golden-entries tr golden init state))])
+    (hash-update widest (first e) (lambda (g) (max g (entry-gap e))))))
 
 (module+ test
   (require (only-in json string->jsexpr)
