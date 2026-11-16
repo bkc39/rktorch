@@ -8,7 +8,10 @@
                   define-cpointer-type make-ctype)
          (only-in ffi/vector _s64vector)
          (only-in "memory.rkt"
-                  _tr-device-type registering/release tensor-allocator/no-retry)
+                  _tr-device-type
+                  registering/release
+                  tensor-allocator
+                  tensor-allocator/no-retry)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
@@ -16,9 +19,13 @@
          _Generator/current
          _Generator/null
          current-generator/raw
+         tr-default-generator-set-state!/raw
+         tr-default-generator-state/raw
          tr-generator-device/raw
          tr-generator-draw-seed/raw
          tr-generator-new-on/raw
+         tr-generator-set-state!/raw
+         tr-generator-state/raw
          tr-randn/raw
          tr-randn-gen-on/raw
          tr-rand/raw
@@ -59,6 +66,25 @@
         -> (rc : _int)
         -> (values rc out))
   #:c-id tr_generator_draw_seed)
+
+;; reading a state draws nothing, so these retry after an OOM
+(define-torch tr-generator-state/raw
+  (_fun (generator : _Generator) -> _Tensor/null)
+  #:c-id tr_generator_state
+  #:wrap tensor-allocator)
+
+(define-torch tr-default-generator-state/raw
+  (_fun (type : _tr-device-type) (index : _int64) -> _Tensor/null)
+  #:c-id tr_default_generator_state
+  #:wrap tensor-allocator)
+
+(define-torch tr-generator-set-state!/raw
+  (_fun (generator : _Generator) (state : _Tensor) -> _int)
+  #:c-id tr_generator_set_state)
+
+(define-torch tr-default-generator-set-state!/raw
+  (_fun (type : _tr-device-type) (index : _int64) (state : _Tensor) -> _int)
+  #:c-id tr_default_generator_set_state)
 
 ;; a draw from either stream; no retry, as for the other RNG bindings
 (define-torch tr-randperm/raw

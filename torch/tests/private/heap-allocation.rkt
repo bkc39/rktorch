@@ -33,7 +33,8 @@
 ;; Earlier runs' garbage is released, main's latch is spent (or its first
 ;; accounting in the window would wake a reaper), and every reaper parked
 ;; again, before the window opens: the heap counts every thread's allocation,
-;; and a woken reaper's is not this run's.
+;; and a woken reaper's is not this run's. The phantoms move when the tallies
+;; flush, so each reading flushes them before it reads the heap.
 (define (racket-heap-allocation thunk)
   (collect-garbage 'minor)
   (drain-finalizers!)
@@ -47,8 +48,8 @@
   (call-with-values thunk void)
   (call-as-atomic
    (lambda ()
-     (define heap (current-memory-use 'cumulative))
-     (- heap (phantom-bytes) start))))
+     (define phantom (phantom-bytes))
+     (- (current-memory-use 'cumulative) phantom start))))
 
 (define (median-allocation thunk)
   (call-with-values thunk void)
