@@ -279,13 +279,40 @@
   (define initial-summary (state-summary (initial-named)))
   (define adam-drift (* 2 total-steps lr))
 
-  (define golden-tolerances
-    (hasheq '32-true
-            (hasheq 'losses tol 'norms tol 'rows 3e-3 'acc 1/128
-                    'values adam-drift 'sum 0.03 'sum-sq 0.1)
-            'bf16-mixed
-            (hasheq 'losses 0.04 'norms 0.5 'rows 0.06 'acc 1/32
-                    'values adam-drift 'sum 0.15 'sum-sq 0.25)))
+  (define golden-evidence
+    `((x86_64
+       "i9-9900K, OMP_NUM_THREADS 1 4 8, ATen default, oneDNN SSE41, MKL SSE4_2 and AVX"
+       (32-true (losses 2.4e-7 ,tol) (norms 1.4e-6 ,tol) (rows 7.9e-4 3e-3) (acc 0 1/128)
+                (values 1.0e-2 ,adam-drift) (sum 6.3e-3 0.03) (sum-sq 2.4e-2 0.1))
+       (bf16-mixed (losses 7.9e-3 0.04) (norms 0.12 0.5) (rows 1.4e-2 0.06) (acc 1/128 1/32)
+                   (values 1.6e-2 ,adam-drift) (sum 3.6e-2 0.15) (sum-sq 6.1e-2 0.25)))
+      (cross-arch
+       "aarch64-darwin, macos-latest, Nix checks run 43994518225"
+       (32-true (losses 5.17e-4 2e-3) (norms 8.78e-3 0.035) (rows 9.47e-4 4e-3) (acc 0 1/128)
+                (values 1.09e-2 ,adam-drift) (sum 6.2e-3 0.03) (sum-sq 2.1e-2 0.1))
+       (bf16-mixed (losses 1.01e-2 0.04) (norms 0.103 0.5) (rows 1.31e-2 0.06)
+                   (acc 0.0078 1/32) (values 1.25e-2 ,adam-drift) (sum 1.16e-2 0.15)
+                   (sum-sq 2.0e-2 0.25)))))
+
+  (define golden-profile
+    (match-lambda
+      ['x86_64 'x86_64]
+      [_ 'cross-arch]))
+
+  (define ((profile-column pick) profile)
+    (match-define (list _ _ configs ...) (assq profile golden-evidence))
+    (for/hasheq ([config (in-list configs)])
+      (match-define (cons precision entries) config)
+      (values precision
+              (for/hasheq ([entry (in-list entries)])
+                (match-define (list quantity gap bound) entry)
+                (values quantity (pick gap bound))))))
+
+  (define profile-gaps (profile-column (lambda (gap _) gap)))
+  (define profile-tolerances (profile-column (lambda (_ bound) bound)))
+
+  (define active-profile (golden-profile (system-type 'arch)))
+  (define golden-tolerances (profile-tolerances active-profile))
 
   (define (golden-config precision)
     (hash-ref (hash-ref golden 'configs) precision))
@@ -298,7 +325,8 @@
                                  #:total total-steps #:warmup warmup))
       (check-names r classifier g))
     (define ours (trace-golden tr initial-summary (state-summary (named-state classifier))))
-    (printf "[20-fashion-mnist] ~a golden largest gaps: ~s\n" label (golden-gaps ours g))
+    (printf "[20-fashion-mnist] ~a golden largest gaps [~a]: ~s\n" label active-profile
+            (golden-gaps ours g))
     (test-case (format "G4-L24: ~a: the fit is the committed Lightning trace" label)
       (compare-golden label ours g (hash-ref golden-tolerances precision))))
 
@@ -320,14 +348,6 @@
       [(cons k more) (hash-update h k (lambda (v) (hash-update-in v more f)))]))
 
   (define ours-a (trace-golden trace-a initial-summary (state-summary (named-state classifier-a))))
-  (define tolerances-a (hash-ref golden-tolerances '32-true))
-
-  (define (golden-failures path f)
-    (define g (hash-update-in (golden-config '32-true) path f))
-    (failures (lambda () (compare-golden "(a)" ours-a g tolerances-a))))
-
-  (define ((past quantity [scale 1.0]) x)
-    (+ x (* 2 (hash-ref tolerances-a quantity) scale)))
 
   (define ((first-of f) xs)
     (match-define (cons x more) xs)
@@ -338,31 +358,67 @@
       (match-define (list step m) row)
       (list step (if (hash-has-key? m key) (hash-update m key f) m))))
 
-  (match-define (hash-table ('shape weight-dims) ('sum-sq weight-sum-sq))
-    (~> (golden-config '32-true) (hash-ref 'state) (hash-ref 'net.3.weight)))
-  (define weight-numel (apply * weight-dims))
+  (define ((scaled-tolerance factor tolerances) quantity)
+    (* factor (hash-ref tolerances quantity)))
 
-  (define perturbations
-    `(((losses) ,(first-of (past 'losses)))
-      ((norms) ,(first-of (past 'norms)))
-      ((rows) ,(each-row 'train/loss_step (past 'rows)))
-      ((rows) ,(each-row 'val/acc (past 'acc)))
-      ((rows) ,(first-of (first-of add1)))
-      ((state net.3.weight head) ,(first-of (past 'values)))
-      ((init net.5.bias tail) ,(first-of (past 'values)))
-      ((state net.3.weight sum) ,(past 'sum (sqrt (* weight-numel weight-sum-sq))))
-      ((state net.3.weight sum-sq) ,(past 'sum-sq weight-sum-sq))
+  (define (float-shifts amount base)
+    (match-define (hash-table ('shape dims) ('sum-sq sum-sq))
+      (~> base (hash-ref 'state) (hash-ref 'net.3.weight)))
+    (define ((by quantity [scale 1.0]) x)
+      (~> (amount quantity) (* scale) (+ x)))
+    `(((losses) ,(first-of (by 'losses)))
+      ((norms) ,(first-of (by 'norms)))
+      ((rows) ,(each-row 'train/loss_step (by 'rows)))
+      ((rows) ,(each-row 'val/acc (by 'acc)))
+      ((state net.3.weight head) ,(first-of (by 'values)))
+      ((init net.5.bias tail) ,(first-of (by 'values)))
+      ((state net.3.weight sum) ,(by 'sum (~> (apply * dims) (* sum-sq) sqrt)))
+      ((state net.3.weight sum-sq) ,(by 'sum-sq sum-sq))))
+
+  (define exact-perturbations
+    `(((rows) ,(first-of (first-of add1)))
       ((state net.3.weight shape) ,reverse)
       ((state net.0.bn.num_batches_tracked sum) ,add1)
       ((labels) ,(first-of (first-of (lambda (y) (- 9 y)))))
       ((lrs) ,(first-of (first-of (lambda (x) (* x (+ 1 1e-12))))))
       ((scales) ,(lambda (_) '(65536.0)))))
 
-  (test-case "G4-L25: a value perturbed past its tolerance fails G4-L24"
-    (check-equal? (golden-failures '(losses) values) 0)
-    (for ([p (in-list perturbations)])
+  (define (shifted base ps)
+    (for/fold ([g base]) ([p (in-list ps)])
       (match-define (list path f) p)
-      (check-true (positive? (golden-failures path f)) (format "~a" path))))
+      (hash-update-in g path f)))
+
+  (define (profile-failures profile g)
+    (define tolerances (hash-ref (profile-tolerances profile) '32-true))
+    (failures (lambda () (compare-golden "(a)" ours-a g tolerances))))
+
+  (define (check-perturbed profile base)
+    (define tolerances (hash-ref (profile-tolerances profile) '32-true))
+    (define past (float-shifts (scaled-tolerance 2 tolerances) base))
+    (check-equal? (profile-failures profile base) 0 (format "~a: unperturbed" profile))
+    (for ([p (in-list (append past exact-perturbations))])
+      (match-define (list path f) p)
+      (check-true (positive? (profile-failures profile (hash-update-in base path f)))
+                  (format "~a: ~a" profile path))))
+
+  (test-case "G4-L25: a value perturbed past the active profile's tolerance fails G4-L24"
+    (check-perturbed active-profile (golden-config '32-true)))
+
+  (define aarch64-golden
+    (let ([base (golden-config '32-true)]
+          [gaps (hash-ref (profile-gaps 'cross-arch) '32-true)])
+      (shifted base (float-shifts (lambda (quantity) (hash-ref gaps quantity)) base))))
+
+  (test-case "G4-L28: the architecture picks the profile, and aarch64's gaps pass only its own"
+    (check-equal? (map golden-profile '(x86_64 aarch64 arm ppc riscv64))
+                  '(x86_64 cross-arch cross-arch cross-arch cross-arch))
+    (for* ([profile (in-list '(x86_64 cross-arch))]
+           [(precision gaps) (in-hash (profile-gaps profile))]
+           [(quantity gap) (in-hash gaps)])
+      (define bound (~> (profile-tolerances profile) (hash-ref precision) (hash-ref quantity)))
+      (check-true (> bound (* 2 gap)) (format "~a ~a ~a" profile precision quantity)))
+    (check-true (positive? (profile-failures 'x86_64 aarch64-golden)))
+    (check-perturbed 'cross-arch aarch64-golden))
 
   (define (check-regenerated regenerated)
     (compare-golden-file regenerated golden golden-tolerances))
@@ -370,16 +426,11 @@
   (define (regenerated-failures path f)
     (failures (lambda () (check-regenerated (hash-update-in golden path f)))))
 
-  (define (within precision)
-    (define tolerances (hash-ref golden-tolerances precision))
-    (define ((half quantity) x)
-      (~> (hash-ref tolerances quantity) (* 1/2) (+ x)))
-    (for/list ([p (in-list `(((losses) ,(first-of (half 'losses)))
-                             ((norms) ,(first-of (half 'norms)))
-                             ((rows) ,(each-row 'train/loss_step (half 'rows)))
-                             ((rows) ,(each-row 'val/acc (half 'acc)))
-                             ((state net.3.weight head) ,(first-of (half 'values)))
-                             ((init net.5.bias tail) ,(first-of (half 'values)))))])
+  (define (regenerated-shifts factor)
+    (for*/list ([precision (in-list '(32-true bf16-mixed))]
+                [tolerances (in-value (hash-ref golden-tolerances precision))]
+                [p (in-list (float-shifts (scaled-tolerance factor tolerances)
+                                          (golden-config precision)))])
       (match-define (list path f) p)
       (list (list* 'configs precision path) f)))
 
@@ -403,23 +454,22 @@
       ((configs bf16-mixed lrs) ,(first-of (first-of (lambda (x) (* x (+ 1 1e-12))))))
       ((configs 32-true scales) ,(lambda (_) '(65536.0)))
       ((configs 32-true rows) ,(first-of (first-of add1)))
-      ((configs bf16-mixed rows) ,without-validation)
-      ((configs 32-true losses) ,(first-of (past 'losses)))))
+      ((configs bf16-mixed rows) ,without-validation)))
 
   (test-case "G4-L27: G4-L26 holds rounding to G4-L24's tolerances and the rest exactly"
     (check-equal? (regenerated-failures '(torch) (lambda (_) "2.15.0")) 0)
-    (for ([p (in-list (append (within '32-true) (within 'bf16-mixed)))])
+    (for ([p (in-list (regenerated-shifts 1/2))])
       (match-define (list path f) p)
       (check-not-equal? (hash-update-in golden path f) golden (format "~a" path))
       (check-equal? (regenerated-failures path f) 0 (format "~a" path)))
-    (for ([p (in-list stale)])
+    (for ([p (in-list (append stale (regenerated-shifts 2)))])
       (match-define (list path f) p)
       (check-true (positive? (regenerated-failures path f)) (format "~a" path))))
 
   (cond
     [(not (and (python-torch-available?) (python-module-available? "lightning")))
-     (displayln (string-append "[20-fashion-mnist] twin parity and fixture freshness skipped:"
-                               " python3 torch or lightning not available"))]
+     (printf "[20-fashion-mnist] twin parity and fixture freshness [~a] skipped: ~a\n"
+             active-profile "python3 torch or lightning not available")]
     [else
      (test-case "G4-L26: the committed Lightning trace is the twin's golden output"
        (with-temporary-directory (root #:template "fashion-golden-~a")

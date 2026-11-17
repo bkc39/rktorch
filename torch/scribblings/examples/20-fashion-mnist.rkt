@@ -23,7 +23,8 @@ gradients accumulated over two batches and clipped, and mixed precision. Its twi
 @filepath{examples/python/20_fashion_mnist.py}, is the same program in Lightning
 2.6.5, and the tests hold the two to each other step for step: live where Lightning
 is installed, and elsewhere against the twin's trace of the CPU fits, committed beside
-the tests.
+the tests. The trace was written on x86_64; other architectures round differently and
+are held to it with wider tolerances.
 
 @chunk[<r20-require>
 (require (only-in racket/math exact-ceiling)
