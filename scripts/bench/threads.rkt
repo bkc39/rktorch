@@ -492,6 +492,48 @@
                                  #:probe (lambda () (raise-user-error 'probe "down")))))
        (check-equal? (unbox ticks) 0))))
 
+  (define taskset (find-executable-path "taskset"))
+  (define one-cpu
+    (and (file-exists? "/proc/self/status")
+         (match (call-with-input-file "/proc/self/status"
+                  (lambda (in) (regexp-match #px"Cpus_allowed_list:\\s*(\\d+)" in)))
+           [(list _ cpu) (bytes->string/utf-8 cpu)]
+           [#f #f])))
+
+  (when (and taskset one-cpu)
+    (test-case "on one CPU, workers spinning when the clock starts still run the raising mix"
+      (call-with-process-deadline
+       120
+       (lambda ()
+         (define program
+           `(begin
+              (require (only-in (file ,(path->string threads-module)) scaling-run))
+              (define (busy ms)
+                (define until (+ (current-inexact-milliseconds) ms))
+                (let loop () (when (< (current-inexact-milliseconds) until) (loop))))
+              (write
+               (for/sum ([_ (in-range 20)])
+                 (define made (box 0))
+                 (define probes (box 0))
+                 (define (failing-first)
+                   (set-box! made (add1 (unbox made)))
+                   (if (= (unbox made) 1) (lambda () (raise-user-error 'mix "unsupported")) void))
+                 (define (probe)
+                   (set-box! probes (add1 (unbox probes)))
+                   (when (= (unbox probes) 1) (busy 30)))
+                 (with-handlers ([exn:fail:user? (lambda (_e) 0)])
+                   (scaling-run 2 'idle #:seconds 0 #:mix failing-first #:probe probe)
+                   1)))))
+         (define ok? #f)
+         (define out
+           (with-output-to-string
+             (lambda ()
+               (set! ok? (system* taskset "-c" one-cpu
+                                  (find-executable-path (find-system-path 'exec-file))
+                                  "-l" "racket/base" "-e" (format "~s" program))))))
+         (check-true ok? out)
+         (check-equal? (read (open-input-string out)) 0 "runs that lost the worker's raise")))))
+
   (test-case "a worker's raise stops the others and fails the run"
     (call-with-process-deadline
      120
