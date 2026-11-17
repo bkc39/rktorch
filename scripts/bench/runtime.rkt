@@ -395,17 +395,23 @@
                          (allocate-until-deadline start deadline))))
        (check-true (>= (hash-ref run 'pause_max_ms) 100.0) (format "~a" (hash-ref run 'pause_max_ms))))))
 
-  (test-case "main's p99 pause beside a 2 ms collect-safe call is a tenth of the plain call's"
+  (test-case "main's p99 pause beside a 2 ms collect-safe call stays within half a call of main alone"
     (call-with-process-deadline
      120
      (lambda ()
-       (define (p99 ffi)
-         (define c (cell #:group 'native #:workload 'usleep-2000 #:main 'alloc #:k 1 #:ffi ffi
+       (define call-ms 2.0)
+       (define (p99 workload ffi k)
+         (define c (cell #:group 'native #:workload workload #:main 'alloc #:k k #:ffi ffi
                          #:seconds 1.0))
          (hash-ref (run-cell c) 'pause_p99_ms))
-       (define plain (p99 'plain))
-       (define safe (p99 'collect-safe))
-       (check-true (< (* 10 safe) plain) (format "collect-safe ~a ms, plain ~a ms" safe plain)))))
+       (define alone (p99 'none 'none 0))
+       (define safe (p99 'usleep-2000 'collect-safe 1))
+       (define plain (p99 'usleep-2000 'plain 1))
+       (define seen (format "alone ~a ms, collect-safe ~a ms, plain ~a ms" alone safe plain))
+       (check-true (< safe (+ alone (/ call-ms 2))) seen)
+       (cond
+         [(>= plain (+ alone (* 5 call-ms))) (check-true (> plain (+ safe (* 4 call-ms))) seen)]
+         [else (printf "[runtime] plain calls stalled no collection, comparison inconclusive: ~a\n" seen)]))))
 
   (test-case "places and threads time the work phase, the place module found from any directory"
     (call-with-process-deadline

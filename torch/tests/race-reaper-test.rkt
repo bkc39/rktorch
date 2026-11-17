@@ -1,7 +1,9 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/list fourth make-list take)
+           (only-in racket/match match-define)
+           rackunit
            (only-in "../foreign.rkt" + @ sum zeros)
            (only-in "../foreign/raw/cas.rkt" cas-claim!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! on-main-os-thread?)
@@ -168,23 +170,45 @@
   (define ((churn-step label))
     (churn-once! (seeded-generator 41 (list 'reaper label))))
 
-  (test-case "L7: with eight churners, each collect-and-wait! drains #t within 500 ms"
+  (define ((counting-fences drainer fenced) name _subject)
+    (when (and (eq? name 'drain-fenced) (eq? (current-thread) drainer))
+      (set-box! fenced (add1 (unbox fenced)))))
+
+  (define (real-ms-of thunk)
+    (define-values (results _cpu real _gc) (time-apply thunk '()))
+    (values (car results) real))
+
+  (define (median xs)
+    (list-ref (sort xs <) (quotient (length xs) 2)))
+
+  (define collections-per-drain 10)
+
+  (test-case "L7: with eight churners, each collect-and-wait! drains #t at its one fence, within 10 collections"
     (within 120
             (lambda ()
               (settle!)
               (define base (ledger-snapshot))
+              (define fenced (box 0))
               (define-values (r workers) (churners (build-list 8 values) churn-step))
-              (define timings
-                (for/list ([_ (in-range 20)])
-                  (define started (current-inexact-milliseconds))
-                  (define drained? (collect-and-wait!))
-                  (cons drained? (- (current-inexact-milliseconds) started))))
+              (define drains
+                (with-race-hook (counting-fences (current-thread) fenced)
+                  (for/list ([_ (in-range 20)])
+                    (define-values (_ collection-ms) (real-ms-of collect-garbage))
+                    (define before (unbox fenced))
+                    (define-values (drained? ms) (real-ms-of collect-and-wait!))
+                    (list drained? (- (unbox fenced) before) ms collection-ms))))
               (stop-roles! r)
               (join-all workers)
               (settle!)
-              (for ([t (in-list timings)])
-                (check-true (car t) "a drain ran out of time")
-                (check-true (< (cdr t) 500) (format "a drain took ~a ms" (cdr t))))
+              (define collection-ms (median (map fourth drains)))
+              (check-equal? (map (lambda (d) (take d 2)) drains)
+                            (make-list 20 '(#t 1))
+                            "(drained, fences reached) for each collect-and-wait!")
+              (for ([d (in-list drains)])
+                (match-define (list _ _ ms _) d)
+                (check-true (<= ms (* collections-per-drain (max 1 collection-ms)))
+                            (format "a drain took ~a ms, over ~a collections of ~a ms"
+                                    ms collections-per-drain collection-ms)))
               (check-ledger base #f))))
 
   (define ((dropping-step _label))
