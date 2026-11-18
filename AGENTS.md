@@ -214,9 +214,11 @@ with `backward!` outside the form as PyTorch recommends). From
   `torch/scribblings/examples/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
   #:p` and `random-crop #:padding` on an image batch where it lives; each
-  takes `#:generator` and draws one seed per batch from it, so a seeded
-  loader replays its augmentation (the draws are the transform's own, not
-  torchvision's). The pretrained preprocessing (#199) on an image or a
+  takes `#:generator` and draws torchvision's per-image values from it
+  (`torch.rand` for the coin, `torch.randint` for the offsets), so a seeded
+  loader replays its augmentation and a per-sample pipeline matches
+  torchvision's for a seed; a one-image crop is a pad and two `narrow`s
+  (`constant-pad-nd` and `random-from!`, tranche 11, #458). The pretrained preprocessing (#199) on an image or a
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
   torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
   float only; two matmuls with host-computed bilinear or Pillow-filter
@@ -341,7 +343,8 @@ on the hand-written shim) and the sampling grids (`affine-grid grid-sample
 on its N, dtype and device, bicubic `F.interpolate(size=)`; `floor-tensor`
 and `fmod-scalar` stay on `torch/generated`) and the elementwise extrema
 (`maximum minimum`, tranche 10, #451) live on `torch` beside the other
-functional ops;
+functional ops (tranche 11, #458: `constant-pad-nd` and `random-from!`,
+`torch.randint`'s draw, stay on `torch/generated` for the transforms);
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'

@@ -5,6 +5,7 @@
 
 #include <torch/torch.h>
 
+#include "torchrkt/detail/generator_handle.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
@@ -157,6 +158,19 @@ int tr_gen_mul__tensor(tr_tensor* self, const tr_tensor* other) {
   }
   return torchrkt::status_call("tr_gen_mul__tensor",
                                [&] { self->value.mul_(other->value); });
+}
+
+int tr_gen_random__from(tr_tensor* self, int64_t from, int64_t to, bool to_has,
+                        const tr_generator* generator) {
+  if (!self) {
+    return torchrkt::null_arg_status("tr_gen_random__from");
+  }
+  return torchrkt::status_call("tr_gen_random__from", [&] {
+    self->value.random_(
+        from, to_has ? c10::optional<int64_t>(to) : c10::optional<int64_t>(),
+        generator ? c10::optional<at::Generator>(generator->value)
+                  : c10::optional<at::Generator>());
+  });
 }
 
 int tr_gen_scatter__src(tr_tensor* self, int64_t dim, const tr_tensor* index,

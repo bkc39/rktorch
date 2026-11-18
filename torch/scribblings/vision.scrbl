@@ -368,8 +368,12 @@ draws: a torchvision pipeline on the same seed picks different crops.
                                  [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 Mirrors each image of the rank-4 batch @racket[x] along its width with
-probability @racket[p]; the rest pass through unchanged.
-With @racket[generator] @racket[#f], the batch seed comes from
+probability @racket[p]; the rest pass through unchanged. Each image draws
+one @tt{torch.rand} from @racket[generator] and flips when it is below
+@racket[p] as a float32, as torchvision's @tt{RandomHorizontalFlip} does
+for one image. The answer is @racket[x] itself when no image flips, and
+one @racket[flip] of it when all do.
+With @racket[generator] @racket[#f], the draws come from
 @racket[(current-generator)].
 }
 
@@ -408,10 +412,14 @@ With @racket[generator] @racket[#f], the batch seed comes from
          tensor?]{
 Pads every image of the rank-4 batch @racket[x], whose height and width are
 positive, with @racket[padding] zero pixels on each side and cuts a
-window of the original size at a per-image offset in a number of native
-calls independent of the batch size, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
-@racket[padding] 0 it is the identity.
-With @racket[generator] @racket[#f], the batch seed comes from
+window of the original size at a per-image offset, torchvision's
+@tt{RandomCrop(32, padding=4)} for CIFAR-10. Each image draws its top,
+then its left offset as @tt{torch.randint(0, 2 * padding + 1)} does from
+@racket[generator]. A batch of one is padded once and answered as a view of
+the window; a larger batch is cut in a number of native calls independent
+of its size. With @racket[padding] 0 it answers @racket[x] and draws
+nothing.
+With @racket[generator] @racket[#f], the draws come from
 @racket[(current-generator)].
 }
 

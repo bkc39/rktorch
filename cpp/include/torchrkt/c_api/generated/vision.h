@@ -23,6 +23,8 @@ extern "C" {
 tr_tensor* tr_gen_affine_grid_generator(const tr_tensor* theta,
                                         const int64_t* size, int64_t size_len,
                                         bool align_corners);
+tr_tensor* tr_gen_constant_pad_nd(const tr_tensor* self, const int64_t* pad,
+                                  int64_t pad_len, double value);
 tr_tensor* tr_gen_grid_sampler_2d(const tr_tensor* input, const tr_tensor* grid,
                                   int64_t interpolation_mode,
                                   int64_t padding_mode, bool align_corners);

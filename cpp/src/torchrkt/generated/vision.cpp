@@ -23,6 +23,17 @@ tr_tensor* tr_gen_affine_grid_generator(const tr_tensor* theta,
   });
 }
 
+tr_tensor* tr_gen_constant_pad_nd(const tr_tensor* self, const int64_t* pad,
+                                  int64_t pad_len, double value) {
+  if (!self || !pad || pad_len < 0) {
+    return torchrkt::null_arg("tr_gen_constant_pad_nd");
+  }
+  return torchrkt::alloc_result("tr_gen_constant_pad_nd", [&] {
+    return at::constant_pad_nd(
+        self->value, at::IntArrayRef(pad, static_cast<size_t>(pad_len)), value);
+  });
+}
+
 tr_tensor* tr_gen_grid_sampler_2d(const tr_tensor* input, const tr_tensor* grid,
                                   int64_t interpolation_mode,
                                   int64_t padding_mode, bool align_corners) {

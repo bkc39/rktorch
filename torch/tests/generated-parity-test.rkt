@@ -214,7 +214,10 @@
           'floor-tensor '((tensor 2 3))
           'fmod-scalar '((tensor 2 3) (double 1.0))
           'maximum '((tensor 2 3) (tensor 2 3))
-          'minimum '((tensor 2 3) (tensor 2 3))))
+          'minimum '((tensor 2 3) (tensor 2 3))
+          'constant-pad-nd '((tensor 2 3) (int-array (1 2 0 1)) (double 0.5))
+          'random-from! '((tensor 6) (int64 2) (optional-int64 9)
+                          (kwarg "generator" none))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.

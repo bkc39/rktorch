@@ -34,6 +34,7 @@
          broadcast-to
          cat
          clamp
+         constant-pad-nd
          conv-transpose2d-input
          conv1d
          conv2d
@@ -110,6 +111,7 @@
          ne-tensor
          nll-loss
          nonzero
+         random-from!
          repeat-interleave-self-int
          reshape
          scaled-dot-product-attention
@@ -174,6 +176,9 @@
 
 (define-generated-op clamp tr_gen_clamp
   ([self tensor] [min optional-scalar] [max optional-scalar]))
+
+(define-generated-op constant-pad-nd tr_gen_constant_pad_nd
+  ([self tensor] [pad int-array] [value scalar]))
 
 (define-generated-op conv-transpose2d-input tr_gen_conv_transpose2d_input
   ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [output-padding int-array] [groups int64] [dilation int-array]))
@@ -402,6 +407,9 @@
 
 (define-generated-op nonzero tr_gen_nonzero
   ([self tensor]))
+
+(define-generated-op random-from! tr_gen_random__from #:inplace
+  ([self tensor] [from int64] [to optional-int64] [generator optional-generator]))
 
 (define-generated-op repeat-interleave-self-int tr_gen_repeat_interleave_self_int
   ([self tensor] [repeats int64] [dim optional-int64] [output-size optional-int64]))

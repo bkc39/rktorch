@@ -231,3 +231,8 @@ math fmod.Scalar
 # in either operand propagating.
 math maximum
 math minimum
+# --- tranche 11 (#458): torchvision's random-crop ---------------------------
+# F.pad's constant mode, and torch.randint's draw into an int64 tensor: one
+# 32-bit word of the generator per value below 2^32.
+vision constant_pad_nd
+inplace random_.from

@@ -289,6 +289,10 @@ void torchrkt_c_api_compile_check(void) {
       tr_gen_upsample_bicubic2d;
   tr_tensor* (*gen_maximum)(const tr_tensor*, const tr_tensor*) =
       tr_gen_maximum;
+  tr_tensor* (*gen_constant_pad)(const tr_tensor*, const int64_t*, int64_t,
+                                 double) = tr_gen_constant_pad_nd;
+  int (*gen_random_from)(tr_tensor*, int64_t, int64_t, bool,
+                         const tr_generator*) = tr_gen_random__from;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -453,6 +457,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_affine_grid;
   (void)gen_bicubic;
   (void)gen_maximum;
+  (void)gen_constant_pad;
+  (void)gen_random_from;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

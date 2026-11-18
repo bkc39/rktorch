@@ -3,7 +3,8 @@
 (module+ test
   (require rackunit
            "../main.rkt"
-           "../vision/transforms.rkt")
+           "../vision/transforms.rkt"
+           (only-in "private/op-calls.rkt" op-calls-of))
 
   (define (same? a b)
     (equal? (tensor->list a) (tensor->list b)))
@@ -26,6 +27,49 @@
       (for/sum ([i (in-range n)])
         (if (same? (select mixed 0 i) (select big 0 i)) 1 0)))
     (check-true (< 50 kept 150) "about half of 200 images stay"))
+
+  (define (draws-after n transform)
+    (define g (make-generator 5))
+    (transform g)
+    (define twin (make-generator 5))
+    (rand n #:device 'cpu #:generator twin)
+    (equal? (tensor->list (rand 4 #:device 'cpu #:generator g))
+            (tensor->list (rand 4 #:device 'cpu #:generator twin))))
+
+  (test-case "random-horizontal-flip: one torch.rand draw an image"
+    (for ([n (in-list '(1 3 16))])
+      (define x (randn n 3 4 4))
+      (check-true (draws-after n (lambda (g) (random-horizontal-flip x #:generator g)))
+                  (format "~a images" n))
+      (check-true (draws-after n (lambda (g) (random-horizontal-flip x #:p 0 #:generator g)))
+                  (format "~a images at p 0" n))))
+
+  (test-case "random-horizontal-flip: the input on tails, one flip when all are heads"
+    (define (calls thunk)
+      (thunk)
+      (op-calls-of thunk))
+    (for ([n (in-list '(1 4))])
+      (define x (randn n 3 8 8))
+      (define g (make-generator 2))
+      (check-eq? (random-horizontal-flip x #:p 0 #:generator g) x
+                 (format "~a images at p 0" n))
+      (define tails (calls (lambda () (random-horizontal-flip x #:p 0 #:generator g))))
+      (define one-flip (calls (lambda () (flip x 3))))
+      (check-equal? (calls (lambda () (random-horizontal-flip x #:p 1 #:generator g)))
+                    (+ tails one-flip)
+                    (format "~a images at p 1: the draw and one flip" n))
+      (check-true (same? (random-horizontal-flip x #:p 1 #:generator g) (flip x 3)))))
+
+  (test-case "random-horizontal-flip: p compares as torch's float32 does"
+    (define g (make-generator 9))
+    (define u (car (tensor->list (rand 1 #:device 'cpu #:generator (make-generator 9)))))
+    (define x (reshape (arange 4) 1 1 2 2))
+    (check-true (same? (random-horizontal-flip x #:p u #:generator g) x)
+                "u < u is false")
+    (check-true (same? (random-horizontal-flip x #:p (+ u 1e-12)
+                                               #:generator (make-generator 9))
+                       x)
+                "a p that rounds to u as a float32 still leaves the image"))
 
   (test-case "random-crop: padding 0 is the identity, otherwise a window"
     (define x (reshape (arange 32) 2 1 4 4))

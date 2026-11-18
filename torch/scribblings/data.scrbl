@@ -433,8 +433,11 @@ stream's state may be set on a generator, and back.
                            @racket[random-grayscale] @racket[random-solarize]
                            @racket[crop-view] @racket[multi-crop]}
                      fallback "yes" "the batch's device")
-               (list @elem{@racket[random-horizontal-flip] @racket[random-crop]
-                           @racket[random-resized-crop]}
+               (list @elem{@racket[random-horizontal-flip] @racket[random-crop]}
+                     @elem{@racket[(current-generator)], else the CPU's default
+                           stream, drawing torchvision's per-image values}
+                     "a CPU one" "none")
+               (list @racket[random-resized-crop]
                      @elem{one @racket[draw-seed], then a seeded Racket generator}
                      "a CPU one" "none")
                (list @racket[dataloader]
