@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out listof
-                  non-empty-listof real-in unsupplied-arg?)
+                  non-empty-listof not/c real-in unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
          (only-in racket/list count)
@@ -12,8 +12,9 @@
          (only-in "optim-groups.rkt"
                   store-initial-lrs! store-set-each! store-update-each! store-values)
          (only-in "optim.rkt"
-                  gen:optimizer group-index? optimizer-parameters optimizer-root optimizer-store
-                  optimizer?))
+                  gen:optimizer group-index? lr-optimizer/c optimizer-parameters
+                  optimizer-root optimizer-store optimizer?)
+         (only-in (submod "optim.rkt" private) prop:wrapped-optimizer))
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
@@ -23,14 +24,14 @@
 (struct scheduler (optimizer rule [last #:mutable] [last-rates #:mutable])
   #:constructor-name make-scheduler
   #:name scheduler-value ;; noqa
+  #:property prop:wrapped-optimizer (lambda (s) (scheduler-optimizer s))
   #:methods gen:optimizer
   [(define/generic inner-parameters optimizer-parameters)
-   (define/generic inner-store optimizer-store)
-   (define/generic inner-root optimizer-root)
    (define (optimizer-parameters s) (inner-parameters (scheduler-optimizer s)))
-   (define (optimizer-store s) (inner-store (scheduler-optimizer s)))
-   (define (optimizer-root s) (inner-root (scheduler-optimizer s)))
    (define (optimizer-step! s) (advance! s))])
+
+(define schedulable/c
+  (and/c lr-optimizer/c (not/c scheduler?)))
 
 (struct shape (bases next closed))
 
@@ -176,7 +177,7 @@
   (list-ref (scheduler-last-rates s) group))
 
 (define/contract-out (step-lr opt #:step-size step-size #:gamma [gamma 0.1]) ;; noqa
-  (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
+  (->* [schedulable/c #:step-size exact-positive-integer?] [#:gamma real?]
        scheduler?)
   (let ([gamma (real->double-flonum gamma)])
     (shaped-by opt
@@ -187,7 +188,7 @@
 (define/contract-out (multi-step-lr opt ;; noqa
                                     #:milestones milestones
                                     #:gamma [gamma 0.1])
-  (->* [optimizer? #:milestones (listof exact-nonnegative-integer?)]
+  (->* [schedulable/c #:milestones (listof exact-nonnegative-integer?)]
        [#:gamma real?]
        scheduler?)
   (let ([gamma (real->double-flonum gamma)])
@@ -200,7 +201,7 @@
                           (* base (flexpt gamma (->fl (milestones-reached milestones t))))))))
 
 (define/contract-out (exponential-lr opt #:gamma gamma) ;; noqa
-  (-> optimizer? #:gamma real? scheduler?)
+  (-> schedulable/c #:gamma real? scheduler?)
   (let ([gamma (real->double-flonum gamma)])
     (shaped-by opt
                (lambda (_base lr _t initial?) (if initial? lr (* lr gamma)))
@@ -209,7 +210,7 @@
 (define/contract-out (cosine-annealing-lr opt ;; noqa
                                           #:t-max t-max
                                           #:eta-min [eta-min 0.0])
-  (->* [optimizer? #:t-max exact-positive-integer?] [#:eta-min real?]
+  (->* [schedulable/c #:t-max exact-positive-integer?] [#:eta-min real?]
        scheduler?)
   (define (one-plus-cos t) (+ 1.0 (cos (/ (* pi (->fl t)) (->fl t-max)))))
   (let ([eta-min (real->double-flonum eta-min)])
@@ -228,7 +229,7 @@
                                 #:start-factor [start-factor (/ 1.0 3.0)]
                                 #:end-factor [end-factor 1.0]
                                 #:total-iters [total-iters 5])
-  (->* [optimizer?]
+  (->* [schedulable/c]
        [#:start-factor (and/c (>/c 0) (<=/c 1)) #:end-factor (real-in 0 1)
         #:total-iters exact-positive-integer?]
        scheduler?)
@@ -252,7 +253,7 @@
                                    #:pct-start [pct-start 0.3]
                                    #:div-factor [div-factor 25.0]
                                    #:final-div-factor [final-div-factor 1e4])
-  (->* [optimizer? #:max-lr (>/c 0) #:total-steps exact-positive-integer?]
+  (->* [schedulable/c #:max-lr (>/c 0) #:total-steps exact-positive-integer?]
        [#:pct-start (and/c (>=/c 0) (</c 1)) #:div-factor (>/c 0)
         #:final-div-factor (>/c 0)]
        scheduler?)
@@ -275,7 +276,7 @@
                   (anneal max-lr final (/ (- t up-end) (- down-end up-end)))))))
 
 (define/contract-out (lambda-lr opt factor) ;; noqa
-  (-> optimizer? (-> exact-nonnegative-integer? real?) scheduler?)
+  (-> schedulable/c (-> exact-nonnegative-integer? real?) scheduler?)
   (rated-by opt (lambda (base t) (* base (real->double-flonum (factor t))))))
 
 (define/contract-out (scheduler-optimizer-of s) ;; noqa
@@ -294,10 +295,8 @@
   (started (scheduler-optimizer lead) (chain schedulers) (current-lrs lead)))
 
 (define/contract-out (sequential-lr opt schedulers #:milestones milestones) ;; noqa
-  (->i ([opt optimizer?] [schedulers (non-empty-listof scheduler?)]
+  (->i ([opt schedulable/c] [schedulers (non-empty-listof scheduler?)]
         #:milestones [milestones (listof exact-nonnegative-integer?)])
-       #:pre/name (opt) "sequential-lr takes an optimizer, not a schedule"
-       (not (scheduler? opt))
        #:pre/name (opt schedulers) "every schedule wraps opt"
        (andmap (lambda (s) (wraps? s opt)) schedulers)
        #:pre/name (schedulers milestones) "sequential-lr takes one milestone fewer than schedules"
@@ -316,7 +315,7 @@
                                                      #:t-0 t-0
                                                      #:t-mult [t-mult 1]
                                                      #:eta-min [eta-min 0.0])
-  (->* (optimizer? #:t-0 exact-positive-integer?)
+  (->* (schedulable/c #:t-0 exact-positive-integer?)
        (#:t-mult exact-positive-integer? #:eta-min real?)
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))

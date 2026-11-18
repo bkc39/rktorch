@@ -4,7 +4,8 @@
                      ;; whole-module require on purpose
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* ->i >=/c any/c contract-out listof or/c unsupplied-arg?)
+                  -> ->* ->i >=/c any/c contract-out flat-named-contract listof or/c
+                  unsupplied-arg?)
          (only-in racket/flonum flexpt)
          (only-in racket/generic define-generics)
          (only-in racket/list group-by)
@@ -39,6 +40,7 @@
          optimizer-root
          group-index?
          has-hyperparameter?
+         lr-optimizer/c
          hyperparameter-value/c
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
@@ -49,7 +51,8 @@
   (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
 (module+ private
-  (provide call-with-gradient-buckets
+  (provide prop:wrapped-optimizer
+           call-with-gradient-buckets
            (struct-out gradient-bucket)
            optimizer-fused?
            optimizer-state
@@ -58,13 +61,39 @@
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
-  (optimizer-store optimizer)
-  (optimizer-root optimizer)
-  #:fallbacks [(define (optimizer-parameters opt) (store-params (tracked-store opt)))
-               (define (optimizer-store opt) (tracked-store opt))
-               (define (optimizer-root opt) opt)])
+  #:requires (optimizer-step! optimizer-parameters))
+
+(define-values (prop:wrapped-optimizer wraps-optimizer? wrapped-optimizer-ref)
+  (make-struct-type-property 'wrapped-optimizer))
+
+(define (optimizer-root opt)
+  (cond
+    [(wraps-optimizer? opt) (optimizer-root ((wrapped-optimizer-ref opt) opt))]
+    [else opt]))
 
 (struct tracked (state keys [generation #:mutable] store))
+
+(define (optimizer-store opt)
+  (define root (optimizer-root opt))
+  (cond
+    [(tracked? root) (tracked-store root)]
+    [else (group-store (optimizer-parameters root) (hasheq))]))
+
+(define (tracked-parameters opt)
+  (store-params (tracked-store opt)))
+
+(begin-for-syntax
+  (define-splicing-syntax-class struct-names
+    (pattern (~seq #:constructor-name constructor:id #:name name:id))))
+
+(define-syntax-parse-rule (define-tracked-optimizer (name:id field:id ...) step:id
+                            names:struct-names)
+  (struct name tracked (field ...)
+    #:constructor-name names.constructor
+    #:name names.name
+    #:methods gen:optimizer
+    [(define (optimizer-step! opt) (step opt))
+     (define (optimizer-parameters opt) (tracked-parameters opt))]))
 
 (define (optimizer-state opt)
   (for*/list ([table (in-hash-values (tracked-state opt))]
@@ -190,6 +219,10 @@
 (define (has-hyperparameter? opt key)
   (and (memq key (hyperparameter-keys opt)) #t))
 
+(define lr-optimizer/c
+  (flat-named-contract 'lr-optimizer/c
+                       (lambda (v) (and (optimizer? v) (has-hyperparameter? v 'lr)))))
+
 (define (group-index? opt i)
   (< i (param-group-count opt)))
 
@@ -239,11 +272,9 @@
     (define mode (update-mode foreach? fused?))
     body ...))
 
-(struct sgd tracked (mode)
+(define-tracked-optimizer (sgd mode) sgd-do-step!
   #:constructor-name make-sgd
-  #:name sgd-optimizer
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (sgd-do-step! opt))])
+  #:name sgd-optimizer)
 
 (define-fusable-optimizer (sgd params
                                [#:lr lr (>=/c 0)]
@@ -294,11 +325,9 @@
             #:foreach (with-hyperparameters sgd-foreach!)
             #:fused (lambda (dev) (with-hyperparameters (sgd-fused! dev)))))
 
-(struct adam tracked (mode one)
+(define-tracked-optimizer (adam mode one) adam-do-step!
   #:constructor-name make-adam
-  #:name adam-optimizer
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (adam-do-step! opt))])
+  #:name adam-optimizer)
 
 (struct adamw adam-optimizer ()
   #:constructor-name make-adamw
@@ -356,11 +385,9 @@
             #:foreach (with-hyperparameters adam-foreach!)
             #:fused (lambda (dev) (with-hyperparameters (adam-fused! dev)))))
 
-(struct rmsprop tracked (mode one)
+(define-tracked-optimizer (rmsprop mode one) rmsprop-do-step!
   #:constructor-name make-rmsprop
-  #:name rmsprop-optimizer ;; noqa
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (rmsprop-do-step! opt))])
+  #:name rmsprop-optimizer) ;; noqa
 
 (define/contract-out (rmsprop params ;; noqa
                               #:lr [lr 1e-2]
@@ -453,14 +480,15 @@
   (store-set! (optimizer-store opt) i key v))
 
 (define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
-  (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
+  (->i ([opt lr-optimizer/c]) (#:group [group exact-nonnegative-integer?])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (or (unsupplied-arg? group) (group-index? opt group))
        [_ real?])
   (store-ref (optimizer-store opt) group 'lr))
 
 (define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
-  (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
+  (->i ([opt lr-optimizer/c] [lr (>=/c 0)])
+       (#:group [group (or/c #f exact-nonnegative-integer?)])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (match (supplied-or group)
          [#f #t]

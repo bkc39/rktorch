@@ -850,6 +850,32 @@ The optimizer predicates; @racket[optimizer?] holds of every optimizer and
 of every schedule.
 }
 
+@defthing[gen:optimizer any/c]{
+The interface every optimizer and schedule implements, a subclass of
+@tt{torch.optim.Optimizer}. A structure implements it with @racket[#:methods] and
+must define @racketidfont{optimizer-step!}, one update, and
+@racketidfont{optimizer-parameters}, the tensors it updates; leaving either out is an
+error when the structure is defined. Such an optimizer has one parameter group and no
+hyperparameters: @racket[step!], @racket[zero-grads!] and @racket[fit], with clipping,
+accumulation and @racket[grad-scaler], accept it; @racket[learning-rate] and the
+schedules reject it.
+
+@torch-examples[
+(struct plain-sgd (params lr)
+  #:methods gen:optimizer
+  [(define (optimizer-parameters opt) (plain-sgd-params opt))
+   (define (optimizer-step! opt)
+     (with-no-grad
+       (for ([p (in-list (plain-sgd-params opt))] #:when (has-grad? p))
+         (copy! p (- p (* (plain-sgd-lr opt) (grad p)))))))])
+(define w (requires-grad! (ones 2)))
+(define opt (plain-sgd (list w) 0.5))
+(backward! (sum (* w w)))
+(step! opt)
+w
+(param-group-count opt)
+]}
+
 @defproc[(step! [opt optimizer?]) void?]{
 Applies one update to every parameter that has a gradient, under
 @racket[with-no-grad]; on a schedule, advances it and writes its rate.
@@ -874,10 +900,10 @@ the next @racket[backward!] a parameter has no gradient, and
 each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 }
 
-@deftogether[(@defproc[(learning-rate [opt optimizer?]
+@deftogether[(@defproc[(learning-rate [opt lr-optimizer/c]
                                        [#:group group exact-nonnegative-integer? 0])
                         real?]
-              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]
+              @defproc[(set-learning-rate! [opt lr-optimizer/c] [lr (>=/c 0)]
                                            [#:group group
                                             (or/c #f exact-nonnegative-integer?) #f])
                        void?])]{
@@ -885,6 +911,13 @@ The learning rate the next @racket[step!] will use; on a schedule, its
 optimizer's. Without @racket[#:group], @racket[learning-rate] reads group 0
 and @racket[set-learning-rate!] writes every group; a schedule scales each
 group from that group's initial rate.
+}
+
+@defthing[lr-optimizer/c flat-contract?]{
+An optimizer or schedule with a learning rate: every optimizer of this library and
+every schedule, and no @racket[gen:optimizer] of one's own. The rate readers take a
+schedule; the schedules below take an optimizer only, as
+@tt{LRScheduler} raises @tt{TypeError} for anything not an @tt{Optimizer}.
 }
 
 A schedule wraps an optimizer and answers to @racket[step!] like one: the
@@ -906,7 +939,7 @@ sequential schedules compose as there; they are pinned against
   (step! schedule))
 ]
 
-@defproc[(step-lr [opt optimizer?]
+@defproc[(step-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                   [#:step-size step-size exact-positive-integer?]
                   [#:gamma gamma real? 0.1])
          scheduler?]{
@@ -914,18 +947,20 @@ The base rate times @racket[gamma] to the power of the number of whole
 @racket[step-size] periods elapsed.
 }
 
-@defproc[(multi-step-lr [opt optimizer?]
+@defproc[(multi-step-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                         [#:milestones milestones (listof exact-nonnegative-integer?)]
                         [#:gamma gamma real? 0.1])
          scheduler?]{
 The base rate times @racket[gamma] once per milestone reached.
 }
 
-@defproc[(exponential-lr [opt optimizer?] [#:gamma gamma real?]) scheduler?]{
+@defproc[(exponential-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
+                         [#:gamma gamma real?])
+         scheduler?]{
 The base rate times @racket[gamma] to the power of the step.
 }
 
-@defproc[(cosine-annealing-lr [opt optimizer?]
+@defproc[(cosine-annealing-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                               [#:t-max t-max exact-positive-integer?]
                               [#:eta-min eta-min real? 0])
          scheduler?]{
@@ -933,7 +968,7 @@ Half a cosine from the base rate at step 0 to @racket[eta-min] at
 @racket[t-max], and back up beyond it.
 }
 
-@defproc[(linear-lr [opt optimizer?]
+@defproc[(linear-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                     [#:start-factor start-factor (and/c (>/c 0) (<=/c 1)) 1/3]
                     [#:end-factor end-factor (real-in 0 1) 1]
                     [#:total-iters total-iters exact-positive-integer? 5])
@@ -942,7 +977,7 @@ The base rate scaled from @racket[start-factor] to @racket[end-factor]
 linearly over @racket[total-iters] steps, and held there: the warmup.
 }
 
-@defproc[(one-cycle-lr [opt optimizer?]
+@defproc[(one-cycle-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                        [#:max-lr max-lr (>/c 0)]
                        [#:total-steps total-steps exact-positive-integer?]
                        [#:pct-start pct-start (and/c (>=/c 0) (</c 1)) 0.3]
@@ -960,7 +995,8 @@ peak at the last step and leave the descent no steps to spread over, so
 the contract excludes it.
 }
 
-@defproc[(lambda-lr [opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
+@defproc[(lambda-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
+                    [factor (-> exact-nonnegative-integer? real?)])
          scheduler?]{
 The base rate times @racket[(factor step)].
 }
@@ -971,7 +1007,7 @@ scaling the rate the previous one wrote. The schedules must wrap one
 optimizer.
 }
 
-@defproc[(sequential-lr [opt optimizer?]
+@defproc[(sequential-lr [opt (and/c lr-optimizer/c (not/c scheduler?))]
                         [schedulers (non-empty-listof scheduler?)]
                         [#:milestones milestones (listof exact-nonnegative-integer?)])
          scheduler?]{
@@ -979,8 +1015,7 @@ optimizer.
 the next starts from its own step 0. The milestones are searched as
 @tt{bisect_right} searches them, unsorted ones included, so the schedule a
 milestone of 0 selects takes the construction step. Every schedule wraps
-@racket[opt], which is not itself a schedule, and there is one milestone fewer
-than schedules. A warm restart keeps the phase it had reached, as
+@racket[opt], and there is one milestone fewer than schedules. A warm restart keeps the phase it had reached, as
 @tt{_update_lr(0)} does in PyTorch. A chained or sequential schedule has no
 step 0 to restart at, so one placed after the first raises at its milestone,
 as PyTorch's does.
@@ -994,7 +1029,7 @@ as PyTorch's does.
 ]
 }
 
-@defproc[(cosine-annealing-warm-restarts [opt optimizer?]
+@defproc[(cosine-annealing-warm-restarts [opt (and/c lr-optimizer/c (not/c scheduler?))]
                                          [#:t-0 t-0 exact-positive-integer?]
                                          [#:t-mult t-mult exact-positive-integer? 1]
                                          [#:eta-min eta-min real? 0])
