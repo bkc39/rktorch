@@ -134,8 +134,9 @@
 
   (bounded-test "random-crop draws two torch.randint offsets an image, none at padding 0"
     (define (draw! generator k)
-      (tensor->list (random-from! (zeros k #:device 'cpu #:dtype 'int64) 0 9
-                                  generator)))
+      (~> (zeros k #:device 'cpu #:dtype 'int64)
+          (random-from! 0 9 generator)
+          tensor->list))
     (define (next-after crop words)
       (define g (make-generator 5))
       (crop g)

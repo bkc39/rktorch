@@ -35,7 +35,7 @@
   (define (check-case j)
     (define dtype (string->symbol (hash-ref j 'dtype)))
     (define images (unpack (hash-ref j 'input) dtype))
-    (define want (tensor->list (unpack (hash-ref j 'output) dtype)))
+    (define want (~> j (hash-ref 'output) (unpack dtype) tensor->list))
     (define ops (hash-ref j 'ops))
     (define seed (hash-ref j 'seed))
     (check-equal? (tensor->list (per-sample ops images seed)) want

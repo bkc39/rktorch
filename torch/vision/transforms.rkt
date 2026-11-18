@@ -30,7 +30,7 @@
 (define (batch-rng generator)
   (define rng (make-pseudo-random-generator))
   (parameterize ([current-pseudo-random-generator rng])
-    (random-seed (bitwise-and (draw-seed #:generator generator) #x7FFFFFFF)))
+    (~> (draw-seed #:generator generator) (bitwise-and #x7FFFFFFF) random-seed))
   rng)
 
 (define (coins n p generator)

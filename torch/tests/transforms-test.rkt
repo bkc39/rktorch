@@ -62,7 +62,7 @@
 
   (test-case "random-horizontal-flip: p compares as torch's float32 does"
     (define g (make-generator 9))
-    (define u (car (tensor->list (rand 1 #:device 'cpu #:generator (make-generator 9)))))
+    (define u (~> (rand 1 #:device 'cpu #:generator (make-generator 9)) tensor->list car))
     (define x (reshape (arange 4) 1 1 2 2))
     (check-true (same? (random-horizontal-flip x #:p u #:generator g) x)
                 "u < u is false")

@@ -7,7 +7,7 @@
   (require (only-in json jsexpr->string)
            (only-in racket/match match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
-           (only-in racket/string string-join)
+           (only-in racket/string string-join string-split)
            rackunit
            "../main.rkt"
            "private/python-env.rkt")
@@ -340,7 +340,12 @@
       (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
                      (spec->python-call-arg s i))
                    ", "))
-    (define invoke (format "torch.ops.aten.~a(~a)" py-name call-args))
+    (define op
+      (match (string-split py-name ".")
+        [(list base) (format "torch.ops.aten.~a" base)]
+        [(list base overload)
+         (format "getattr(torch.ops.aten.~a, ~s)" base overload)]))
+    (define invoke (format "~a(~a)" op call-args))
     (string-append
      (apply string-append
             (for/list ([s (in-list specs)]
