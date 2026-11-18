@@ -2,6 +2,7 @@
 
 (module+ cases
   (require (for-syntax racket/base)
+           (only-in racket/dict dict-ref)
            (only-in racket/list drop-right flatten last)
            rackunit
            syntax/parse/define
@@ -13,13 +14,14 @@
            (only-in "../data/loader.rkt"
                     dataloader dataset-batch dataset-length dataset-ref
                     default-collate)
+           (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../main.rkt"
-                    device-type dtype make-generator narrow native-memory-use
+                    device-type dtype make-generator narrow
                     ref shape sum tensor tensor->list tensor? to-dtype zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/heap-allocation.rkt" median-allocation)
-           (only-in "private/race-harness.rkt" settle!))
+           (only-in "private/race-harness.rkt" counters-and-fold settle!))
 
   (define caller (blamed "librispeech-dataset-test.rkt"))
 
@@ -49,10 +51,21 @@
   (define (batch-of ds indices [collate default-collate])
     (call-with-values (lambda () (dataset-batch ds indices collate)) list))
 
-  (define (cpu-bytes)
-    (for/sum ([entry (in-list (native-memory-use))]
+  (define (cpu-total by-device)
+    (for/sum ([entry (in-list by-device)]
               #:when (eq? (device-type (car entry)) 'cpu))
       (cdr entry)))
+
+  (struct ledger (counted live drift))
+
+  (define (ledger-reading)
+    (define-values (counters fold) (counters-and-fold))
+    (ledger (cpu-total counters)
+            (cpu-total fold)
+            (for/list ([entry (in-list counters)]
+                       #:unless (= (cdr entry) (dict-ref fold (car entry) 0)))
+              (define live (dict-ref fold (car entry) 0))
+              (list (car entry) (cdr entry) live (- (cdr entry) live)))))
 
   (define (log-mel samples rate)
     (log-mel-spectrogram (ref samples 0) #:sample-rate rate))
@@ -202,12 +215,19 @@
     (with-utterances (us)
       (define ds (librispeech us))
       (settle!)
-      (define before (cpu-bytes))
+      (define before (ledger-reading))
       (for ([(x lengths transcripts) (dataloader ds #:batch-size 2 #:workers 4)])
         (void))
       (settle!)
-      (define after (cpu-bytes))
-      (check-true (<= after before) (format "~a bytes before, ~a after" before after)))))
+      (define after (ledger-reading))
+      (define workers (live-worker-count))
+      (check-equal? (ledger-drift after) '()
+                    (format "(device counters fold difference): ~a; ~a workers alive"
+                            (ledger-drift after) workers))
+      (check-true (<= (ledger-live after) (ledger-live before))
+                  (format "~a bytes live before, ~a after (CPU counters ~a, ~a); ~a workers alive"
+                          (ledger-live before) (ledger-live after)
+                          (ledger-counted before) (ledger-counted after) workers)))))
 
 (module+ test
   (require (only-in "private/wedge.rkt" call-with-process-deadline))
