@@ -286,7 +286,7 @@
     (join-workers! pool))
   (define (abandoned!)
     (set! taken #f)
-    (stop-workers! pool))
+    (join-workers! pool))
   (set-up (lambda ()
             (for ([r (in-range ahead)])
               (refill! r))))

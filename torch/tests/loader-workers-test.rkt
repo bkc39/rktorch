@@ -5,7 +5,7 @@
            (only-in racket/match match match* match-define)
            rackunit
            "../data/loader.rkt"
-           (only-in (submod "../data/loader.rkt" private) sampler-draws traversal)
+           (only-in (submod "../data/loader.rkt" private) sampler-draws traversal with-traversal)
            (only-in (submod "../data/workers.rkt" private)
                     live-worker-count pool-guard-threads pool-guard? worker-custodian)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
@@ -1067,6 +1067,32 @@
                          (check-equal? (unbox finished) '(#t #f))
                          (release-gate! gate))))
     (check-true (dead-within? workers 10)))
+
+  (define-dataset held-at (n held builder resume)
+    #:length n
+    #:ref (i)
+    (when (= i held)
+      (set-box! builder (current-thread))
+      (semaphore-wait resume))
+    (tensor (list i) #:dtype 'int64))
+
+  (test-case "leaving a traversal early waits for a worker still building"
+    (define builder (box #f))
+    (define resume (make-semaphore 0))
+    (define started (box '()))
+    (define finished (box #f))
+    (with-race-hook (noting-started started)
+      (define consumer
+        (thread (lambda ()
+                  (with-traversal ([_count batch]
+                                   (dataloader (held-at 4 1 builder resume) #:workers 2))
+                    (batch 0))
+                  (set-box! finished (map thread-dead? (unbox started))))))
+      (check-pred thread? (stalled-builder builder))
+      (check-false (sync/timeout 0.3 consumer) "worker 1 is still building batch 1")
+      (semaphore-post resume)
+      (check-not-false (sync/timeout 10 consumer))
+      (check-equal? (unbox finished) '(#t #t))))
 
   (test-case "freeing each delivered batch at once never double-releases"
     (settle!)
