@@ -13,8 +13,8 @@
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/race-harness.rkt"
-                    check-ledger hooks ledger-snapshot make-watch
-                    settle! watch-hook with-race-hook)
+                    check-ledger gate-hook hooks ledger-snapshot make-gate make-watch
+                    release-gate! settle! wait-for-arrival watch-hook with-race-hook)
            (only-in "private/within.rkt" within))
 
   (define caller (blamed "loader-workers-test.rkt"))
@@ -1010,6 +1010,63 @@
     (kill-thread waiter)
     (void more?)
     (custodian-shutdown-all c))
+
+  (define (delivered gate-index)
+    (make-gate 'batch-delivered #:when (lambda (index) (= index gate-index))))
+
+  (define (drained more? next)
+    (let drain ([n 0])
+      (if (more?)
+          (begin (next) (drain (add1 n)))
+          n)))
+
+  (test-case "a worker parked after its hand-off holds nothing it handed off"
+    (define gate (delivered 0))
+    (with-race-hook (gate-hook gate)
+      (define-values (more? next)
+        (~> (arange 4) tensor-dataset (dataloader #:workers 1) in-dataloader sequence-generate))
+      (define boxes (within 60 (lambda () (first-batch-boxes next))))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (define waiter (thread next))
+      (check-false (sync/timeout 0.2 waiter) "batch 1 waits behind the parked worker")
+      (collect-garbage 'major)
+      (check-equal? (map weak-box-value boxes) '(#f))
+      (release-gate! gate)
+      (check-not-false (sync/timeout 10 waiter))
+      (check-equal? (within 10 (lambda () (drained more? next))) 2)))
+
+  (define (epoch-ending-at gate check!)
+    (define started (box '()))
+    (define finished (box #f))
+    (with-race-hook (hooks (noting-started started) (gate-hook gate))
+      (define consumer
+        (thread (lambda ()
+                  (for ([_ (~> (arange 4) tensor-dataset (dataloader #:batch-size 2 #:workers 2))])
+                    (void))
+                  (set-box! finished (map thread-dead? (unbox started))))))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (check! consumer finished)
+      (unbox started)))
+
+  (test-case "an epoch ends after its workers exit"
+    (define gate (delivered 1))
+    (epoch-ending-at gate
+                     (lambda (consumer finished)
+                       (check-false (sync/timeout 0.3 consumer)
+                                    "the worker of the last batch is parked")
+                       (release-gate! gate)
+                       (check-not-false (sync/timeout 10 consumer))
+                       (check-equal? (unbox finished) '(#t #t)))))
+
+  (test-case "an epoch waits a bounded time for a worker that does not exit"
+    (define gate (delivered 1))
+    (define workers
+      (epoch-ending-at gate
+                       (lambda (consumer finished)
+                         (check-not-false (sync/timeout 30 consumer))
+                         (check-equal? (unbox finished) '(#t #f))
+                         (release-gate! gate))))
+    (check-true (dead-within? workers 10)))
 
   (test-case "freeing each delivered batch at once never double-releases"
     (settle!)

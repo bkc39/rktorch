@@ -228,7 +228,9 @@ raises after they have started, when the
 custodian current at the traversal's start shuts down, or once the loop that
 held the traversal has let it go and a collection runs. They run outside
 that custodian, so a @racket[custodian-limit-memory] on it does not cover
-what they allocate. On Racket 9.3, a place that ends while one of its
+what they allocate. An exhausted traversal waits up to 5 seconds for its
+workers to exit, as PyTorch joins the workers of a finished epoch, so
+nothing a worker held outlives the epoch. On Racket 9.3, a place that ends while one of its
 workers is building a batch hangs instead of exiting. Workers build CPU
 tensors, so @racket[ds] must not be on an accelerator, and a batch raises at
 its position when one of its values holds an accelerator tensor, itself or

@@ -89,8 +89,10 @@
     (match (and (not (sync/timeout 0 stopped)) (sync stopped received))
       [(request index indices)
        (define result (build ds collate index indices))
+       (define more? (built? result))
        (results-queue-put! results index result)
-       (when (built? result) (loop))]
+       (race-point batch-delivered index)
+       (when more? (loop))]
       [_ (void)])))
 
 (define (reap guard registration)
@@ -196,6 +198,15 @@
 
 (define/contract-out (stop-workers! pool) (-> worker-pool? void?) ;; noqa
   (semaphore-post (pool-guard-stop (worker-pool-guard pool))))
+
+(define join-seconds 5)
+
+(define/contract-out (join-workers! pool) (-> worker-pool? void?) ;; noqa
+  (stop-workers! pool)
+  (define deadline (alarm-evt (+ (current-inexact-milliseconds) (* 1000 join-seconds))))
+  (parameterize-break #f
+    (for ([t (in-vector (worker-pool-threads pool))])
+      (sync deadline (thread-dead-evt t)))))
 
 (define/contract-out (abort-workers! pool) (-> worker-pool? void?) ;; noqa
   (stop-workers! pool)
