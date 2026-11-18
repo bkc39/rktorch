@@ -1016,9 +1016,9 @@
 
   (define (drained more? next)
     (let drain ([n 0])
-      (if (more?)
-          (begin (next) (drain (add1 n)))
-          n)))
+      (cond
+        [(more?) (next) (drain (add1 n))]
+        [else n])))
 
   (test-case "a worker parked after its hand-off holds nothing it handed off"
     (define gate (delivered 0))
