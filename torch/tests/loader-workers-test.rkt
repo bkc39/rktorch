@@ -1050,13 +1050,14 @@
 
   (test-case "an epoch ends after its workers exit"
     (define gate (delivered 1))
-    (epoch-ending-at gate
-                     (lambda (consumer finished)
-                       (check-false (sync/timeout 0.3 consumer)
-                                    "the worker of the last batch is parked")
-                       (release-gate! gate)
-                       (check-not-false (sync/timeout 10 consumer))
-                       (check-equal? (unbox finished) '(#t #t)))))
+    (void
+     (epoch-ending-at gate
+                      (lambda (consumer finished)
+                        (check-false (sync/timeout 0.3 consumer)
+                                     "the worker of the last batch is parked")
+                        (release-gate! gate)
+                        (check-not-false (sync/timeout 10 consumer))
+                        (check-equal? (unbox finished) '(#t #t))))))
 
   (test-case "an epoch waits a bounded time for a worker that does not exit"
     (define gate (delivered 1))
@@ -1079,6 +1080,7 @@
   (test-case "leaving a traversal early waits for a worker still building"
     (define builder (box #f))
     (define resume (make-semaphore 0))
+    (define leave (make-semaphore 0))
     (define started (box '()))
     (define finished (box #f))
     (with-race-hook (noting-started started)
@@ -1086,9 +1088,11 @@
         (thread (lambda ()
                   (with-traversal ([_count batch]
                                    (dataloader (held-at 4 1 builder resume) #:workers 2))
-                    (batch 0))
+                    (batch 0)
+                    (semaphore-wait leave))
                   (set-box! finished (map thread-dead? (unbox started))))))
       (check-pred thread? (stalled-builder builder))
+      (semaphore-post leave)
       (check-false (sync/timeout 0.3 consumer) "worker 1 is still building batch 1")
       (semaphore-post resume)
       (check-not-false (sync/timeout 10 consumer))
