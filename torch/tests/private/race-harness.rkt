@@ -55,6 +55,7 @@
          await-roles!
          stop-roles!
          settle!
+         counters-and-fold
          env-number
          seeded-generator
          churn-once!
