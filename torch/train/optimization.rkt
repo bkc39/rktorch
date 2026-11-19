@@ -6,6 +6,7 @@
          (only-in "../nn/scheduler.rkt" scheduler?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" loss/c)
+         (only-in "private/state.rkt" run-optimizers)
          (only-in "private/types.rkt"
                   make-scheduler-config not-implemented scheduler-config?
                   trainer-hparam-names trainer?)
@@ -24,6 +25,21 @@
        scheduler-config?)
   (make-scheduler-config s interval frequency))
 
+(define/contract-out (scheduler-config-scheduler c)
+  (-> scheduler-config? scheduler?)
+  (error 'unimplemented))
+
+(define/contract-out (scheduler-config-interval c)
+  (-> scheduler-config? interval/c)
+  (error 'unimplemented))
+
+(define/contract-out (scheduler-config-frequency c)
+  (-> scheduler-config? exact-positive-integer?)
+  (error 'unimplemented))
+
+(define (configured? r opt)
+  (and (memq opt (run-optimizers r)) #t))
+
 (define/contract-out (hparam tr name)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)]) [_ real?])
   (not-implemented 'hparam 'T2))
@@ -41,9 +57,15 @@
   (not-implemented 'manual-backward! 'T2))
 
 (define/contract-out (manual-step! r opt)
-  (-> manual-run/c optimizer? void?)
+  (->i ([r manual-run/c] [opt optimizer?])
+       #:pre/name (r opt) "opt is not one of define-optimizers' optimizers"
+       (configured? r opt)
+       [_ void?])
   (not-implemented 'manual-step! 'T2))
 
 (define/contract-out (manual-zero-grads! r opt)
-  (-> manual-run/c optimizer? void?)
+  (->i ([r manual-run/c] [opt optimizer?])
+       #:pre/name (r opt) "opt is not one of define-optimizers' optimizers"
+       (configured? r opt)
+       [_ void?])
   (not-implemented 'manual-zero-grads! 'T2))

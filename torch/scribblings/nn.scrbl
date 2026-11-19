@@ -778,7 +778,7 @@ No step writes a gradient.
 (equal? (map tensor->list (parameters net)) (map tensor->list (parameters twin)))
 ]
 
-@defproc[(sgd [params (listof tensor?)]
+@defproc[(sgd [params (or/c (listof tensor?) (non-empty-listof param-group?))]
               [#:lr lr (>=/c 0)]
               [#:momentum momentum (>=/c 0) 0]
               [#:nesterov? nesterov? boolean? #f]
@@ -796,7 +796,7 @@ multiple of the parameter to the gradient before either, torch's L2 form.
 @racket[#:foreach? #t].
 }
 
-@defproc[(adam [params (listof tensor?)]
+@defproc[(adam [params (or/c (listof tensor?) (non-empty-listof param-group?))]
                [#:lr lr (>=/c 0) 1e-3]
                [#:beta1 beta1 real? 0.9]
                [#:beta2 beta2 real? 0.999]
@@ -813,7 +813,7 @@ to the gradient, as there, not AdamW's decoupled one.
 @racket[#:foreach? #t].
 }
 
-@defproc[(adamw [params (listof tensor?)]
+@defproc[(adamw [params (or/c (listof tensor?) (non-empty-listof param-group?))]
                 [#:lr lr (>=/c 0) 1e-3] [#:beta1 beta1 real? 0.9]
                 [#:beta2 beta2 real? 0.999] [#:eps eps real? 1e-8]
                 [#:weight-decay weight-decay (>=/c 0) 1e-2]
@@ -826,7 +826,7 @@ taken of the gradient alone. The decay applies to every parameter in
 @tt{torch.optim.AdamW} subclasses @tt{Adam}.
 }
 
-@defproc[(rmsprop [params (listof tensor?)]
+@defproc[(rmsprop [params (or/c (listof tensor?) (non-empty-listof param-group?))]
                   [#:lr lr (>=/c 0) 1e-2]
                   [#:alpha alpha (>=/c 0) 0.99]
                   [#:eps eps (>=/c 0) 1e-8]
@@ -874,10 +874,18 @@ the next @racket[backward!] a parameter has no gradient, and
 each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 }
 
-@deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]
-              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]) void?])]{
+@deftogether[(@defproc[(learning-rate [opt optimizer?]
+                                       [#:group group exact-nonnegative-integer? 0])
+                        real?]
+              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]
+                                           [#:group group
+                                            (or/c #f exact-nonnegative-integer?) #f])
+                       void?])]{
 The learning rate the next @racket[step!] will use; on a schedule, its
-optimizer's.
+optimizer's. Without @racket[#:group], @racket[learning-rate] reads group 0
+and @racket[set-learning-rate!] writes every group; a schedule scales each
+group from that group's initial rate. @racket[#:group] is not implemented
+yet.
 }
 
 A schedule wraps an optimizer and answers to @racket[step!] like one: the
@@ -885,7 +893,9 @@ rate for step 0 is written at construction, and each @racket[step!] on the
 schedule advances its count and writes the rate for it, so a training loop
 steps the optimizer and then the schedule as in PyTorch. The rates are the
 closed forms of @tt{torch.optim.lr_scheduler}'s constructors of the same
-names, pinned against them step for step.
+names, pinned against them step for step. @racket[chained-scheduler],
+@racket[sequential-lr] and @racket[cosine-annealing-warm-restarts] are not
+implemented yet.
 
 @racketblock[
 (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9 #:weight-decay 5e-4))
@@ -956,14 +966,113 @@ the contract excludes it.
 The base rate times @racket[(factor step)].
 }
 
+@defproc[(chained-scheduler [schedulers (non-empty-listof scheduler?)]) scheduler?]{
+@tt{ChainedScheduler}: each @racket[step!] steps every schedule in order, each
+scaling the rate the previous one wrote. The schedules must wrap one
+optimizer.
+}
+
+@defproc[(sequential-lr [opt optimizer?]
+                        [schedulers (non-empty-listof scheduler?)]
+                        [#:milestones milestones (listof exact-nonnegative-integer?)])
+         scheduler?]{
+@tt{SequentialLR}: the i-th schedule runs from milestone i−1; at a milestone
+the next starts from its own step 0. Every schedule wraps @racket[opt], which
+is not itself a schedule, and there is one milestone fewer than schedules.
+
+@racketblock[
+(define warm (linear-lr opt #:start-factor 0.1 #:total-iters 3))
+(define cool (cosine-annealing-lr opt #:t-max 3))
+(define s (sequential-lr opt (list warm cool) #:milestones '(3)))
+]
+}
+
+@defproc[(cosine-annealing-warm-restarts [opt optimizer?]
+                                         [#:t-0 t-0 exact-positive-integer?]
+                                         [#:t-mult t-mult exact-positive-integer? 1]
+                                         [#:eta-min eta-min real? 0])
+         scheduler?]{
+@tt{CosineAnnealingWarmRestarts}: cosine annealing restarted every period,
+the first @racket[t-0] steps long and each next one @racket[t-mult] times the
+last.
+}
+
 @deftogether[(@defproc[(scheduler? [v any/c]) boolean?]
               @defproc[(scheduler-step-count [s scheduler?]) exact-nonnegative-integer?]
-              @defproc[(scheduler-rate [s scheduler?]) real?]
+              @defproc[(scheduler-rate [s scheduler?]
+                                       [#:group group exact-nonnegative-integer? 0])
+                       real?]
               @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
 A schedule, the number of times it has been stepped, the rate it last
 wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
-last @racket[step!], and does not call a @racket[lambda-lr] factor again.
+last @racket[step!], and does not call a @racket[lambda-lr] factor again;
+@racket[#:group] is @tt{get_last_lr()[group]}, not implemented yet.
+}
+
+@subsection[#:tag "param-groups"]{Parameter groups}
+
+Not implemented yet: every optimizer accepts a list of parameter groups
+in place of a parameter list, but constructing one raises.
+
+@defproc[(param-group [params (listof tensor?)]
+                      [#:lr lr (>=/c 0) #f]
+                      [#:weight-decay weight-decay (>=/c 0) #f]
+                      [#:momentum momentum (>=/c 0) #f]
+                      [#:nesterov? nesterov? boolean? #f]
+                      [#:beta1 beta1 real? #f]
+                      [#:beta2 beta2 real? #f]
+                      [#:eps eps real? #f]
+                      [#:alpha alpha (>=/c 0) #f])
+         param-group?]{
+An entry of @tt{param_groups}: @racket[params] with the hyperparameters that
+differ from the optimizer's keywords; an omitted keyword inherits. Every
+optimizer takes a list of these in place of a parameter list; a parameter in
+two groups, or a keyword the optimizer lacks, is a contract violation.
+@racket[foreach?] and @racket[fused?] stay optimizer-wide.
+}
+
+@deftogether[(@defproc[(param-group? [v any/c]) boolean?]
+              @defproc[(param-group-params [g param-group?]) (listof tensor?)]
+              @defproc[(param-group-hyperparameters [g param-group?])
+                       (hash/c symbol? (or/c real? boolean?) #:immutable #t)]
+              @defthing[hyperparameter-key/c contract?])]{
+A parameter group, its parameters and the hyperparameters it sets, and the
+keys a group can set: @racket['lr], @racket['weight-decay],
+@racket['momentum], @racket['nesterov?], @racket['beta1], @racket['beta2],
+@racket['eps] and @racket['alpha].
+}
+
+@defproc[(weight-decay-param-groups [model layer?]
+                                    [#:weight-decay weight-decay (or/c #f (>=/c 0)) #f]
+                                    [#:skip skip (listof string?) '("cls-token" "pos-embed")])
+         (list/c param-group? param-group?)]{
+The trainable parameters of @racket[model] split for decoupled weight decay:
+rank above 1 and not named in @racket[skip] first, then the rest with weight
+decay 0 (biases, norms, the CLS token, position embeddings). A name matches
+@racket[skip] by its last dotted segment. Frozen parameters are left out, and
+both groups are returned even when one is empty. The first group sets
+@racket[#:weight-decay] only when it is given.
+
+@racketblock[
+(define opt (adamw (weight-decay-param-groups net #:weight-decay 0.05)))
+(param-group-ref opt 1 'weight-decay)
+]
+}
+
+@deftogether[(@defproc[(param-group-count [opt optimizer?]) exact-positive-integer?]
+              @defproc[(optimizer-param-groups [opt optimizer?]) (listof param-group?)]
+              @defproc[(param-group-ref [opt optimizer?] [i exact-nonnegative-integer?]
+                                        [key hyperparameter-key/c])
+                       (or/c real? boolean?)]
+              @defproc[(param-group-set! [opt optimizer?] [i exact-nonnegative-integer?]
+                                         [key hyperparameter-key/c] [v (or/c real? boolean?)])
+                       void?])]{
+@tt{len(opt.param_groups)}, a snapshot of them with every key filled, and
+@tt{opt.param_groups[i][key]} read and written. A written value is used from
+the next @racket[step!]. An index past the last group, a key the optimizer
+lacks, and a value outside that key's keyword contract are contract
+violations. On a schedule, its optimizer's.
 }
 
 @section{Checkpoints}

@@ -87,7 +87,10 @@ Whether @racket[v] was built by @racket[LSTM] or by @racket[GRU].
 }
 
 @defproc[(clip-grad-norm! [params (listof tensor?)]
-                          [max-norm (and/c real? (>=/c 0))])
+                          [max-norm (and/c real? (>=/c 0))]
+                          [#:norm-type norm-type (and/c real? (not/c nan?)) 2.0]
+                          [#:error-if-nonfinite? error-if-nonfinite? boolean? #f]
+                          [#:foreach? foreach? boolean? #t])
          tensor?]{
 Scales the gradients of @racket[params] in place so that their joint L2
 norm, taken over all of them as one vector, is at most
@@ -107,4 +110,27 @@ the backward pass and the optimizer step:
 Recurrent networks need it because a gradient carried back through many
 steps can grow without bound. The scale never leaves the device, so
 clipping does not wait on the GPU; reading the returned norm does.
+
+@racket[norm-type] is the p of the norm, @racket[+inf.0] for the largest
+magnitude, as @tt{norm_type}. The gradients are grouped by device and dtype
+and each group is reduced and scaled in one native call, @tt{foreach=True};
+@racket[#:foreach? #f] goes one gradient at a time, with the same bits on the
+CPU. With @racket[error-if-nonfinite?], a non-finite norm raises before any
+gradient changes, which reads the norm to the host. A @racket[norm-type]
+other than 2, @racket[#:error-if-nonfinite? #t] and @racket[#:foreach? #f]
+are not implemented yet.
+}
+
+@defproc[(clip-grad-value! [params (listof tensor?)]
+                           [clip-value (and/c real? (>=/c 0))]
+                           [#:foreach? foreach? boolean? #t])
+         void?]{
+Clamps every gradient of @racket[params] into
+[@racket[(- clip-value)], @racket[clip-value]] in place, @tt{clip_grad_value_}.
+Not implemented yet.
+
+@racketblock[
+(define ps (append (parameters (Linear 3 2)) (parameters (Linear 2 1))))
+(clip-grad-value! ps 0.1)
+]
 }

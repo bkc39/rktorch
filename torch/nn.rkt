@@ -14,6 +14,7 @@
          "nn/dropout.rkt"
          "nn/ema.rkt"
          "nn/embedding.rkt"
+         "nn/grad-scaler.rkt"
          "nn/group-norm.rkt"
          (submod "nn/init.rkt" checked)
          "nn/layer-hash.rkt"
@@ -37,9 +38,11 @@
          "nn/loss.rkt"
          "nn/mode.rkt"
          (only-in "nn/optim.rkt"
-                  adam adam? adamw adamw? learning-rate rmsprop rmsprop?
+                  adam adam? adamw adamw? learning-rate optimizer-param-groups
+                  param-group-ref param-group-set! rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
          (submod "nn/optim.rkt" checked)
+         "nn/param-group.rkt"
          "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
@@ -167,7 +170,17 @@
          step!
          zero-grads!
          learning-rate
-         set-learning-rate!)
+         set-learning-rate!
+         hyperparameter-key/c
+         param-group
+         param-group?
+         param-group-params
+         param-group-hyperparameters
+         weight-decay-param-groups
+         param-group-count
+         optimizer-param-groups
+         param-group-ref
+         param-group-set!)
 
 (provide scheduler?
          scheduler-step-count
@@ -179,9 +192,22 @@
          cosine-annealing-lr
          linear-lr
          one-cycle-lr
-         lambda-lr)
+         lambda-lr
+         chained-scheduler
+         sequential-lr
+         cosine-annealing-warm-restarts)
 
-(provide clip-grad-norm!)
+(provide clip-grad-norm!
+         clip-grad-value!)
+
+(provide grad-scaler
+         grad-scaler?
+         grad-scaler-scale-loss
+         grad-scaler-unscale!
+         grad-scaler-step!
+         grad-scaler-update!
+         grad-scaler-scale
+         grad-scaler-enabled?)
 
 (provide ema
          ema?

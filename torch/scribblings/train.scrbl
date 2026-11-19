@@ -20,7 +20,10 @@ A trainer is a layer whose body forms are a method's steps and hooks, and
 gradient clipping, manual optimization, the hyperparameter procedures,
 @racket[run-schedulers], @racket[run-estimated-stepping-batches] and
 @racket[#:ckpt-path] are not implemented yet and raise
-@racket[exn:fail:unsupported].
+@racket[exn:fail:unsupported]; the schedule callbacks,
+@racket[gradient-accumulation-scheduler], the @racket[scheduler-config]
+accessors, @racket[run-precision], @racket[run-grad-scaler] and
+@racket[run-accumulate-grad-batches] are not implemented yet either.
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
@@ -190,6 +193,11 @@ re-raises the exception; a break issued meanwhile is absorbed if breaks were
 enabled when @racket[fit] was called, and stays pending otherwise. A loop that
 leaves a loader early stops its @racket[#:workers] threads. The trainer does
 not yet support training from a loader with @racket[#:workers].
+@racket[#:precision] @racket['auto-mixed] picks @racket['bf16-mixed] where the
+device supports it and @racket['16-mixed] otherwise; @racket['16-mixed] scales
+the loss with a @racket[grad-scaler], unscales before
+@racket[on-before-optimizer-step], and on the CPU runs as
+@racket['bf16-mixed], as Lightning does.
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
 @racket[#:fast-dev-run]; a @racket[define-training-step]; a
@@ -261,10 +269,19 @@ only per epoch answers the running reduction of the current epoch, read once
 until the next @racket[log!] of that key.}
 
 @deftogether[(@defproc[(run-schedulers [r run?]) (listof scheduler-config?)]
-              @defproc[(run-estimated-stepping-batches [r run?])
+              @defproc[(run-estimated-stepping-batches [r fit-run/c])
                        exact-nonnegative-integer?])]{
-The schedulers @racket[define-optimizers] returned, and Lightning's
-@tt{estimated_stepping_batches}.}
+The schedulers @racket[define-optimizers] returned, as Lightning's
+@tt{lr_scheduler_configs}, a bare schedule as an @racket['epoch] one, and
+Lightning's @tt{estimated_stepping_batches}, which @racket[define-optimizers]
+can read. A test or predict run has no schedulers.}
+
+@deftogether[(@defproc[(run-precision [r run?]) (or/c '32-true '16-mixed 'bf16-mixed)]
+              @defproc[(run-grad-scaler [r run?]) (or/c #f grad-scaler?)]
+              @defproc[(run-accumulate-grad-batches [r run?]) exact-positive-integer?])]{
+The precision @racket[fit] resolved @racket[#:precision] to, the scaler a
+@racket['16-mixed] run steps through, and the accumulation factor of the
+current epoch.}
 
 @defproc[(request-stop! [r fitting-run/c]) void?]{
 Lightning's @tt{should_stop}: the current batch finishes, then the
@@ -384,6 +401,12 @@ step was dropped, so with @racket[#:accumulate-grad-batches] 2 and
 @defproc[(scheduler-config? [v any/c]) boolean?]{
 Recognizes @racket[scheduler-config] values.}
 
+@deftogether[(@defproc[(scheduler-config-scheduler [c scheduler-config?]) scheduler?]
+              @defproc[(scheduler-config-interval [c scheduler-config?]) interval/c]
+              @defproc[(scheduler-config-frequency [c scheduler-config?])
+                       exact-positive-integer?])]{
+The fields of a @racket[scheduler-config].}
+
 @deftogether[(@defproc[(hparam [tr trainer?] [name symbol?]) real?]
               @defproc[(set-hparam! [tr trainer?] [name symbol?] [v real?])
                        void?]
@@ -399,7 +422,44 @@ Read and write the fields named by @racket[define-hparams]; another
                        void?])]{
 Manual optimization, inside a @racket[define-training-step] of a trainer
 defined with @racket[#:automatic-optimization? #f].
-@racket[manual-zero-grads!] runs the @racket[on-before-zero-grad] hooks.}
+@racket[manual-zero-grads!] runs the @racket[on-before-zero-grad] hooks.
+@racket[opt] must be one of the optimizers @racket[define-optimizers]
+returned, as Lightning's @tt{LightningOptimizer} wraps them.}
+
+@defproc[(hparam-scheduler [name symbol?]
+                           [curve (-> exact-nonnegative-integer? real?)]
+                           [#:interval interval interval/c 'step])
+         callback?]{
+Sets the trainer's hparam @racket[name] to @racket[(curve (run-global-step run))]
+at each training batch start, or to @racket[(curve (run-epoch run))] at each
+epoch start. It keeps no state: the value depends only on the step or epoch.}
+
+@defproc[(param-group-scheduler [key schedulable-key/c]
+                                [curve (-> exact-nonnegative-integer? real?)]
+                                [#:optimizer optimizer exact-nonnegative-integer? 0]
+                                [#:groups groups
+                                 (or/c #f (non-empty-listof exact-nonnegative-integer?)) #f]
+                                [#:interval interval interval/c 'step])
+         callback?]{
+The same for @racket[key] of the selected parameter groups (every group for
+@racket[#f]) of the @racket[optimizer]-th optimizer, written as an absolute
+value.
+
+@racketblock[
+(define wd (lambda (t) (+ 0.04 (* 0.18 (- 1 (cos (* pi (/ t 100))))))))
+(fit (Dino) loader #:max-steps 100
+     #:callbacks (list (param-group-scheduler 'weight-decay wd #:groups '(0))))
+]}
+
+@deftogether[(@defproc[(hparam-scheduler? [v any/c]) boolean?]
+              @defproc[(param-group-scheduler? [v any/c]) boolean?])]{
+Recognize the schedule callbacks.}
+
+@defproc[(gradient-accumulation-scheduler [scheduling accumulation-scheduling/c])
+         callback?]{
+Lightning's @tt{GradientAccumulationScheduler}: from each epoch key of
+@racket[scheduling] on, accumulate that many batches; a missing epoch 0 means
+1. It needs automatic optimization and @racket[#:accumulate-grad-batches] 1.}
 
 @section{Contracts}
 
@@ -411,13 +471,17 @@ defined with @racket[#:automatic-optimization? #f].
               @defthing[clip-algorithm/c contract?]
               @defthing[fast-dev-run/c contract?]
               @defthing[interval/c contract?]
+              @defthing[schedulable-key/c contract?]
+              @defthing[accumulation-scheduling/c contract?]
               @defthing[reduce/c contract?]
               @defthing[state-key/c contract?])]{
 The keyword values: @racket['fit], @racket['test] or @racket['predict]; a
 run's stage; a batch count or a fraction of the loader; a batch count or a
-fraction of the epoch; @racket['32-true], @racket['16-mixed] or
-@racket['bf16-mixed]; @racket['norm] or @racket['value]; a boolean or a
-batch count; @racket['step] or @racket['epoch]; @racket['mean],
+fraction of the epoch; @racket['32-true], @racket['16-mixed],
+@racket['bf16-mixed] or @racket['auto-mixed]; @racket['norm] or
+@racket['value]; a boolean or a batch count; @racket['step] or
+@racket['epoch]; the parameter-group keys a schedule callback can write; an
+immutable non-empty hash from epochs to accumulation factors; @racket['mean],
 @racket['sum], @racket['max] or @racket['min]; a non-empty string.}
 
 @deftogether[(@defthing[scalar-tensor/c contract?]
@@ -431,9 +495,10 @@ dtype; @racket[#f], a logger or a list of loggers.}
               @defthing[batch-start-run/c contract?]
               @defthing[step-pending-run/c contract?]
               @defthing[logging-run/c contract?]
-              @defthing[manual-run/c contract?])]{
+              @defthing[manual-run/c contract?]
+              @defthing[fit-run/c contract?])]{
 A run inside an active @racket[fit]; inside an @racket[on-train-batch-start]
 hook; in a training batch whose optimizer step is pending; in a hook that
-may log; inside a manual training step.}
+may log; inside a manual training step; of @racket[fit], finished or not.}
 
 @include-section["train-hooks.scrbl"]

@@ -6,7 +6,9 @@
                      (only-in "private/hooks.rkt"
                               callback-hook? definable-hooks hook-batch?
                               hook-formals hook-name))
-         (only-in racket/contract/base ->* or/c procedure-arity-includes/c)
+         (only-in racket/contract/base
+                  -> ->* and/c contract? flat-named-contract hash/c
+                  not/c or/c procedure-arity-includes/c)
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -49,3 +51,14 @@
     (lambda-hooks (hooks-table (list (cons 'proc proc) ...)) state-key)))
 
 (define-lambda-callback lambda-callback)
+
+(define/contract-out accumulation-scheduling/c
+  contract?
+  (flat-named-contract 'accumulation-scheduling/c
+                       (and/c (hash/c exact-nonnegative-integer? exact-positive-integer?
+                                      #:immutable #t)
+                              (not/c hash-empty?))))
+
+(define/contract-out (gradient-accumulation-scheduler scheduling)
+  (-> accumulation-scheduling/c callback?)
+  (error 'unimplemented))
