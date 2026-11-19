@@ -272,6 +272,7 @@
          set-cuda-matmul-allow-tf32!
          cudnn-allow-tf32?
          set-cudnn-allow-tf32!
+         cpu-capability
          sub!
          zero!
          mul!

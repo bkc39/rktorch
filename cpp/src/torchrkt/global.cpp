@@ -1,6 +1,7 @@
 #include "torchrkt/c_api/global.h"
 
 #include <ATen/Context.h>
+#include <ATen/Version.h>
 #include <torch/torch.h>
 #include <torch/version.h>
 
@@ -62,6 +63,16 @@ int tr_manual_seed(uint64_t seed) {
       torch::mps::manual_seed(seed);
     }
   });
+}
+
+const char* tr_cpu_capability(void) {
+  static const std::string capability = [] {
+    std::string name;
+    torchrkt::status_call("tr_cpu_capability",
+                          [&name] { name = at::get_cpu_capability(); });
+    return name;
+  }();
+  return capability.empty() ? nullptr : capability.c_str();
 }
 
 int tr_set_deterministic_algorithms(int enabled, int warn_only) {
