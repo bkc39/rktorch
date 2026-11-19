@@ -1069,6 +1069,27 @@
                          (release-gate! gate))))
     (check-true (dead-within? workers 10)))
 
+  (define (seconds-in thunk)
+    (define start (current-inexact-milliseconds))
+    (thunk)
+    (/ (- (current-inexact-milliseconds) start) 1000.0))
+
+  (test-case "a traversal ended twice waits for its workers once"
+    (define gate (delivered 1))
+    (define started (box '()))
+    (with-race-hook (hooks (noting-started started) (gate-hook gate))
+      (define-values (count batch finish!)
+        (traversal (~> (arange 4) tensor-dataset (dataloader #:batch-size 2 #:workers 2))))
+      (for ([k (in-range count)])
+        (batch k))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (define first-wait (seconds-in finish!))
+      (define second-wait (seconds-in finish!))
+      (check-true (>= first-wait 4.5) (format "the first end waited ~a s" first-wait))
+      (check-true (< second-wait 1) (format "the second end waited ~a s" second-wait))
+      (release-gate! gate)
+      (check-true (dead-within? (unbox started) 10))))
+
   (define-dataset held-at (n held builder resume)
     #:length n
     #:ref (i)

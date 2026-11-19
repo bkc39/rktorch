@@ -30,7 +30,7 @@
 (define batch-result/c (or/c built? raised?))
 
 ;; Workers never reach the pool, so its finalizer can stop them.
-(struct worker-pool (guard results))
+(struct worker-pool (guard results [joined? #:mutable]))
 
 ;; The guard's shutdown callback runs under the custodian lock, so it only posts.
 (struct pool-guard ([threads #:mutable] stop kill))
@@ -159,7 +159,7 @@
     (define stop (make-semaphore 0))
     ;; Both ways to stop exist before the first worker does.
     (define guard (pool-guard (vector) stop (make-semaphore 0)))
-    (define pool (worker-pool guard results))
+    (define pool (worker-pool guard results #f))
     (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
     (define registration (guard-with! (current-custodian) guard))
     (call-with-abort (lambda (_v)
@@ -203,10 +203,14 @@
 
 (define/contract-out (join-workers! pool) (-> worker-pool? void?) ;; noqa
   (stop-workers! pool)
-  (define deadline (alarm-evt (+ (current-inexact-milliseconds) (* 1000 join-seconds))))
-  (parameterize-break #f
-    (for ([t (in-vector (worker-pool-threads pool))])
-      (sync deadline (thread-dead-evt t)))))
+  (cond
+    [(worker-pool-joined? pool) (void)]
+    [else
+     (set-worker-pool-joined?! pool #t)
+     (define deadline (alarm-evt (+ (current-inexact-milliseconds) (* 1000 join-seconds))))
+     (parameterize-break #f
+       (for ([t (in-vector (worker-pool-threads pool))])
+         (sync deadline (thread-dead-evt t))))]))
 
 (define/contract-out (abort-workers! pool) (-> worker-pool? void?) ;; noqa
   (stop-workers! pool)

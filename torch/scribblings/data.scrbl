@@ -228,10 +228,10 @@ raises after they have started, when the
 custodian current at the traversal's start shuts down, or once the loop that
 held the traversal has let it go and a collection runs. They run outside
 that custodian, so a @racket[custodian-limit-memory] on it does not cover
-what they allocate. A traversal that is exhausted, or that the trainer
-leaves early, waits for each worker to exit for up to 5 seconds, PyTorch's
-@tt{MP_STATUS_CHECK_INTERVAL}, as PyTorch's iterator joins its workers when
-it shuts them down; a worker still building a batch finishes it first, and
+what they allocate. When a traversal is exhausted, and whenever one the
+trainer runs ends, it waits once for each worker to exit, for up to 5
+seconds, PyTorch's @tt{MP_STATUS_CHECK_INTERVAL}, as PyTorch's iterator
+joins its workers when it shuts them down; a worker still building a batch finishes it first, and
 one that is still running after the wait is left to stop on its own. A
 @racket[for] loop that stops early cannot tell its traversal, so its workers
 stop after a collection. On Racket 9.3, a place that ends while one of its
