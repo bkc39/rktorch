@@ -24,6 +24,7 @@ CPP_INCLUDE = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated"
 CPP_UMBRELLA = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated.h"
 CPP_SRC = ROOT / "cpp" / "src" / "torchrkt" / "generated"
 RKT_WRAPPERS = ROOT / "torch" / "generated.rkt"
+RKT_SHARDS = ROOT / "torch" / "generated"
 MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
 ABI_STAMP = ROOT / "torch" / "foreign" / "raw" / "abi-stamp.rktd"
 ABI_STAMP_SCRIPT = ROOT / "cpp" / "cmake" / "abi_stamp.cmake"
@@ -140,6 +141,10 @@ def main() -> None:
     _write(CPP_UMBRELLA, emit_cpp.emit_umbrella(shard_names))
     cpp_paths.append(CPP_UMBRELLA)
     _write(CPP_SRC / "sources.cmake", emit_cpp.emit_sources_cmake(shard_names))
+    _clean(RKT_SHARDS, (".rkt",))
+    for shard in shard_names:
+        _write(RKT_WRAPPERS.parent / emit_racket.shard_module(shard),
+               emit_racket.emit_shard(shards[shard]))
     _write(RKT_WRAPPERS, emit_racket.emit_wrappers(shards))
     _write(MANIFEST, emit_racket.emit_manifest(shards))
     _clang_format(cpp_paths)

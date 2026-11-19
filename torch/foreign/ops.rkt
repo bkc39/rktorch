@@ -28,6 +28,7 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/cas.rkt" cas-add!)
          (only-in "raw/device.rkt"
+                  tr-cuda-bf16-supported/raw
                   tr-cuda-device-count/raw
                   tr-cuda-empty-cache/raw
                   tr-cuda-is-available/raw
@@ -81,7 +82,8 @@
                   tensor?
                   wrap-tensor))
 
-(provide device->type+index
+(provide default-cuda-index
+         device->type+index
          dims-rest/c
          dtype-symbols
          float-dtype-max
@@ -180,6 +182,14 @@
 
 (define/checked-out (cuda-available?) (-> boolean?)
   (= 1 (tr-cuda-is-available/raw)))
+
+(define (default-cuda-index)
+  (define dev (default-device))
+  (if (eq? (device-type dev) 'cuda) (device-index dev) 0))
+
+(define/checked-out (cuda-bfloat16-supported? [index (default-cuda-index)])
+  (->* () (exact-nonnegative-integer?) boolean?)
+  (= 1 (tr-cuda-bf16-supported/raw index)))
 
 (define/contract-out (cuda-if-available) (-> device?) ;; noqa
   (if (cuda-available?) (cuda-device) (cpu-device)))

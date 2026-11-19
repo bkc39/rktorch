@@ -304,16 +304,14 @@
 (define (call-with-traversal loader proc)
   (define breaks (current-break-parameterization))
   (parameterize-break #f
-    (define-values (count batch finish! abandon!) (abandonable-traversal loader breaks))
-    (define taken 0)
+    (define-values (count batch _finish! abandon!) (abandonable-traversal loader breaks))
     (define (counted-batch k)
-      (set! taken (max taken (add1 k)))
       (call-with-values (lambda () (batch k)) list))
     (dynamic-wind void
                   (lambda ()
                     (call-with-break-parameterization breaks
                                                       (lambda () (proc count counted-batch))))
-                  (lambda () (if (= taken count) (finish!) (abandon!))))))
+                  abandon!)))
 
 (define-syntax-parse-rule (with-traversal ([count:id batch:id] loader:expr) body:expr ...+)
   (call-with-traversal loader (lambda (count batch) body ...)))

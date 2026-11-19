@@ -4,7 +4,12 @@ Records every hook a LightningModule and a Callback can override, in the order
 Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383)
 and for fits that skip a window by a None loss or an optimizer_step that does
 not step (#446), dumps _FxValidator.functions, and records the step each
-logger row is labelled with in fits that skip a window (#445). Writes
+logger row is labelled with in fits that skip a window (#445), and records
+trainer.estimated_stepping_batches as configure_optimizers reads it for a
+table of fit options (G2-L11 of the T2 spec, #385), and the fits of G3-L17,
+L19 and L22: a GradientAccumulationScheduler, manual optimization over two
+optimizers, and bf16-mixed precision, and the logged rows of manual fits
+that step two optimizers or none each batch. Writes
 torch/tests/lightning-hooks.rktd, or the path given as the first argument;
 lightning-hooks-parity-test.rkt regenerates it and compares.
 
@@ -23,7 +28,7 @@ import sys
 import lightning
 import lightning.pytorch as pl
 import torch
-from lightning.pytorch.callbacks import Callback
+from lightning.pytorch.callbacks import Callback, GradientAccumulationScheduler
 from lightning.pytorch.core.hooks import CheckpointHooks, DataHooks, ModelHooks
 from lightning.pytorch.loggers.logger import Logger
 from lightning.pytorch.trainer.connectors.logger_connector.fx_validator import (
@@ -169,7 +174,32 @@ class RecorderCallback(Callback):
         self.scenario = scenario
 
 
+class ManualBase(Base):
+    """Manual optimization over two SGDs on the same layer. Lightning's
+    LightningOptimizer.zero_grad runs no hook; the zero_grad marker records
+    where the step calls it, for rktorch's D7."""
+
+    def __init__(self, scenario):
+        super().__init__(scenario)
+        self.automatic_optimization = False
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        for opt in self.optimizers():
+            trainer = self.scenario.trainer
+            self.scenario.events.append((Symbol("zero_grad"), trainer.current_epoch,
+                                         trainer.global_step, None, current_lr(trainer)))
+            opt.zero_grad()
+            self.manual_backward(nn.functional.mse_loss(self(x), y))
+            opt.step()
+
+    def configure_optimizers(self):
+        return [torch.optim.SGD(self.layer.parameters(), lr=0.1),
+                torch.optim.SGD(self.layer.parameters(), lr=0.1)]
+
+
 Recorder = recording(Base, MODULE_HOOKS, "")
+ManualRecorder = recording(ManualBase, MODULE_HOOKS, "")
 Recorded = recording(RecorderCallback, CALLBACK_HOOKS, "Callback.")
 
 
@@ -188,11 +218,12 @@ def trainer(callbacks, logger=False, **kwargs):
                       callbacks=callbacks, **options)
 
 
-def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None):
+def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None,
+        callbacks=(), module=Recorder):
     torch.manual_seed(0)
     scenario = Scenario(**(scenario_kwargs or {}))
-    model = Recorder(scenario)
-    t = trainer([Recorded(scenario)], **(trainer_kwargs or {}))
+    model = module(scenario)
+    t = trainer([Recorded(scenario), *callbacks], **(trainer_kwargs or {}))
     scenario.trainer = t
     try:
         if entry == "fit":
@@ -236,6 +267,11 @@ SCENARIOS = {
     "skip-every-max-steps": lambda: run(
         "fit", {"skip_loss": "every"},
         trainer_kwargs={"max_epochs": -1, "max_steps": 4}),
+    "accumulate-scheduler": lambda: run(
+        "fit", train=10,
+        callbacks=[GradientAccumulationScheduler({0: 1, 1: 2})]),
+    "manual": lambda: run("fit", module=ManualRecorder),
+    "bf16-mixed": lambda: run("fit", trainer_kwargs={"precision": "bf16-mixed"}),
     "test": lambda: run("test"),
     "predict": lambda: run("predict"),
 }
@@ -271,13 +307,38 @@ class Logged(Base):
         return super().validation_step(batch, batch_idx)
 
 
-def logged(scenario_kwargs, train=6, accumulate=1, log_every=1):
+class ManualLogged(Logged):
+    """Manual optimization stepping the first `steps` of two SGDs each batch."""
+
+    def __init__(self, scenario, steps):
+        super().__init__(scenario)
+        self.automatic_optimization = False
+        self.steps = steps
+
+    def training_step(self, batch, batch_idx):
+        self.log("tl", 1.0, on_step=True, on_epoch=True)
+        x, y = batch
+        for opt in self.optimizers()[:self.steps]:
+            opt.zero_grad()
+            self.manual_backward(nn.functional.mse_loss(self(x), y))
+            opt.step()
+
+    def configure_optimizers(self):
+        return [torch.optim.SGD(self.layer.parameters(), lr=0.1),
+                torch.optim.SGD(self.layer.parameters(), lr=0.1)]
+
+
+def logged(scenario_kwargs, train=6, accumulate=1, log_every=1, module=Logged):
     torch.manual_seed(0)
     rows = Rows()
     t = trainer([], logger=rows, log_every_n_steps=log_every,
                 accumulate_grad_batches=accumulate)
-    t.fit(Logged(Scenario(**scenario_kwargs)), loader(train), loader(4))
+    t.fit(module(Scenario(**scenario_kwargs)), loader(train), loader(4))
     return rows.rows
+
+
+def manual(steps):
+    return lambda scenario: ManualLogged(scenario, steps)
 
 
 LOGGED = {
@@ -287,7 +348,44 @@ LOGGED = {
         {"skip_loss": (0, 1)}, train=10, accumulate=2),
     "skip-loss-log-every-2": lambda: logged(
         {"skip_loss": (0, 1)}, log_every=2),
+    "manual": lambda: logged({}, module=manual(2)),
+    "manual-log-every-4": lambda: logged({}, log_every=4, module=manual(2)),
+    "manual-no-steps": lambda: logged({}, module=manual(0)),
 }
+
+
+class Stepping(Base):
+    def configure_optimizers(self):
+        self.scenario.events.append(self.trainer.estimated_stepping_batches)
+        return torch.optim.SGD(self.parameters(), lr=0.1)
+
+
+STEPPING = [
+    {"train": 5, "accumulate": 1, "limit": 1.0, "max-epochs": 2},
+    {"train": 5, "accumulate": 2, "limit": 1.0, "max-epochs": 3},
+    {"train": 5, "accumulate": 3, "limit": 1.0, "max-epochs": 2,
+     "max-steps": 3},
+    {"train": 6, "accumulate": 1, "limit": 0.5, "max-epochs": 2},
+    {"train": 6, "accumulate": 4, "limit": 4, "max-epochs": 1},
+    {"train": 3, "accumulate": 5, "limit": 1.0, "max-epochs": 2},
+    {"train": 4, "accumulate": 1, "limit": 1.0, "max-steps": 7},
+    {"train": 5, "accumulate": 2, "limit": 1.0, "fast-dev-run": 3},
+    {"train": 2, "accumulate": 1, "limit": 1.0, "fast-dev-run": 5},
+    {"train": 4, "accumulate": 1, "limit": 1.0, "fast-dev-run": True},
+]
+
+
+def estimated(row):
+    torch.manual_seed(0)
+    scenario = Scenario()
+    t = trainer([], max_epochs=row.get("max-epochs"),
+                max_steps=row.get("max-steps", -1),
+                accumulate_grad_batches=row["accumulate"],
+                limit_train_batches=row["limit"],
+                fast_dev_run=row.get("fast-dev-run", False))
+    t.fit(Stepping(scenario), loader(2 * row["train"]))
+    [steps] = scenario.events
+    return {**row, "estimated": steps}
 
 
 def rktd(v):
@@ -315,6 +413,15 @@ def permissions():
     return "\n".join(out)
 
 
+def stepping_text():
+    rows = []
+    for row in STEPPING:
+        fields = " ".join("(%s . %s)" % (k, rktd(v))
+                          for k, v in estimated(row).items())
+        rows.append("     #hasheq(" + fields + ")")
+    return "\n".join(rows)
+
+
 def scenario_text(name, events):
     rows = "\n".join("     " + rktd(e) for e in events)
     return "   (%s\n    .\n    (\n%s))" % (name, rows)
@@ -330,9 +437,10 @@ def main():
             "        (torch . %s)\n"
             "        (log-permissions\n         .\n         #hasheq(\n%s))\n"
             "        (logged-steps\n         .\n         #hasheq(\n%s))\n"
-            "        (scenarios\n         .\n         #hasheq(\n%s)))\n") % (
+            "        (scenarios\n         .\n         #hasheq(\n%s))\n"
+            "        (stepping\n         .\n         (\n%s)))\n") % (
         rktd(lightning.__version__), rktd(torch.__version__.split("+")[0]),
-        permissions(), rows, scenarios)
+        permissions(), rows, scenarios, stepping_text())
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w") as f:
         f.write(text)

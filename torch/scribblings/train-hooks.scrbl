@@ -66,8 +66,10 @@ The order of one @racket[fit], after Lightning 2.6.5, with
        step, @tt{on-before-zero-grad} on a window's first batch,
        @tt{on-before-backward} with the loss ÷ @italic{A},
        @tt{on-after-backward}, @tt{on-before-optimizer-step} at a window's
-       end, the schedulers, @tt{on-train-batch-end}, and a validation loop
-       when one is due.}
+       end (before clip and step; after unscaling under a
+       @racket['16-mixed] scaler, unless the window's last loss is
+       @racket[#f], as @racket[fit] describes), the schedulers,
+       @tt{on-train-batch-end}, and a validation loop when one is due.}
  @item{A @racket[#f] loss skips that batch's @tt{on-before-backward},
        backward pass and @tt{on-after-backward}. After @racket[skip-step!],
        @tt{on-before-optimizer-step} and the step do not run, unless the

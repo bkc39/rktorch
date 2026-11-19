@@ -6,17 +6,21 @@
                   not/c or/c real-in)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" device?)
+         (only-in "../nn/grad-scaler.rkt" grad-scaler?)
          (only-in "../nn/optim.rkt" optimizer?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/book.rkt" book-metric book-metrics)
          (only-in "private/hooks.rkt" hook-log hook-named)
          (only-in "private/state.rkt"
-                  live? run-batch-index run-book run-current-stage run-device run-entry
-                  run-epoch run-global-step run-hook run-loop run-optimizers run-step-pending?
-                  run-stepped? run-trainer run? set-run-skip-epoch?! set-run-skip-window?!
+                  live? [run-accumulate accumulate-of] run-batch-index run-book
+                  run-current-stage run-device run-entry run-epoch run-global-step
+                  [run-grad-scaler grad-scaler-of] run-hook run-loop run-optimizers
+                  [run-precision precision-of] run-scheduler-configs
+                  run-step-pending? run-stepped? run-stepping-batches run-trainer run?
+                  set-run-accumulate! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-stop?!)
          (only-in "private/types.rkt"
-                  define-named-contract not-implemented scheduler-config?
+                  define-named-contract scheduler-config?
                   trainer-automatic? trainer?))
 
 (provide (contract-out
@@ -30,7 +34,8 @@
           [run-stepped? (-> run? boolean?)]))
 
 (module+ private
-  (provide hook-log-rule))
+  (provide hook-log-rule
+           set-run-accumulate-grad-batches!))
 
 (define (hook-log-rule r)
   (define name (and (live? r) (run-hook r)))
@@ -50,7 +55,7 @@
 (define-named-contract val-check-interval/c
   (or/c #f exact-positive-integer? (and/c inexact-real? (>/c 0.0) (<=/c 1.0))))
 
-(define-named-contract precision/c (or/c '32-true '16-mixed 'bf16-mixed))
+(define-named-contract precision/c (or/c '32-true '16-mixed 'bf16-mixed 'auto-mixed))
 
 (define-named-contract clip-algorithm/c (or/c 'norm 'value))
 
@@ -68,6 +73,9 @@
 
 (define-live-run-contract step-pending-run/c (r)
   (run-step-pending? r))
+
+(define-named-contract fit-run/c
+  (lambda (r) (and (run? r) (eq? (run-entry r) 'fit))))
 
 (define-named-contract logging-run/c
   (lambda (r) (and (hook-log-rule r) #t)))
@@ -102,8 +110,23 @@
 
 (define/contract-out (run-schedulers r)
   (-> run? (listof scheduler-config?))
-  (not-implemented 'run-schedulers 'T2))
+  (run-scheduler-configs r))
 
 (define/contract-out (run-estimated-stepping-batches r)
-  (-> run? exact-nonnegative-integer?)
-  (not-implemented 'run-estimated-stepping-batches 'T2))
+  (-> fit-run/c exact-nonnegative-integer?)
+  (run-stepping-batches r))
+
+(define/contract-out (run-precision r)
+  (-> run? (or/c '32-true '16-mixed 'bf16-mixed))
+  (precision-of r))
+
+(define/contract-out (run-grad-scaler r)
+  (-> run? (or/c #f grad-scaler?))
+  (grad-scaler-of r))
+
+(define/contract-out (run-accumulate-grad-batches r)
+  (-> run? exact-positive-integer?)
+  (accumulate-of r))
+
+(define (set-run-accumulate-grad-batches! r a)
+  (set-run-accumulate! r a))

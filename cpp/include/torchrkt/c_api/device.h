@@ -93,6 +93,13 @@ int tr_cuda_empty_cache(void);
 int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,
                      int64_t* out_index);
 
+/* torch.cuda.is_bf16_supported(including_emulation=False) for one device:
+ * 1 when CUDA is present and the device's compute capability major is at
+ * least 8; 0 when CUDA is absent or not compiled in, the index is out of
+ * range, or the query throws. Clears tr_last_error on entry, like
+ * tr_cuda_is_available. */
+int tr_cuda_bf16_supported(int64_t device_index);
+
 #ifdef __cplusplus
 }
 #endif

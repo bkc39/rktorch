@@ -6,7 +6,9 @@
 (module+ test
   (require rackunit
            "../main.rkt"
-           "../nn.rkt")
+           "../nn.rkt"
+           (only-in "private/python-env.rkt"
+                    python-check python-cuda-available? python-torch-available?))
 
   (test-case "autocast is off by default and reports the device's dtype"
     (check-false (autocast-enabled? 'cpu))
@@ -49,6 +51,40 @@
                    (error 'test "escaped"))))
     (check-false (autocast-enabled? 'cpu) "an exception still restores"))
 
+  (define (cast-after-update cache?)
+    (define w (requires-grad! (tensor '((1.0 0.0) (0.0 1.0)))))
+    (define x (tensor '((1.0 2.0))))
+    (with-autocast #:device 'cpu #:cache-enabled? cache?
+      (@ x w)
+      (with-no-grad (copy! w (tensor '((2.0 0.0) (0.0 2.0)))))
+      (tensor->list (@ x w))))
+
+  (test-case "the cast cache serves a stale weight unless #:cache-enabled? is #f"
+    (check-true (autocast-cache-enabled?))
+    (check-equal? (cast-after-update #t) '(1.0 2.0) "torch's cache keys by tensor")
+    (check-equal? (cast-after-update #f) '(2.0 4.0))
+    (check-true (autocast-cache-enabled?)))
+
+  (test-case "with no #:cache-enabled? at top level, with-autocast caches casts, as torch"
+    (with-autocast #:device 'cpu
+      (check-true (autocast-cache-enabled?))))
+
+  (test-case "with-autocast restores the cache flag, even on escape"
+    (with-autocast #:device 'cpu #:cache-enabled? #f
+      (check-false (autocast-cache-enabled?))
+      (with-autocast #:device 'cpu
+        (check-false (autocast-cache-enabled?) "the default keeps the current flag, as torch"))
+      (with-autocast #:device 'cpu #:cache-enabled? #t
+        (check-true (autocast-cache-enabled?)))
+      (check-false (autocast-cache-enabled?) "the outer flag is back"))
+    (check-exn #rx"escaped"
+               (lambda ()
+                 (with-autocast #:device 'cpu #:cache-enabled? #f
+                   (error 'test "escaped"))))
+    (check-true (autocast-cache-enabled?) "an exception still restores")
+    (check-exn exn:fail:contract?
+               (lambda () (with-autocast #:device 'cpu #:cache-enabled? 'no 1))))
+
   (test-case "call-with-autocast takes a device struct and a thunk"
     (define out
       (call-with-autocast (lambda () (@ (ones 2 2) (ones 2 2)))
@@ -82,7 +118,7 @@
       (define conv (to (Conv2d 3 8 3) (cuda-device)))
       (define x (to (randn 2 3 8 8) (cuda-device)))
       (check-false (autocast-enabled? 'cuda))
-      (define y (with-autocast #:device 'cuda (conv x)))
+      (define y (with-autocast #:device 'cuda #:dtype 'bfloat16 (conv x)))
       (check-equal? (dtype y) 'bfloat16)
       (check-equal? (device y) (cuda-device))
       (define z (with-autocast #:device 'cuda #:dtype 'float16 (conv x)))
@@ -99,4 +135,22 @@
         (with-autocast #:device 'cuda #:dtype 'float16
           (check-equal? (dtype (lin x)) 'float16
                         "the outer extent's bfloat16 weight cast is not reused"))
-        (check-equal? (dtype (lin x)) 'bfloat16)))))
+        (check-equal? (dtype (lin x)) 'bfloat16))))
+
+  (test-case "G3-L8: the bf16 probe is #f without CUDA and follows the capability with it"
+    (cond
+      [(not (cuda-available?)) (check-false (cuda-bfloat16-supported?))]
+      [(and (python-torch-available?) (python-cuda-available?))
+       (check-equal? (cuda-bfloat16-supported?)
+                     (hash-ref (python-check "cuda_bf16_probe.py") 'bf16))]
+      [else (displayln "[autocast-test] G3-L8 oracle skipped: no CUDA python")])
+    (check-false (cuda-bfloat16-supported? 4096) "an index past the device count"))
+
+  (test-case "G3-L9: with no #:dtype, CUDA autocast follows the probe and the CPU stays bf16"
+    (check-equal? (with-autocast #:device 'cpu (autocast-dtype 'cpu)) 'bfloat16)
+    (check-equal? (call-with-autocast (lambda () (autocast-dtype 'cpu)) #:device (cpu-device))
+                  'bfloat16)
+    (when (cuda-available?)
+      (define expected (if (cuda-bfloat16-supported?) 'bfloat16 'float16))
+      (check-equal? (with-autocast #:device 'cuda (autocast-dtype 'cuda)) expected)
+      (check-equal? (with-autocast #:device (cuda-device) (autocast-dtype 'cuda)) expected))))
