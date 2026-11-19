@@ -20,10 +20,13 @@
                                 add-tensor add-tensor! div-scalar! lerp-scalar!))
          (only-in "../private/contract.rkt" define/checked-out define/contract-out supplied-or)
          (only-in "../private/step-log.rkt" log-optimizer-step!)
+         (only-in "optim-groups.rkt"
+                  group-store store-count store-groups store-params store-partition store-ref
+                  store-set! store-set-all!)
          (only-in "param-group.rkt" hyperparameter-key/c param-group?)
          (only-in (submod "param-group.rkt" private)
-                  floating-params/c grouped? groups-distinct? groups-keys-within?
-                  groups-setting-holds? params/c)
+                  floating-params/c groups-distinct? groups-keys-within? groups-setting-holds?
+                  param-group-settings param-group-tensors params/c)
          (only-in "optim-foreach.rkt"
                   adam-foreach! adam-fused! bias-correction rmsprop-foreach!
                   sgd-foreach! sgd-fused! slot! slot-ref step-count!))
@@ -32,10 +35,9 @@
          optimizer?
          optimizer-step!
          optimizer-parameters
-         optimizer-lr
-         optimizer-set-lr!
+         optimizer-store
          optimizer-root
-         sgd-lr
+         group-index?
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
                        [adamw? (-> any/c boolean?)]
@@ -50,12 +52,13 @@
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
-  (optimizer-lr optimizer)
-  (optimizer-set-lr! optimizer lr)
+  (optimizer-store optimizer)
   (optimizer-root optimizer)
-  #:fallbacks [(define (optimizer-root opt) opt)])
+  #:fallbacks [(define (optimizer-parameters opt) (store-params (tracked-store opt)))
+               (define (optimizer-store opt) (tracked-store opt))
+               (define (optimizer-root opt) opt)])
 
-(struct tracked (state keys [generation #:mutable]))
+(struct tracked (state keys [generation #:mutable] store))
 
 (define (optimizer-state opt)
   (for*/list ([table (in-hash-values (tracked-state opt))]
@@ -104,30 +107,30 @@
     [foreach? 'foreach]
     [else 'loop]))
 
-(define (step-by! opt params mode #:loop loop! #:foreach foreach!
-                  #:fused [fused! #f])
+(define (step-by! opt mode #:loop loop! #:foreach foreach! #:fused [fused! #f])
+  (define st (tracked-store opt))
+  (define (by-group! update!)
+    (with-gradients ([qs gs] (store-params st))
+      (for ([part (in-list (store-partition st qs gs))])
+        (match-define (list h gqs ggs) part)
+        (update-buckets! opt gqs ggs (lambda (bqs bgs) (update! h bqs bgs))))))
   (with-no-grad
     (follow-moves! opt)
     (match mode
       ['loop
-       (for ([p (in-list params)])
+       (for* ([group (in-list (store-groups st))]
+              [h (in-value (param-group-settings group))]
+              [p (in-list (param-group-tensors group))])
          (with-gradient (g p)
-           (loop! p g)))]
-      ['foreach
-       (with-gradients ([qs gs] params)
-         (update-buckets! opt qs gs foreach!))]
-      ['fused
-       (with-gradients ([qs gs] params)
-         (update-buckets! opt qs gs fused!))])))
+           (loop! h p g)))]
+      ['foreach (by-group! foreach!)]
+      ['fused (by-group! fused!)])))
 
 (define (unit-scalar)
   (full 1.0 #:device (cpu-device) #:dtype 'float32))
 
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (g:add-tensor g p weight-decay)))
-
-(define (hyper x)
-  (real->double-flonum x))
 
 (define (explicit? v)
   (and (not (unsupplied-arg? v)) v))
@@ -151,7 +154,7 @@
   (and (memq key (hyperparameter-keys opt)) #t))
 
 (define (group-index? opt i)
-  (or (zero? i) (< i (param-group-count opt))))
+  (< i (param-group-count opt)))
 
 (define nonnegative/c (>=/c 0))
 
@@ -199,15 +202,11 @@
     (define mode (update-mode foreach? fused?))
     body ...))
 
-(struct sgd tracked (params [lr #:mutable] momentum nesterov? weight-decay
-                            mode)
+(struct sgd tracked (mode)
   #:constructor-name make-sgd
   #:name sgd-optimizer
   #:methods gen:optimizer
-  [(define (optimizer-parameters opt) (sgd-params opt))
-   (define (optimizer-lr opt) (sgd-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-sgd-lr! opt (hyper lr)))
-   (define (optimizer-step! opt) (sgd-do-step! opt))])
+  [(define (optimizer-step! opt) (sgd-do-step! opt))])
 
 (define-fusable-optimizer (sgd params
                                [#:lr lr (>=/c 0)]
@@ -221,11 +220,10 @@
   #:keys sgd-keys
   #:mode mode
   #:result sgd?
-  (cond
-    [(grouped? params) (error 'unimplemented)]
-    [else
-     (make-sgd (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper momentum)
-               nesterov? (hyper weight-decay) mode)]))
+  (make-sgd (make-hasheq) (make-hasheq) #f
+            (group-store params (hasheq 'lr lr 'momentum momentum 'nesterov? nesterov?
+                                        'weight-decay weight-decay))
+            mode))
 
 (define (momentum-buffer! state p d momentum)
   (cond
@@ -250,24 +248,20 @@
   (g:add-tensor! p step (- lr)))
 
 (define (sgd-do-step! opt)
-  (define ((with-hyperparameters update!) ps gs)
-    (update! (tracked-state opt) ps gs #:lr (sgd-lr opt)
-             #:momentum (sgd-momentum opt) #:nesterov? (sgd-nesterov? opt)
-             #:weight-decay (sgd-weight-decay opt)))
-  (step-by! opt (sgd-params opt) (sgd-mode opt)
+  (define ((with-hyperparameters update!) h ps gs)
+    (update! (tracked-state opt) ps gs #:lr (hash-ref h 'lr)
+             #:momentum (hash-ref h 'momentum) #:nesterov? (hash-ref h 'nesterov?)
+             #:weight-decay (hash-ref h 'weight-decay)))
+  (step-by! opt (sgd-mode opt)
             #:loop (with-hyperparameters sgd-loop!)
             #:foreach (with-hyperparameters sgd-foreach!)
             #:fused (with-hyperparameters sgd-fused!)))
 
-(struct adam tracked (params [lr #:mutable] beta1 beta2 eps weight-decay
-                             mode one)
+(struct adam tracked (mode one)
   #:constructor-name make-adam
   #:name adam-optimizer
   #:methods gen:optimizer
-  [(define (optimizer-parameters opt) (adam-params opt))
-   (define (optimizer-lr opt) (adam-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-adam-lr! opt (hyper lr)))
-   (define (optimizer-step! opt) (adam-do-step! opt))])
+  [(define (optimizer-step! opt) (adam-do-step! opt))])
 
 (struct adamw adam-optimizer ()
   #:constructor-name make-adamw
@@ -285,11 +279,10 @@
     #:keys adam-keys
     #:mode mode
     #:result result?
-    (cond
-      [(grouped? params) (error 'unimplemented)]
-      [else
-       (make (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper beta1)
-             (hyper beta2) (hyper eps) (hyper weight-decay) mode (unit-scalar))])))
+    (make (make-hasheq) (make-hasheq) #f
+          (group-store params (hasheq 'lr lr 'beta1 beta1 'beta2 beta2 'eps eps
+                                      'weight-decay weight-decay))
+          mode (unit-scalar))))
 
 (define-adam adam make-adam adam? 0.0)
 (define-adam adamw make-adamw adamw? 1e-2)
@@ -300,10 +293,11 @@
   (define t (step-count! state p))
   (define d
     (cond
-      [decoupled?
+      [(not decoupled?) (decayed g p weight-decay)]
+      [(zero? weight-decay) g]
+      [else
        (mul! p (- 1.0 (* lr weight-decay)))
-       g]
-      [else (decayed g p weight-decay)]))
+       g]))
   (define m (slot! state 'exp-avg p))
   (define v (slot! state 'exp-avg-sq p))
   (g:lerp-scalar! m d (- 1.0 beta1))
@@ -315,25 +309,21 @@
   (addcdiv! p m denom (* (/ lr (bias-correction beta1 t)) -1.0)))
 
 (define (adam-do-step! opt)
-  (define ((with-hyperparameters update!) ps gs)
-    (update! (tracked-state opt) ps gs #:lr (adam-lr opt)
-             #:beta1 (adam-beta1 opt) #:beta2 (adam-beta2 opt)
-             #:eps (adam-eps opt) #:weight-decay (adam-weight-decay opt)
+  (define ((with-hyperparameters update!) h ps gs)
+    (update! (tracked-state opt) ps gs #:lr (hash-ref h 'lr)
+             #:beta1 (hash-ref h 'beta1) #:beta2 (hash-ref h 'beta2)
+             #:eps (hash-ref h 'eps) #:weight-decay (hash-ref h 'weight-decay)
              #:decoupled? (adamw? opt)))
-  (step-by! opt (adam-params opt) (adam-mode opt)
+  (step-by! opt (adam-mode opt)
             #:loop (with-hyperparameters (adam-loop! (adam-one opt)))
             #:foreach (with-hyperparameters adam-foreach!)
             #:fused (with-hyperparameters adam-fused!)))
 
-(struct rmsprop tracked (params [lr #:mutable] alpha eps weight-decay
-                                momentum mode one)
+(struct rmsprop tracked (mode one)
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
-  [(define (optimizer-parameters opt) (rmsprop-params opt))
-   (define (optimizer-lr opt) (rmsprop-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-rmsprop-lr! opt (hyper lr)))
-   (define (optimizer-step! opt) (rmsprop-do-step! opt))])
+  [(define (optimizer-step! opt) (rmsprop-do-step! opt))])
 
 (define/contract-out (rmsprop params ;; noqa
                               #:lr [lr 1e-2]
@@ -354,12 +344,10 @@
        #:pre/name (params) "a parameter group's eps is negative"
        (groups-setting-holds? params 'eps (lambda (e) (>= e 0)))
        [result rmsprop?])
-  (cond
-    [(grouped? params) (error 'unimplemented)]
-    [else
-     (make-rmsprop (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper alpha)
-                   (hyper eps) (hyper weight-decay) (hyper momentum)
-                   (update-mode foreach? #f) (unit-scalar))]))
+  (make-rmsprop (make-hasheq) (make-hasheq) #f
+                (group-store params (hasheq 'lr lr 'alpha alpha 'eps eps
+                                            'weight-decay weight-decay 'momentum momentum))
+                (update-mode foreach? #f) (unit-scalar)))
 
 (define ((rmsprop-loop! one) state p g #:lr lr #:alpha alpha #:eps eps
                              #:weight-decay weight-decay #:momentum momentum)
@@ -378,12 +366,12 @@
      (g:add-tensor! p buf (- lr))]))
 
 (define (rmsprop-do-step! opt)
-  (define ((with-hyperparameters update!) ps gs)
-    (update! (tracked-state opt) ps gs #:lr (rmsprop-lr opt)
-             #:alpha (rmsprop-alpha opt) #:eps (rmsprop-eps opt)
-             #:weight-decay (rmsprop-weight-decay opt)
-             #:momentum (rmsprop-momentum opt)))
-  (step-by! opt (rmsprop-params opt) (rmsprop-mode opt)
+  (define ((with-hyperparameters update!) h ps gs)
+    (update! (tracked-state opt) ps gs #:lr (hash-ref h 'lr)
+             #:alpha (hash-ref h 'alpha) #:eps (hash-ref h 'eps)
+             #:weight-decay (hash-ref h 'weight-decay)
+             #:momentum (hash-ref h 'momentum)))
+  (step-by! opt (rmsprop-mode opt)
             #:loop (with-hyperparameters (rmsprop-loop! (rmsprop-one opt)))
             #:foreach (with-hyperparameters rmsprop-foreach!)))
 
@@ -402,11 +390,11 @@
 
 (define/checked-out (param-group-count opt)
   (-> optimizer? exact-positive-integer?)
-  (error 'unimplemented))
+  (store-count (optimizer-store opt)))
 
 (define/contract-out (optimizer-param-groups opt) ;; noqa
   (-> optimizer? (listof param-group?))
-  (error 'unimplemented))
+  (store-groups (optimizer-store opt)))
 
 (define/contract-out (param-group-ref opt i key) ;; noqa
   (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c])
@@ -415,7 +403,7 @@
        #:pre/name (opt key) "this optimizer has no such hyperparameter"
        (has-hyperparameter? opt key)
        [_ (or/c real? boolean?)])
-  (error 'unimplemented))
+  (store-ref (optimizer-store opt) i key))
 
 (define/contract-out (param-group-set! opt i key v) ;; noqa
   (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c]
@@ -425,16 +413,14 @@
        #:pre/name (opt key) "this optimizer has no such hyperparameter"
        (has-hyperparameter? opt key)
        [_ void?])
-  (error 'unimplemented))
+  (store-set! (optimizer-store opt) i key v))
 
 (define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
   (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (or (unsupplied-arg? group) (group-index? opt group))
        [_ real?])
-  (cond
-    [(zero? group) (optimizer-lr opt)]
-    [else (error 'unimplemented)]))
+  (store-ref (optimizer-store opt) group 'lr))
 
 (define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
   (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
@@ -443,6 +429,6 @@
          [#f #t]
          [i (group-index? opt i)])
        [_ void?])
-  (cond
-    [group (error 'unimplemented)]
-    [else (optimizer-set-lr! opt lr)]))
+  (if group
+      (store-set! (optimizer-store opt) group 'lr lr)
+      (store-set-all! (optimizer-store opt) 'lr lr)))

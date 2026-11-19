@@ -2,11 +2,14 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i >=/c and/c any/c contract? contract-out flat-named-contract
-                  hash/c list/c listof non-empty-listof or/c property/c rename-contract)
-         (only-in racket/list append-map check-duplicates remove-duplicates)
-         (only-in "../foreign.rkt" dtype tensor?)
+                  hash/c list/c listof non-empty-listof or/c property/c rename-contract
+                  the-unsupplied-arg unsupplied-arg?)
+         (only-in racket/list append-map check-duplicates filter-not partition remove-duplicates)
+         (only-in racket/match match-lambda)
+         (only-in threading ~>)
+         (only-in "../foreign.rkt" dtype requires-grad? shape tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "layer.rkt" layer?))
+         (only-in "layer.rkt" layer? named-parameters))
 
 (provide (contract-out [param-group? (-> any/c boolean?)]))
 
@@ -16,11 +19,13 @@
            groups-distinct?
            groups-keys-within?
            groups-setting-holds?
+           make-param-group
            param-group-settings
+           param-group-tensors
            params/c))
 
 (struct param-group (tensors settings)
-  #:constructor-name make-param-group ;; noqa
+  #:constructor-name make-param-group
   #:name param-group-struct) ;; noqa
 
 (define/contract-out hyperparameter-key/c
@@ -29,31 +34,51 @@
                        (or/c 'lr 'weight-decay 'momentum 'nesterov? 'beta1 'beta2 'eps
                              'alpha)))
 
-(define/contract-out (param-group params #:lr [lr #f] #:weight-decay [weight-decay #f]
-                                  #:momentum [momentum #f] #:nesterov? [nesterov? #f]
-                                  #:beta1 [beta1 #f] #:beta2 [beta2 #f]
-                                  #:eps [eps #f] #:alpha [alpha #f])
+(define/contract-out (param-group params
+                                  #:lr [lr the-unsupplied-arg]
+                                  #:weight-decay [weight-decay the-unsupplied-arg]
+                                  #:momentum [momentum the-unsupplied-arg]
+                                  #:nesterov? [nesterov? the-unsupplied-arg]
+                                  #:beta1 [beta1 the-unsupplied-arg]
+                                  #:beta2 [beta2 the-unsupplied-arg]
+                                  #:eps [eps the-unsupplied-arg]
+                                  #:alpha [alpha the-unsupplied-arg])
   (->i ([params (listof tensor?)])
        (#:lr [lr (>=/c 0)] #:weight-decay [weight-decay (>=/c 0)]
         #:momentum [momentum (>=/c 0)] #:nesterov? [nesterov? boolean?]
         #:beta1 [beta1 real?] #:beta2 [beta2 real?] #:eps [eps real?]
         #:alpha [alpha (>=/c 0)])
        [result param-group?])
-  (error 'unimplemented))
+  (~> `((lr . ,lr) (weight-decay . ,weight-decay) (momentum . ,momentum)
+        (nesterov? . ,nesterov?) (beta1 . ,beta1) (beta2 . ,beta2) (eps . ,eps) (alpha . ,alpha))
+      (filter-not (match-lambda [(cons _ v) (unsupplied-arg? v)]) _)
+      make-immutable-hasheq
+      (make-param-group params _)))
 
 (define/contract-out (param-group-params g)
   (-> param-group? (listof tensor?))
-  (error 'unimplemented))
+  (param-group-tensors g))
 
 (define/contract-out (param-group-hyperparameters g)
   (-> param-group? (hash/c symbol? (or/c real? boolean?) #:immutable #t))
-  (error 'unimplemented))
+  (param-group-settings g))
+
+(define (last-segment name)
+  (regexp-replace #rx"^.*[.]" name ""))
 
 (define/contract-out (weight-decay-param-groups model #:weight-decay [weight-decay #f]
                                                 #:skip [skip '("cls-token" "pos-embed")])
   (->* (layer?) (#:weight-decay (or/c #f (>=/c 0)) #:skip (listof string?))
        (list/c param-group? param-group?))
-  (error 'unimplemented))
+  (define exempt?
+    (match-lambda
+      [(cons name t) (or (~> t shape length (<= 1)) (member (last-segment name) skip))]))
+  (define-values (no-decay decay)
+    (~> (named-parameters model) (filter (match-lambda [(cons _ t) (requires-grad? t)]) _)
+        (partition exempt? _)))
+  (list (make-param-group (map cdr decay)
+                          (if weight-decay (hasheq 'weight-decay weight-decay) (hasheq)))
+        (make-param-group (map cdr no-decay) (hasheq 'weight-decay 0.0))))
 
 (define floating-tensor/c
   (rename-contract

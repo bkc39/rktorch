@@ -884,8 +884,7 @@ each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 The learning rate the next @racket[step!] will use; on a schedule, its
 optimizer's. Without @racket[#:group], @racket[learning-rate] reads group 0
 and @racket[set-learning-rate!] writes every group; a schedule scales each
-group from that group's initial rate. @racket[#:group] is not implemented
-yet.
+group from that group's initial rate.
 }
 
 A schedule wraps an optimizer and answers to @racket[step!] like one: the
@@ -1007,23 +1006,20 @@ A schedule, the number of times it has been stepped, the rate it last
 wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
 last @racket[step!], and does not call a @racket[lambda-lr] factor again;
-@racket[#:group] is @tt{get_last_lr()[group]}, not implemented yet.
+@racket[#:group] is @tt{get_last_lr()[group]}.
 }
 
 @subsection[#:tag "param-groups"]{Parameter groups}
 
-Not implemented yet: every optimizer accepts a list of parameter groups
-in place of a parameter list, but constructing one raises.
-
 @defproc[(param-group [params (listof tensor?)]
-                      [#:lr lr (>=/c 0) #f]
-                      [#:weight-decay weight-decay (>=/c 0) #f]
-                      [#:momentum momentum (>=/c 0) #f]
-                      [#:nesterov? nesterov? boolean? #f]
-                      [#:beta1 beta1 real? #f]
-                      [#:beta2 beta2 real? #f]
-                      [#:eps eps real? #f]
-                      [#:alpha alpha (>=/c 0) #f])
+                      [#:lr lr (>=/c 0) @#,elem{inherited}]
+                      [#:weight-decay weight-decay (>=/c 0) @#,elem{inherited}]
+                      [#:momentum momentum (>=/c 0) @#,elem{inherited}]
+                      [#:nesterov? nesterov? boolean? @#,elem{inherited}]
+                      [#:beta1 beta1 real? @#,elem{inherited}]
+                      [#:beta2 beta2 real? @#,elem{inherited}]
+                      [#:eps eps real? @#,elem{inherited}]
+                      [#:alpha alpha (>=/c 0) @#,elem{inherited}])
          param-group?]{
 An entry of @tt{param_groups}: @racket[params] with the hyperparameters that
 differ from the optimizer's keywords; an omitted keyword inherits. Every
@@ -1054,9 +1050,15 @@ decay 0 (biases, norms, the CLS token, position embeddings). A name matches
 both groups are returned even when one is empty. The first group sets
 @racket[#:weight-decay] only when it is given.
 
-@racketblock[
+@torch-examples[
+(manual-seed! 0)
+(define net (Sequential (Linear 4 8) (LayerNorm 8) (Linear 8 2)))
 (define opt (adamw (weight-decay-param-groups net #:weight-decay 0.05)))
+(param-group-count opt)
+(map (lambda (g) (length (param-group-params g))) (optimizer-param-groups opt))
 (param-group-ref opt 1 'weight-decay)
+(param-group-set! opt 0 'lr 2e-3)
+(list (learning-rate opt #:group 0) (learning-rate opt #:group 1))
 ]
 }
 
