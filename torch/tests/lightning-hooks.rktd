@@ -3556,4 +3556,17 @@
      (Callback.on_fit_end 2 10 #f 0.025)
      (on_fit_end 2 10 #f 0.025)
      (Callback.teardown 2 10 #f 0.025)
-     (teardown 2 10 #f 0.025))))))
+     (teardown 2 10 #f 0.025)))))
+        (stepping
+         .
+         (
+     #hasheq((train . 5) (accumulate . 1) (limit . 1.0) (max-epochs . 2) (estimated . 10))
+     #hasheq((train . 5) (accumulate . 2) (limit . 1.0) (max-epochs . 3) (estimated . 9))
+     #hasheq((train . 5) (accumulate . 3) (limit . 1.0) (max-epochs . 2) (max-steps . 3) (estimated . 3))
+     #hasheq((train . 6) (accumulate . 1) (limit . 0.5) (max-epochs . 2) (estimated . 6))
+     #hasheq((train . 6) (accumulate . 4) (limit . 4) (max-epochs . 1) (estimated . 1))
+     #hasheq((train . 3) (accumulate . 5) (limit . 1.0) (max-epochs . 2) (estimated . 2))
+     #hasheq((train . 4) (accumulate . 1) (limit . 1.0) (max-steps . 7) (estimated . 7))
+     #hasheq((train . 5) (accumulate . 2) (limit . 1.0) (fast-dev-run . 3) (estimated . 2))
+     #hasheq((train . 2) (accumulate . 1) (limit . 1.0) (fast-dev-run . 5) (estimated . 2))
+     #hasheq((train . 4) (accumulate . 1) (limit . 1.0) (fast-dev-run . #t) (estimated . 1)))))

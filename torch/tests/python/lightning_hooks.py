@@ -4,7 +4,9 @@ Records every hook a LightningModule and a Callback can override, in the order
 Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383)
 and for fits that skip a window by a None loss or an optimizer_step that does
 not step (#446), dumps _FxValidator.functions, and records the step each
-logger row is labelled with in fits that skip a window (#445). Writes
+logger row is labelled with in fits that skip a window (#445), and records
+trainer.estimated_stepping_batches as configure_optimizers reads it for a
+table of fit options (G2-L11 of the T2 spec, #385). Writes
 torch/tests/lightning-hooks.rktd, or the path given as the first argument;
 lightning-hooks-parity-test.rkt regenerates it and compares.
 
@@ -290,6 +292,40 @@ LOGGED = {
 }
 
 
+class Stepping(Base):
+    def configure_optimizers(self):
+        self.scenario.events.append(self.trainer.estimated_stepping_batches)
+        return torch.optim.SGD(self.parameters(), lr=0.1)
+
+
+STEPPING = [
+    {"train": 5, "accumulate": 1, "limit": 1.0, "max-epochs": 2},
+    {"train": 5, "accumulate": 2, "limit": 1.0, "max-epochs": 3},
+    {"train": 5, "accumulate": 3, "limit": 1.0, "max-epochs": 2,
+     "max-steps": 3},
+    {"train": 6, "accumulate": 1, "limit": 0.5, "max-epochs": 2},
+    {"train": 6, "accumulate": 4, "limit": 4, "max-epochs": 1},
+    {"train": 3, "accumulate": 5, "limit": 1.0, "max-epochs": 2},
+    {"train": 4, "accumulate": 1, "limit": 1.0, "max-steps": 7},
+    {"train": 5, "accumulate": 2, "limit": 1.0, "fast-dev-run": 3},
+    {"train": 2, "accumulate": 1, "limit": 1.0, "fast-dev-run": 5},
+    {"train": 4, "accumulate": 1, "limit": 1.0, "fast-dev-run": True},
+]
+
+
+def estimated(row):
+    torch.manual_seed(0)
+    scenario = Scenario()
+    t = trainer([], max_epochs=row.get("max-epochs"),
+                max_steps=row.get("max-steps", -1),
+                accumulate_grad_batches=row["accumulate"],
+                limit_train_batches=row["limit"],
+                fast_dev_run=row.get("fast-dev-run", False))
+    t.fit(Stepping(scenario), loader(2 * row["train"]))
+    [steps] = scenario.events
+    return {**row, "estimated": steps}
+
+
 def rktd(v):
     if v is None or v is False:
         return "#f"
@@ -315,6 +351,15 @@ def permissions():
     return "\n".join(out)
 
 
+def stepping_text():
+    rows = []
+    for row in STEPPING:
+        fields = " ".join("(%s . %s)" % (k, rktd(v))
+                          for k, v in estimated(row).items())
+        rows.append("     #hasheq(" + fields + ")")
+    return "\n".join(rows)
+
+
 def scenario_text(name, events):
     rows = "\n".join("     " + rktd(e) for e in events)
     return "   (%s\n    .\n    (\n%s))" % (name, rows)
@@ -330,9 +375,10 @@ def main():
             "        (torch . %s)\n"
             "        (log-permissions\n         .\n         #hasheq(\n%s))\n"
             "        (logged-steps\n         .\n         #hasheq(\n%s))\n"
-            "        (scenarios\n         .\n         #hasheq(\n%s)))\n") % (
+            "        (scenarios\n         .\n         #hasheq(\n%s))\n"
+            "        (stepping\n         .\n         (\n%s)))\n") % (
         rktd(lightning.__version__), rktd(torch.__version__.split("+")[0]),
-        permissions(), rows, scenarios)
+        permissions(), rows, scenarios, stepping_text())
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w") as f:
         f.write(text)
