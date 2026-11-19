@@ -19,3 +19,6 @@ google/vit-base-patch16-224-in21k, at the revisions it records. To
 regenerate it:
 
     python3 scripts/record-vit-keys.py [OUT]
+
+fashion-mnist/ holds a real subset of Fashion-MNIST under Zalando's MIT
+license; fashion-mnist/NOTICE records its source and carries the license.

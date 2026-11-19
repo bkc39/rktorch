@@ -7,7 +7,9 @@
 
 (provide tr-set-autocast-enabled/raw
          tr-is-autocast-enabled/raw
-         tr-autocast-dtype/raw)
+         tr-autocast-dtype/raw
+         tr-set-autocast-cache-enabled/raw
+         tr-is-autocast-cache-enabled/raw)
 
 (define-torch tr-set-autocast-enabled/raw
   (_fun (type : _tr-device-type) (dtype : _tr-dtype) (enabled? : _bool) -> _int)
@@ -28,3 +30,13 @@
         -> (rc : _int)
         -> (values rc (dtype-code->symbol out)))
   #:c-id tr_autocast_dtype)
+
+(define-torch tr-set-autocast-cache-enabled/raw
+  (_fun (enabled? : _bool) -> _int)
+  #:c-id tr_set_autocast_cache_enabled)
+
+(define-torch tr-is-autocast-cache-enabled/raw
+  (_fun (out : (_ptr o _int))
+        -> (rc : _int)
+        -> (values rc (not (zero? out))))
+  #:c-id tr_is_autocast_cache_enabled)

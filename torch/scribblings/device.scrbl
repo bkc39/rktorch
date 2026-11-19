@@ -109,12 +109,15 @@ choice for inference and storage.
   (step! opt))
 ]
 
-@defform[(with-autocast maybe-device maybe-dtype body ...+)
+@defform[(with-autocast maybe-device maybe-dtype maybe-cache body ...+)
          #:grammar [(maybe-device (code:line) (code:line #:device device))
-                    (maybe-dtype (code:line) (code:line #:dtype dtype))]]{
+                    (maybe-dtype (code:line) (code:line #:dtype dtype))
+                    (maybe-cache (code:line) (code:line #:cache-enabled? cache?))]]{
 Runs the body with autocast on for @racket[device], which is a device type
 or a @racket[device?] value and defaults to the default device, in
-@racket[dtype], @racket['bfloat16] unless given @racket['float16]. Leaving
+@racket[dtype]. Without @racket[#:dtype] it is @racket['bfloat16], or
+@racket['float16] on a CUDA device that @racket[cuda-bfloat16-supported?]
+rejects; torch's default on CUDA is @racket['float16] on every device. Leaving
 the body puts back whatever was there before, so the form nests. The state
 is kept per device type. A thread made with @racket[#:pool 'own] has its
 own. Coroutine threads share one, so while one of them is inside the form,
@@ -123,14 +126,26 @@ the extent. Threads of a shared parallel thread pool share that of the pool
 thread running them. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
+
+While @racket[cache?] is true, each float32 leaf weight that requires grad is
+cast once and the cast reused for the rest of the extent, so a weight updated
+in place inside the body, by @racket[step!] say, reaches later ops at its old
+value; pass @racket[#f] to cast it afresh each time. It defaults to the
+current flag, as torch's @tt{cache_enabled=None}: @racket[#t] outside every
+extent, and an enclosing form's @racket[#f] inside one. The flag is the
+thread's for every device type, and leaving the body restores it.
 }
 
 @defproc[(call-with-autocast [thunk (-> any)]
                              [#:device device (or/c 'cpu 'cuda 'mps device?)
                               (default-device)]
-                             [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16])
+                             [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16]
+                             [#:cache-enabled? cache? boolean?
+                              (autocast-cache-enabled?)])
          any]{
-The procedure form of @racket[with-autocast].
+The procedure form of @racket[with-autocast], with its default dtype: the
+@racket['bfloat16] shown becomes @racket['float16] on a CUDA device
+@racket[cuda-bfloat16-supported?] rejects.
 }
 
 @defproc[(autocast-enabled? [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
@@ -138,6 +153,12 @@ The procedure form of @racket[with-autocast].
 Whether autocast is on for @racket[device] in the calling thread's state,
 which a thread made with @racket[#:pool 'own] keeps for itself and other
 threads share as @racket[with-autocast] describes.
+}
+
+@defproc[(autocast-cache-enabled?) boolean?]{
+Whether autocast reuses its weight casts within an extent in the calling
+thread, as @racket[with-autocast]'s @racket[#:cache-enabled?] sets it;
+@racket[#t] outside every extent.
 }
 
 @defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
@@ -190,7 +211,7 @@ Equivalent to @racket[(to t dtype)].
 
 @defmodule[torch/nn #:link-target? #f]
 
-Not implemented yet. A gradient scaler is @tt{torch.amp.GradScaler}: under
+A gradient scaler is @tt{torch.amp.GradScaler}: under
 @racket['float16] autocast, small gradients underflow, so the loss is
 multiplied by a large power of two before @racket[backward!] and the
 gradients are divided by it again before the step. Unscale before clipping,
@@ -199,15 +220,24 @@ NaN is skipped and the scale backs off; after @racket[growth-interval]
 finite steps in a row it grows. A fused @racket[sgd], @racket[adam] or
 @racket[adamw] reads the scale and the inf flag on the device, so a scaled
 step makes no host read; any other optimizer reads the flag once per step.
+Scaling by a power of two commutes with rounding, so the unscaled gradients
+are the unscaled run's bits.
 
-@racketblock[
+@torch-examples[
+(define net (Linear 3 1))
+(define twin (layer-copy net))
+(define opt (sgd (parameters net) #:lr 0.1))
+(define x (randn 4 3))
 (define scaler (grad-scaler #:device 'cpu))
-(zero-grads! opt)
-(backward! (grad-scaler-scale-loss scaler loss))
+(backward! (grad-scaler-scale-loss scaler (sum (net x))))
 (grad-scaler-unscale! scaler opt)
+(backward! (sum (twin x)))
+(equal? (map tensor->list (map grad (parameters net)))
+        (map tensor->list (map grad (parameters twin))))
 (clip-grad-norm! (parameters net) 1.0)
 (grad-scaler-step! scaler opt)
 (grad-scaler-update! scaler)
+(grad-scaler-scale scaler)
 ]
 
 @defproc[(grad-scaler [#:device device (or/c 'cpu 'cuda 'mps device?) 'cuda]
@@ -218,7 +248,8 @@ step makes no host read; any other optimizer reads the flag once per step.
                       [#:enabled? enabled? boolean? #t])
          grad-scaler?]{
 A scaler for @racket[device]'s gradients. The scale is created on the device
-of the first loss it scales. A @racket['cuda] scaler without CUDA logs a
+of the first loss it scales. A fused optimizer's step under the scaler assumes
+its parameters are on that device. A @racket['cuda] scaler without CUDA logs a
 warning to @racket['rktorch-amp] and is disabled; a disabled scaler answers
 its loss as it is and steps as @racket[step!] does.
 }
@@ -231,12 +262,13 @@ disabled), and whether it scales.
 }
 
 @defproc[(grad-scaler-scale-loss [s grad-scaler?] [loss tensor?]) tensor?]{
-@racket[loss] times the scale, @tt{scaler.scale(loss)}.
+@racket[loss] times the scale, on @racket[loss]'s device, @tt{scaler.scale(loss)}.
 }
 
 @defproc[(grad-scaler-unscale! [s grad-scaler?] [opt optimizer?]) void?]{
 Divides the gradients of @racket[opt]'s parameters by the scale in place and
-records whether any is non-finite, @tt{unscale_}. Calling it twice before
+records whether any is non-finite, @tt{unscale_}. It raises on
+@racket['float16] gradients, as torch does. Calling it twice before
 @racket[grad-scaler-update!], or after @racket[grad-scaler-step!], is a
 contract violation, as is calling it before any loss was scaled.
 }
@@ -251,8 +283,9 @@ so a skipped step is not reported.
          void?]{
 Backs the scale off after a skipped step and grows it after
 @racket[growth-interval] finite ones, or sets it to @racket[new-scale],
-@tt{scaler.update()}. An update with no unscale or step since the last is a
-contract violation.
+@tt{scaler.update()}. An update before any loss was scaled is a contract
+violation, as is one with no @racket[new-scale] and no unscale or step since
+the last.
 }
 
 @section[#:tag "determinism"]{Determinism}
@@ -390,6 +423,14 @@ only on CUDA asks this of the batch's device.
 Whether libtorch sees a CUDA device, and a Metal device, as Python's
 @tt{torch.cuda.is_available()} and @tt{torch.backends.mps.is_available()}.
 Neither allocates, and a virtual machine may advertise MPS it can't use.}
+
+@defproc[(cuda-bfloat16-supported? [index exact-nonnegative-integer?
+                                           @#,elem{the default device's CUDA index}])
+         boolean?]{
+@tt{torch.cuda.is_bf16_supported(including_emulation=False)}: compute
+capability 8.0 or above, for the CUDA device @racket[index], which defaults to
+the default device's index when that is CUDA and 0 otherwise. @racket[#f]
+without CUDA or for an index past the device count.}
 
 @defproc[(cuda-if-available) device?]{
 The first CUDA device when one is present, else the CPU;

@@ -10,6 +10,12 @@ its loss divided by the accumulation, the window's last batch (or the
 epoch's) steps, and the scheduler steps after the epoch's last optimizer step.
 
 Prints the undivided loss of every batch, and the parameters after training.
+
+RKTORCH_TWIN_CONFIG=clip or bf16 runs trainer-clip-test.rkt's twin instead
+(G3-L14 of the T2 spec, #385): a Linear(8, 4) on 32 random rows in batches of
+8, SGD with momentum, two epochs, no accumulation, with clip_grad_norm_ at 1.0
+between backward and step (clip), or the forward and loss under
+torch.autocast("cpu", torch.bfloat16) (bf16).
 """
 
 import json
@@ -64,30 +70,57 @@ def convnet():
                          nn.Linear(800, 128), nn.ReLU(), nn.Linear(128, 10))
 
 
-torch.manual_seed(0)
+CONFIG = os.environ.get("RKTORCH_TWIN_CONFIG")
 
-with torch.device(DEVICE):
-    net = convnet()
-xs, ys = load_fixture()
-xs, ys = xs.to(DEVICE), ys.to(DEVICE)
-batches = [(xs[i:i + BATCH], ys[i:i + BATCH]) for i in range(0, len(xs), BATCH)]
-opt = torch.optim.SGD(net.parameters(), lr=0.05, momentum=0.9)
-sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
 
-losses = []
-last = len(batches) - 1
-for _ in range(EPOCHS):
-    for i, (x, y) in enumerate(batches):
-        loss = torch.nn.functional.cross_entropy(net(x), y)
-        if i % ACCUMULATE == 0:
+def mnist_run():
+    torch.manual_seed(0)
+    with torch.device(DEVICE):
+        net = convnet()
+    xs, ys = load_fixture()
+    xs, ys = xs.to(DEVICE), ys.to(DEVICE)
+    batches = [(xs[i:i + BATCH], ys[i:i + BATCH])
+               for i in range(0, len(xs), BATCH)]
+    opt = torch.optim.SGD(net.parameters(), lr=0.05, momentum=0.9)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
+    losses = []
+    last = len(batches) - 1
+    for _ in range(EPOCHS):
+        for i, (x, y) in enumerate(batches):
+            loss = torch.nn.functional.cross_entropy(net(x), y)
+            if i % ACCUMULATE == 0:
+                opt.zero_grad(set_to_none=True)
+            (loss / ACCUMULATE).backward()
+            if (i + 1) % ACCUMULATE == 0 or i == last:
+                opt.step()
+            if i == last:
+                sched.step()
+            losses.append(loss.item())
+    return net, losses
+
+
+def config_run(config):
+    torch.manual_seed(0)
+    net = nn.Linear(8, 4)
+    xs, ys = torch.randn(32, 8), torch.randn(32, 4)
+    opt = torch.optim.SGD(net.parameters(), lr=0.05, momentum=0.9)
+    losses = []
+    for _ in range(EPOCHS):
+        for i in range(0, 32, 8):
+            x, y = xs[i:i + 8], ys[i:i + 8]
+            with torch.autocast("cpu", dtype=torch.bfloat16,
+                                enabled=config == "bf16"):
+                loss = torch.nn.functional.mse_loss(net(x), y)
             opt.zero_grad(set_to_none=True)
-        (loss / ACCUMULATE).backward()
-        if (i + 1) % ACCUMULATE == 0 or i == last:
+            loss.backward()
+            if config == "clip":
+                torch.nn.utils.clip_grad_norm_(net.parameters(), 1.0)
             opt.step()
-        if i == last:
-            sched.step()
-        losses.append(loss.item())
+            losses.append(loss.item())
+    return net, losses
 
+
+net, losses = config_run(CONFIG) if CONFIG else mnist_run()
 params = torch.cat([p.detach().flatten() for p in net.parameters()])
 
 print(json.dumps({

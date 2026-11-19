@@ -2,8 +2,9 @@
 
 (require (only-in racket/flonum flexpt)
          (only-in racket/function negate)
+         (only-in racket/match match match-define)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" copy! device zeros zeros-like)
+         (only-in "../foreign.rkt" copy! device to zeros zeros-like)
          (prefix-in g: (only-in "../generated.rkt"
                                 foreach-add-list! foreach-add-scalar!
                                 foreach-addcdiv-scalar!
@@ -15,7 +16,9 @@
 
 (provide adam-foreach!
          adam-fused!
+         amp-scaling-at
          bias-correction
+         current-amp-scaling
          rmsprop-foreach!
          sgd-foreach!
          sgd-fused!
@@ -47,25 +50,48 @@
 (define (bias-correction beta t)
   (- 1.0 (flexpt beta (exact->inexact t))))
 
+(define current-amp-scaling (make-parameter #f))
+
+(struct amp-scaling (home copies))
+
+(define (amp-scaling-at home grad-scale found-inf)
+  (amp-scaling home (make-hash (list (cons home (cons grad-scale found-inf))))))
+
+(define (moved-to scalars dev)
+  (match-define (cons grad-scale found-inf) scalars)
+  (cons (and grad-scale (to grad-scale dev)) (to found-inf dev)))
+
+(define (amp-arguments dev)
+  (match (current-amp-scaling)
+    [#f (values #f #f)]
+    [(amp-scaling home copies)
+     (match-define (cons grad-scale found-inf)
+       (hash-ref! copies dev (lambda () (moved-to (hash-ref copies home) dev))))
+     (values grad-scale found-inf)]))
+
 (define (step-tensor p)
   (zeros #:device (device p) #:dtype 'float32))
 
 (define (foreach-copy! dsts srcs #:non-blocking? [non-blocking? #f])
   (g:foreach-copy! dsts srcs non-blocking?))
 
-(define (fused-sgd! ps gs bufs #:lr lr #:momentum momentum
+(define (fused-sgd! ps gs bufs #:device dev #:lr lr #:momentum momentum
                     #:weight-decay weight-decay #:nesterov? nesterov?
                     #:first-step? first-step? #:dampening [dampening 0.0]
                     #:maximize? [maximize? #f])
+  (define-values (grad-scale found-inf) (amp-arguments dev))
   (g:fused-sgd! ps gs bufs weight-decay momentum lr dampening nesterov?
-                maximize? first-step? #f #f))
+                maximize? first-step? grad-scale found-inf))
 
-(define (fused-adam! ps gs ms vs steps #:decoupled? decoupled? #:lr lr
+(define (fused-adam! ps gs ms vs steps #:device dev #:decoupled? decoupled? #:lr lr
                      #:beta1 beta1 #:beta2 beta2 #:weight-decay weight-decay
                      #:eps eps #:amsgrad? [amsgrad? #f] #:maximize? [maximize? #f])
+  (define-values (grad-scale found-inf) (amp-arguments dev))
   ((if decoupled? g:fused-adamw! g:fused-adam!)
    ps gs ms vs '() steps lr beta1 beta2 weight-decay eps amsgrad? maximize?
-   #f #f))
+   grad-scale found-inf)
+  (when found-inf
+    (g:foreach-add-list! steps (map (lambda (_) found-inf) steps) -1.0)))
 
 (define (pairs-where keep? ps xs)
   (for/lists (qs ys) ([p (in-list ps)] [x (in-list xs)] #:when (keep? p))
@@ -105,12 +131,12 @@
       [else (momentum-buffers! state ps ds momentum)]))
   (g:foreach-add-list! ps steps (- lr)))
 
-(define (sgd-fused! state ps gs #:lr lr #:momentum momentum
-                    #:nesterov? nesterov? #:weight-decay weight-decay)
+(define ((sgd-fused! dev) state ps gs #:lr lr #:momentum momentum
+                          #:nesterov? nesterov? #:weight-decay weight-decay)
   (define (fused! qs hs #:first-step? first-step?)
     (define bufs
       (if (zero? momentum) '() (slots! state 'momentum-buffer qs)))
-    (fused-sgd! qs hs bufs #:lr lr #:momentum momentum
+    (fused-sgd! qs hs bufs #:device dev #:lr lr #:momentum momentum
                 #:weight-decay weight-decay #:nesterov? nesterov?
                 #:first-step? first-step?))
   (define (held? p)
@@ -149,12 +175,12 @@
    ps ms denoms
    (map (lambda (t) (* (/ lr (bias-correction beta1 t)) -1.0)) steps)))
 
-(define (adam-fused! state ps gs #:lr lr #:beta1 beta1 #:beta2 beta2
-                     #:eps eps #:weight-decay weight-decay
-                     #:decoupled? decoupled?)
+(define ((adam-fused! dev) state ps gs #:lr lr #:beta1 beta1 #:beta2 beta2
+                           #:eps eps #:weight-decay weight-decay
+                           #:decoupled? decoupled?)
   (define steps (g:foreach-add-scalar! (slots! state 'step ps step-tensor) 1.0))
   (fused-adam! ps gs (slots! state 'exp-avg ps) (slots! state 'exp-avg-sq ps)
-               steps #:decoupled? decoupled? #:lr lr #:beta1 beta1
+               steps #:device dev #:decoupled? decoupled? #:lr lr #:beta1 beta1
                #:beta2 beta2 #:weight-decay weight-decay #:eps eps))
 
 (define (rmsprop-foreach! state ps gs #:lr lr #:alpha alpha #:eps eps

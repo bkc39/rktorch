@@ -5,21 +5,20 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * backward! grad item manual-seed! randn reshape sum tensor tensor->list)
+                    * backward! grad item manual-seed! randn sum tensor)
            (only-in "../nn.rkt"
                     Linear Parameter Sequential adam grad-scaler grad-scaler-enabled?
                     grad-scaler-scale grad-scaler-scale-loss grad-scaler-step!
                     grad-scaler-unscale! grad-scaler-update! layer-copy parameters sgd step!
                     zero-grads!)
+           (only-in (submod "../nn/grad-scaler.rkt" private) host-read-hook)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/flat.rkt" flat)
            (only-in "private/op-calls.rkt" crossings-of)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "grad-scaler-test"))
-
-  (define (flat t)
-    (~> t (reshape -1) tensor->list))
 
   (define (cpu-scaler)
     (grad-scaler #:device 'cpu #:growth-interval 3))
@@ -138,10 +137,23 @@
          (backward! loss)
          (crossings-of (lambda () (step! opt)))])))
 
-  (bounded-test "G3-L7: a fused scaled step costs a fused step, a foreach one a constant more"
-    (check-equal? (step-crossings 2 #:fused? #t #:scaled? #t)
-                  (step-crossings 2 #:fused? #t #:scaled? #f))
+  (bounded-test "G3-L7: a scaled step costs a constant more, and a fused one reads no host"
+    (define (fused-extra n)
+      (- (step-crossings n #:fused? #t #:scaled? #t) (step-crossings n #:fused? #t #:scaled? #f)))
+    (check-equal? (fused-extra 2) (fused-extra 1))
+    (check-equal? (fused-extra 4) (fused-extra 1))
     (define (extra n)
       (- (step-crossings n #:fused? #f #:scaled? #t) (step-crossings n #:fused? #f #:scaled? #f)))
     (check-equal? (extra 1) (extra 4))
-    (check-true (positive? (extra 1)))))
+    (check-true (positive? (extra 1))))
+
+  (define (host-reads n #:fused? fused?)
+    (define reads 0)
+    (parameterize ([host-read-hook (lambda () (set! reads (add1 reads)))])
+      (step-crossings n #:fused? fused? #:scaled? #t))
+    reads)
+
+  (bounded-test "G3-L7: four scaled steps read the host once each, and fused ones never"
+    (check-equal? (host-reads 1 #:fused? #f) 4)
+    (check-equal? (host-reads 4 #:fused? #f) 4)
+    (check-equal? (host-reads 2 #:fused? #t) 0)))

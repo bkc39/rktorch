@@ -67,6 +67,8 @@ void torchrkt_c_api_compile_check(void) {
       tr_set_autocast_enabled;
   int (*is_autocast_enabled)(tr_device_type, int*) = tr_is_autocast_enabled;
   int (*autocast_dtype)(tr_device_type, tr_dtype*) = tr_autocast_dtype;
+  int (*set_autocast_cache_enabled)(int) = tr_set_autocast_cache_enabled;
+  int (*is_autocast_cache_enabled)(int*) = tr_is_autocast_cache_enabled;
   int (*tensor_dtype)(const tr_tensor*, tr_dtype*) = tr_tensor_dtype;
   int (*copy_data_i64)(const tr_tensor*, uint64_t, int64_t*, uint64_t*) =
       tr_tensor_copy_data_i64;
@@ -295,6 +297,7 @@ void torchrkt_c_api_compile_check(void) {
                               double, int64_t) = tr_gen__amp_update_scale_;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
+  int (*cuda_bf16)(int64_t) = tr_cuda_bf16_supported;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
       tr_cuda_memory_stats;
   int (*cuda_mem_info)(int64_t, int64_t*, int64_t*) = tr_cuda_mem_get_info;
@@ -339,6 +342,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)set_autocast_enabled;
   (void)is_autocast_enabled;
   (void)autocast_dtype;
+  (void)set_autocast_cache_enabled;
+  (void)is_autocast_cache_enabled;
   (void)hann_window;
   (void)stft;
   (void)audio_info;
@@ -461,6 +466,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_amp_update_scale;
   (void)cuda_available;
   (void)cuda_count;
+  (void)cuda_bf16;
   (void)cuda_stats;
   (void)cuda_mem_info;
   (void)cuda_reset_peak;

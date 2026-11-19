@@ -4,7 +4,8 @@
                      ;; whole-module require on purpose
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* ->i >=/c any/c contract-out listof or/c unsupplied-arg?)
+                  -> ->* ->i >=/c any/c contract-out flat-named-contract listof or/c
+                  unsupplied-arg?)
          (only-in racket/flonum flexpt)
          (only-in racket/generic define-generics)
          (only-in racket/list group-by)
@@ -28,8 +29,8 @@
                   floating-params/c groups-distinct? groups-keys-within? groups-setting-holds?
                   param-group-settings param-group-tensors params/c)
          (only-in "optim-foreach.rkt"
-                  adam-foreach! adam-fused! bias-correction rmsprop-foreach!
-                  sgd-foreach! sgd-fused! slot! slot-ref step-count!))
+                  adam-foreach! adam-fused! amp-scaling-at bias-correction current-amp-scaling
+                  rmsprop-foreach! sgd-foreach! sgd-fused! slot! slot-ref step-count!))
 
 (provide gen:optimizer
          optimizer?
@@ -39,6 +40,7 @@
          optimizer-root
          group-index?
          has-hyperparameter?
+         lr-optimizer/c
          hyperparameter-value/c
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
@@ -49,18 +51,49 @@
   (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
 (module+ private
-  (provide optimizer-state))
+  (provide prop:wrapped-optimizer
+           call-with-gradient-buckets
+           (struct-out gradient-bucket)
+           optimizer-fused?
+           optimizer-state
+           scaled-step!))
 
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
-  (optimizer-store optimizer)
-  (optimizer-root optimizer)
-  #:fallbacks [(define (optimizer-parameters opt) (store-params (tracked-store opt)))
-               (define (optimizer-store opt) (tracked-store opt))
-               (define (optimizer-root opt) opt)])
+  #:requires (optimizer-step! optimizer-parameters))
+
+(define-values (prop:wrapped-optimizer wraps-optimizer? wrapped-optimizer-ref)
+  (make-struct-type-property 'wrapped-optimizer))
+
+(define (optimizer-root opt)
+  (cond
+    [(wraps-optimizer? opt) (optimizer-root ((wrapped-optimizer-ref opt) opt))]
+    [else opt]))
 
 (struct tracked (state keys [generation #:mutable] store))
+
+(define (optimizer-store opt)
+  (define root (optimizer-root opt))
+  (cond
+    [(tracked? root) (tracked-store root)]
+    [else (group-store (optimizer-parameters root) (hasheq))]))
+
+(define (tracked-parameters opt)
+  (store-params (tracked-store opt)))
+
+(begin-for-syntax
+  (define-splicing-syntax-class struct-names
+    (pattern (~seq #:constructor-name constructor:id #:name name:id))))
+
+(define-syntax-parse-rule (define-tracked-optimizer (name:id field:id ...) step:id
+                            names:struct-names)
+  (struct name tracked (field ...)
+    #:constructor-name names.constructor
+    #:name names.name
+    #:methods gen:optimizer
+    [(define (optimizer-step! opt) (step opt))
+     (define (optimizer-parameters opt) (tracked-parameters opt))]))
 
 (define (optimizer-state opt)
   (for*/list ([table (in-hash-values (tracked-state opt))]
@@ -97,11 +130,42 @@
     (match-define (cons q _) qg)
     (hash-ref! keys q (lambda () (placement q))))
   (for ([bucket (in-list (group-by key-of (map cons qs gs)))])
+    (match-define (cons (app key-of (cons dev _)) _) bucket)
     (define-values (bqs bgs)
       (for/lists (bqs bgs) ([qg (in-list bucket)])
         (match-define (cons q g) qg)
         (values q g)))
-    (update! bqs bgs)))
+    (update! dev bqs bgs)))
+
+(struct gradient-bucket (device dtype grads))
+
+(define (placement-cache! root)
+  (match root
+    [(? tracked?) (follow-moves! root) (tracked-keys root)]
+    [_ (make-hasheq)]))
+
+(define (call-with-gradient-buckets opt proc)
+  (with-no-grad
+    (define keys (placement-cache! (optimizer-root opt)))
+    (define (key-of qg)
+      (match-define (cons q _) qg)
+      (hash-ref! keys q (lambda () (placement q))))
+    (define (bucket-of qgs)
+      (match-define (list (and head (cons _ g)) (cons _ more) ...) qgs)
+      (match-define (cons dev dt) (key-of head))
+      (gradient-bucket dev dt (cons g more)))
+    (with-gradients ([qs gs] (optimizer-parameters opt))
+      (proc (map bucket-of (group-by key-of (map cons qs gs)))))))
+
+(define (optimizer-fused? opt)
+  (match (optimizer-root opt)
+    [(? sgd? o) (eq? (sgd-mode o) 'fused)]
+    [(? adam? o) (eq? (adam-mode o) 'fused)]
+    [_ #f]))
+
+(define (scaled-step! opt [grad-scale #f] [found-inf #f] [home #f])
+  (parameterize ([current-amp-scaling (and found-inf (amp-scaling-at home grad-scale found-inf))])
+    (step! opt)))
 
 (define (update-mode foreach? fused?)
   (cond
@@ -109,13 +173,13 @@
     [foreach? 'foreach]
     [else 'loop]))
 
-(define (step-by! opt mode #:loop loop! #:foreach foreach! #:fused [fused! #f])
+(define (step-by! opt mode #:loop loop! #:foreach foreach! #:fused [fused-on #f])
   (define st (tracked-store opt))
-  (define (by-group! update!)
+  (define (by-group! update-on)
     (with-gradients ([qs gs] (store-params st))
       (for ([part (in-list (store-partition st qs gs))])
         (match-define (list h gqs ggs) part)
-        (update-buckets! opt gqs ggs (lambda (bqs bgs) (update! h bqs bgs))))))
+        (update-buckets! opt gqs ggs (lambda (dev bqs bgs) ((update-on dev) h bqs bgs))))))
   (with-no-grad
     (follow-moves! opt)
     (match mode
@@ -125,8 +189,8 @@
               [p (in-list (param-group-tensors group))])
          (with-gradient (g p)
            (loop! h p g)))]
-      ['foreach (by-group! foreach!)]
-      ['fused (by-group! fused!)])))
+      ['foreach (by-group! (lambda (_) foreach!))]
+      ['fused (by-group! fused-on)])))
 
 (define (unit-scalar)
   (full 1.0 #:device (cpu-device) #:dtype 'float32))
@@ -154,6 +218,10 @@
 
 (define (has-hyperparameter? opt key)
   (and (memq key (hyperparameter-keys opt)) #t))
+
+(define lr-optimizer/c
+  (flat-named-contract 'lr-optimizer/c
+                       (lambda (v) (and (optimizer? v) (has-hyperparameter? v 'lr)))))
 
 (define (group-index? opt i)
   (< i (param-group-count opt)))
@@ -204,11 +272,9 @@
     (define mode (update-mode foreach? fused?))
     body ...))
 
-(struct sgd tracked (mode)
+(define-tracked-optimizer (sgd mode) sgd-do-step!
   #:constructor-name make-sgd
-  #:name sgd-optimizer
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (sgd-do-step! opt))])
+  #:name sgd-optimizer)
 
 (define-fusable-optimizer (sgd params
                                [#:lr lr (>=/c 0)]
@@ -257,13 +323,11 @@
   (step-by! opt (sgd-mode opt)
             #:loop (with-hyperparameters sgd-loop!)
             #:foreach (with-hyperparameters sgd-foreach!)
-            #:fused (with-hyperparameters sgd-fused!)))
+            #:fused (lambda (dev) (with-hyperparameters (sgd-fused! dev)))))
 
-(struct adam tracked (mode one)
+(define-tracked-optimizer (adam mode one) adam-do-step!
   #:constructor-name make-adam
-  #:name adam-optimizer
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (adam-do-step! opt))])
+  #:name adam-optimizer)
 
 (struct adamw adam-optimizer ()
   #:constructor-name make-adamw
@@ -319,13 +383,11 @@
   (step-by! opt (adam-mode opt)
             #:loop (with-hyperparameters (adam-loop! (adam-one opt)))
             #:foreach (with-hyperparameters adam-foreach!)
-            #:fused (with-hyperparameters adam-fused!)))
+            #:fused (lambda (dev) (with-hyperparameters (adam-fused! dev)))))
 
-(struct rmsprop tracked (mode one)
+(define-tracked-optimizer (rmsprop mode one) rmsprop-do-step!
   #:constructor-name make-rmsprop
-  #:name rmsprop-optimizer ;; noqa
-  #:methods gen:optimizer
-  [(define (optimizer-step! opt) (rmsprop-do-step! opt))])
+  #:name rmsprop-optimizer) ;; noqa
 
 (define/contract-out (rmsprop params ;; noqa
                               #:lr [lr 1e-2]
@@ -418,14 +480,15 @@
   (store-set! (optimizer-store opt) i key v))
 
 (define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
-  (->i ([opt optimizer?]) (#:group [group exact-nonnegative-integer?])
+  (->i ([opt lr-optimizer/c]) (#:group [group exact-nonnegative-integer?])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (or (unsupplied-arg? group) (group-index? opt group))
        [_ real?])
   (store-ref (optimizer-store opt) group 'lr))
 
 (define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
-  (->i ([opt optimizer?] [lr (>=/c 0)]) (#:group [group (or/c #f exact-nonnegative-integer?)])
+  (->i ([opt lr-optimizer/c] [lr (>=/c 0)])
+       (#:group [group (or/c #f exact-nonnegative-integer?)])
        #:pre/name (opt group) "the optimizer has no parameter group with this index"
        (match (supplied-or group)
          [#f #t]

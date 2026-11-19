@@ -128,6 +128,15 @@ TEST(TorchrktDevice, ResetPeakStatsFailsCleanlyWithoutCuda) {
   EXPECT_STRNE(tr_last_error(), "");
 }
 
+TEST(TorchrktDevice, Bf16ProbeAnswersZeroOutOfRange) {
+  EXPECT_EQ(tr_cuda_bf16_supported(-1), 0);
+  EXPECT_EQ(tr_cuda_bf16_supported(1 << 20), 0);
+  EXPECT_STREQ(tr_last_error(), "");
+  if (tr_cuda_is_available() == 0) {
+    EXPECT_EQ(tr_cuda_bf16_supported(0), 0);
+  }
+}
+
 TEST(TorchrktDevice, AllocatorSettingsRejectsNull) {
   EXPECT_EQ(tr_cuda_set_allocator_settings(nullptr), 1);
   EXPECT_STRNE(tr_last_error(), "");

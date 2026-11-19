@@ -9,6 +9,7 @@
                     exponential-lr lambda-lr learning-rate linear-lr param-group-ref
                     param-group-set! scheduler-rate scheduler-step-count sequential-lr
                     set-learning-rate! sgd step! step-lr)
+           (only-in "../foreign/raw/cas.rkt" cas-update!)
            (only-in (submod "../foreign/raw/cas.rkt" private) site-cas)
            (only-in "../foreign/raw/regions.rkt" with-cleanup)
            (only-in "private/blame.rkt" blames-caller?)
@@ -67,9 +68,10 @@
 
   (define (with-write-at-first-update write thunk)
     (define primitive (unbox site-cas))
+    (define me (current-thread))
     (define pending? (box #t))
     (define (racing site target old new)
-      (when (and (eq? site 'update) (unbox pending?))
+      (when (and (eq? site 'update) (eq? (current-thread) me) (unbox pending?))
         (set-box! pending? #f)
         (write))
       (primitive site target old new))
@@ -81,6 +83,22 @@
     (define s (exponential-lr opt #:gamma 0.5))
     (with-write-at-first-update (lambda () (set-learning-rate! opt 10.0)) (lambda () (step! s)))
     (check-not-false (memv (learning-rate opt) '(5.0 10.0)))
+    (check-equal? (scheduler-rate s) (learning-rate opt)))
+
+  (bounded-test "an update on another thread does not run the write meant for the step"
+    (define opt (fresh-opt 1.0))
+    (define s (exponential-lr opt #:gamma 0.5))
+    (define writes (box 0))
+    (define (write)
+      (set-box! writes (add1 (unbox writes)))
+      (set-learning-rate! opt 10.0))
+    (with-write-at-first-update
+     write
+     (lambda ()
+       (thread-wait (thread (lambda () (cas-update! (box 0) add1))))
+       (check-equal? (list (unbox writes) (learning-rate opt)) '(0 1.0))
+       (step! s)))
+    (check-equal? (list (unbox writes) (learning-rate opt)) '(1 5.0))
     (check-equal? (scheduler-rate s) (learning-rate opt)))
 
   (bounded-test "a lambda-lr factor that writes the optimizer runs once per group and step"
