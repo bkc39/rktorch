@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 import subprocess
@@ -8,6 +9,7 @@ import unittest
 from unittest import mock
 
 from common import GcClock, meta
+from loaders import WorkerThreads, gc_count, loader_cell, measured, spread_subset, train_cell
 from op_cost import sample, stack_inputs, thread_loop
 from pipelines import peak_rss_mb
 from threads import MIXES, PeakSampler, os_thread_count, peak_of, scaling_run
@@ -175,6 +177,58 @@ class Mixes(unittest.TestCase):
             self.assertGreater(run["mixes"], 0, name)
             self.assertAlmostEqual(run["ops_per_s"] * run["elapsed_s"] / run["mixes"], ops,
                                    places=9, msg=name)
+
+
+class SpreadSubset(unittest.TestCase):
+    def test_takes_every_strideth_item_as_the_racket_loader_does(self):
+        ds = list(range(10))
+        self.assertEqual(list(spread_subset(ds, 3)), [0, 3, 6])
+        self.assertEqual(list(spread_subset(ds, 5)), [0, 2, 4, 6, 8])
+        self.assertIs(spread_subset(ds, 10), ds)
+        self.assertIs(spread_subset(ds, 0), ds)
+
+
+class WorkerThreadCounts(unittest.TestCase):
+    def test_keeps_each_watched_workers_most_threads(self):
+        with tempfile.TemporaryDirectory() as root:
+            for pid, names in [("7", ["1"]), ("8", ["1", "2"])]:
+                os.mkdir(os.path.join(root, pid))
+                touch(os.path.join(root, pid), names)
+            sampler = WorkerThreads(interval=0.01, tasks=lambda pid: os.path.join(root, str(pid)))
+            sampler.watch([7, 8])
+            touch(os.path.join(root, "7"), ["2", "3"])
+            time.sleep(0.2)
+            os.remove(os.path.join(root, "7", "3"))
+            sampler.watch([9])
+            self.assertEqual(sorted(sampler.stop()), [2, 3])
+
+    def test_measured_counts_the_main_processs_collections(self):
+        before = gc_count()
+        _, stats = measured(lambda _workers: gc.collect())
+        self.assertGreater(gc_count(), before)
+        self.assertGreaterEqual(stats["gc_count"], 1)
+        self.assertEqual(stats["worker_threads"], [])
+
+
+class LoaderCells(unittest.TestCase):
+    def test_a_cell_keeps_its_workers_only_when_asked_and_counts_their_threads(self):
+        plain = loader_cell("cifar", 0, True, 0, 1, 16, "full")
+        self.assertEqual((plain["samples"], plain["persistent"]), (16, False))
+        kept = loader_cell("cifar", 1, True, 1, 1, 16, "full")
+        self.assertTrue(kept["persistent"])
+        self.assertGreater(kept["samples_per_s"], 0)
+        if os.path.isdir("/proc/self/task"):
+            self.assertEqual(len(kept["worker_threads"]), 1, kept)
+        fresh = loader_cell("cifar", 1, False, 0, 2, 16, "full")
+        self.assertFalse(fresh["persistent"])
+        if os.path.isdir("/proc/self/task"):
+            self.assertEqual(len(fresh["worker_threads"]), 2, "a new worker every epoch")
+
+    def test_a_training_cell_records_mains_steps_and_the_workers_ops(self):
+        run = train_cell(1, 0.1, 0)
+        self.assertGreater(run["main_steps_per_s"], 0)
+        self.assertGreater(run["ops_per_s"], 0)
+        self.assertEqual(run["intra_op_threads"], torch.get_num_threads())
 
 
 class Meta(unittest.TestCase):

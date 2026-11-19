@@ -28,7 +28,10 @@
          duration-run
          scaling-cells
          native-cells
+         outside-cores
+         parse-self-ticks
          places-cells
+         process-cpu-times
          run-cell)
 
 (define-runtime-path work-module "runtime-work.rkt")
@@ -233,19 +236,19 @@
 (define (first-line path)
   (and (file-exists? path) (call-with-input-file path read-line)))
 
-(define (parse-self-ticks text)
+(define (parse-self-ticks text #:children? [children? #f])
   (match (and (string? text) (regexp-match #px"^.*\\)\\s+(.*)$" text))
     [(list _ rest)
      (match (map string->number (string-split rest))
-       [(list _ _ _ _ _ _ _ _ _ _ _ utime stime _ ...)
-        #:when (and (exact-nonnegative-integer? utime) (exact-nonnegative-integer? stime))
-        (+ utime stime)]
+       [(list _ _ _ _ _ _ _ _ _ _ _ utime stime cutime cstime _ ...)
+        #:when (andmap exact-nonnegative-integer? (list utime stime cutime cstime))
+        (+ utime stime (if children? (+ cutime cstime) 0))]
        [_ #f])]
     [_ #f]))
 
-(define (process-cpu-times)
+(define (process-cpu-times #:children? [children? #f])
   (define system (parse-cpu-times (first-line "/proc/stat")))
-  (define self (parse-self-ticks (first-line "/proc/self/stat")))
+  (define self (parse-self-ticks (first-line "/proc/self/stat") #:children? children?))
   (and system self (list (car system) (cdr system) self)))
 
 (define (outside-cores before after cpus)
@@ -435,6 +438,9 @@
     (check-equal? (parse-self-ticks
                    "42 (a (b) c) R 1 2 3 0 -1 4194304 489 0 0 0 120 30 0 0 25 5 1 0 3 4 5")
                   150)
+    (define waited "42 (racket) S 1 2 3 0 -1 4194304 489 0 0 0 120 30 7 3 25 5 1 0 3 4 5")
+    (check-equal? (parse-self-ticks waited) 150)
+    (check-equal? (parse-self-ticks waited #:children? #t) 160 "a waited-for child's ticks count")
     (check-false (parse-self-ticks "42 (racket) R 1 2"))
     (check-false (parse-self-ticks #f))
     (check-equal? (outside-cores '(100 1000 40) '(400 2000 240) 8) 0.8)

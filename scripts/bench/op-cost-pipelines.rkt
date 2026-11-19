@@ -12,7 +12,9 @@
          (only-in "pytorch.rkt" child-records twin-records)
          (only-in "workloads/pipelines.rkt" pipeline))
 
-(provide run-cell
+(provide epoch!
+         peak-rss-kb
+         run-cell
          single-threaded-environment
          pipeline-settings
          pipeline-records)
