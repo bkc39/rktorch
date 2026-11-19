@@ -7,7 +7,7 @@
   (require (only-in json jsexpr->string)
            (only-in racket/match match match* match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
-           (only-in racket/string string-join)
+           (only-in racket/string string-join string-split)
            (prefix-in g: (only-in "../generated.rkt" sum-dim-intlist))
            rackunit
            "../main.rkt"
@@ -226,7 +226,10 @@
           'amp-foreach-non-finite-check-and-unscale! '((tensors (3) (2 2)) (scalar-tensor 0.0)
                                                        (scalar-tensor 0.5))
           'amp-update-scale! '((scalar-tensor 65536.0) (int32-scalar-tensor 0)
-                               (scalar-tensor 0.0) (double 2.0) (double 0.5) (int64 2))))
+                               (scalar-tensor 0.0) (double 2.0) (double 0.5) (int64 2))
+          'constant-pad-nd '((tensor 2 3) (int-array (1 2 0 1)) (double 0.5))
+          'random-from! '((tensor 6) (int64 2) (optional-int64 9)
+                          (kwarg "generator" none))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -368,7 +371,12 @@
       (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
                      (spec->python-call-arg s i))
                    ", "))
-    (define invoke (format "torch.ops.aten.~a(~a)" py-name call-args))
+    (define op
+      (match (string-split py-name ".")
+        [(list base) (format "torch.ops.aten.~a" base)]
+        [(list base overload)
+         (format "getattr(torch.ops.aten.~a, ~s)" base overload)]))
+    (define invoke (format "~a(~a)" op call-args))
     (string-append
      (apply string-append
             (for/list ([s (in-list specs)]

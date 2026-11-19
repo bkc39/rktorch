@@ -7,11 +7,15 @@
                   define-generated-op))
 
 (provide affine-grid-generator
+         constant-pad-nd
          grid-sampler-2d
          upsample-bicubic2d)
 
 (define-generated-op affine-grid-generator tr_gen_affine_grid_generator
   ([theta tensor] [size int-array] [align-corners bool]))
+
+(define-generated-op constant-pad-nd tr_gen_constant_pad_nd
+  ([self tensor] [pad int-array] [value scalar]))
 
 (define-generated-op grid-sampler-2d tr_gen_grid_sampler_2d
   ([input tensor] [grid tensor] [interpolation-mode int64] [padding-mode int64]

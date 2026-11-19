@@ -1,20 +1,22 @@
 #lang racket/base
 
 (require (only-in ffi/vector
-                  f32vector-set! f64vector-set! make-f32vector make-f64vector
-                  make-s64vector s64vector-set!)
+                  f32vector-set! f64vector-set! make-f32vector make-f64vector)
          (only-in racket/contract/base
                   -> ->* ->i and/c flat-contract-predicate flat-named-contract
                   list/c listof or/c real-in)
+         (only-in racket/flonum flsingle)
          (only-in racket/match match-define)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   @ add arange clamp cpu-generator/c device device-type div
-                  draw-seed dtype flip masked-fill! mul narrow ne reshape select
-                  stack sub tensor tensor-shape tensor? to-dtype transpose where)
+                  draw-seed dtype flip masked-fill! mul narrow ne rand reshape
+                  select stack sub tensor tensor->list tensor-shape tensor? to
+                  to-dtype transpose where zeros)
          (only-in "../foreign/contracts.rkt" image-batch/c)
-         (only-in "../generated.rkt" index-tensor)
+         (only-in "../generated.rkt"
+                  constant-pad-nd index-tensor random-from!)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/contracts.rkt"
                   default-ratio default-scale ratio/c scale/c))
@@ -28,8 +30,14 @@
 (define (batch-rng generator)
   (define rng (make-pseudo-random-generator))
   (parameterize ([current-pseudo-random-generator rng])
-    (random-seed (bitwise-and (draw-seed #:generator generator) #x7FFFFFFF)))
+    (~> (draw-seed #:generator generator) (bitwise-and #x7FFFFFFF) random-seed))
   rng)
+
+(define (coins n p generator)
+  (define threshold (flsingle (exact->inexact p)))
+  (for/list ([u (in-list (tensor->list (rand n #:device 'cpu
+                                             #:generator generator)))])
+    (< u threshold)))
 
 (define/contract-out (random-horizontal-flip x ;; noqa
                                              #:p [p 0.5]
@@ -37,15 +45,17 @@
   (->* [image-batch/c]
        [#:p (real-in 0 1) #:generator (or/c cpu-generator/c #f)]
        tensor?)
-  (define n (car (tensor-shape x)))
+  (match-define (cons n _) (tensor-shape x))
+  (define heads (coins n p generator))
   (cond
-    [(zero? n) x]
+    [(not (memq #t heads)) x]
+    [(andmap values heads) (flip x 3)]
     [else
-     (define rng (batch-rng generator))
-     (define flipped
-       (for/list ([_ (in-range n)]) (if (< (random rng) p) 1 0)))
-     (define mask (reshape (ne (tensor flipped #:device (device x)) 0)
-                           n 1 1 1))
+     (define mask
+       (~> (for/list ([head? (in-list heads)]) (if head? 1 0))
+           (tensor #:device (device x))
+           (ne 0)
+           (reshape n 1 1 1)))
      (where mask (flip x 3) x)]))
 
 (define croppable-batch/c
@@ -63,25 +73,36 @@
        [#:padding exact-nonnegative-integer?
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
+  (match-define (cons n _) (tensor-shape x))
   (cond
-    [(~> x tensor-shape car zero?) x]
-    [else (cropped x padding generator)]))
+    [(or (zero? n) (zero? padding)) x]
+    [else
+     (define corners
+       (~> (zeros n 2 #:device 'cpu #:dtype 'int64)
+           (random-from! 0 (add1 (* 2 padding)) generator)))
+     (if (= n 1)
+         (windowed x padding corners)
+         (gathered x padding corners))]))
 
-(define (cropped x padding generator)
+(define (windowed x padding corners)
+  (match-define (list _ _ h w) (tensor-shape x))
+  (match-define (list top left) (tensor->list corners))
+  (~> x
+      (constant-pad-nd (list padding padding padding padding) 0.0)
+      (narrow 2 top h)
+      (narrow 3 left w)))
+
+(define (gathered x padding corners)
   (match-define (list n c h w) (tensor-shape x))
   (define dev (device x))
-  (define rng (batch-rng generator))
-  (define span (add1 (* 2 padding)))
-  (define offsets (make-s64vector (* 2 n)))
-  (for ([k (in-range (* 2 n))])
-    (s64vector-set! offsets k (- (random span rng) padding)))
-  (define corners (reshape (tensor offsets #:device dev) n 2))
+  (define starts (~> corners (sub padding) (to dev)))
   (define (positions extent)
     (arange extent #:device dev #:dtype 'int64))
-  (define (starts axis)
-    (~> corners (select 1 axis) (reshape n 1)))
-  (define rows (add (starts 0) (reshape (positions h) 1 h)))
-  (define cols (add (starts 1) (reshape (positions w) 1 w)))
+  (define (along axis extent)
+    (add (~> starts (select 1 axis) (reshape n 1))
+         (reshape (positions extent) 1 extent)))
+  (define rows (along 0 h))
+  (define cols (along 1 w))
   (define (inside raw extent)
     (~> raw (clamp #:min 0 #:max (sub1 extent)) (to-dtype 'int64)))
   (define rows* (inside rows h))

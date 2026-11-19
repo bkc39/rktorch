@@ -5,6 +5,7 @@
 
 #include <stdbool.h>
 
+#include "torchrkt/c_api/random.h"
 #include "torchrkt/c_api/tensor.h"
 
 #ifdef __cplusplus
@@ -47,6 +48,9 @@ int tr_gen_masked_fill__tensor(tr_tensor* self, const tr_tensor* mask,
 int tr_gen_masked_scatter_(tr_tensor* self, const tr_tensor* mask,
                            const tr_tensor* source);
 int tr_gen_mul__tensor(tr_tensor* self, const tr_tensor* other);
+int tr_gen_random__from(
+    tr_tensor* self, int64_t from, int64_t to, bool to_has,
+    const tr_generator* generator /* nullable: NULL == the global stream */);
 int tr_gen_scatter__src(tr_tensor* self, int64_t dim, const tr_tensor* index,
                         const tr_tensor* src);
 int tr_gen_scatter__value(tr_tensor* self, int64_t dim, const tr_tensor* index,

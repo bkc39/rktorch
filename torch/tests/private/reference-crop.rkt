@@ -2,8 +2,8 @@
 
 (require (only-in racket/match match-define)
          (only-in "../../foreign.rkt"
-                  copy! device dtype narrow select stack tensor-shape zeros)
-         (only-in (submod "../../vision/transforms.rkt" private) batch-rng))
+                  copy! device dtype item narrow select stack tensor-shape zeros)
+         (only-in "../../generated.rkt" random-from!))
 
 (provide reference-crop)
 
@@ -13,10 +13,14 @@
                         #:device (device x)
                         #:dtype (dtype x)))
   (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)
-  (define rng (batch-rng generator))
   (define span (add1 (* 2 padding)))
+  (define (offset)
+    (if (= span 1)
+        0
+        (item (random-from! (zeros 1 #:device 'cpu #:dtype 'int64)
+                            0 span generator))))
   (stack (for/list ([i (in-range n)])
-           (define top (random span rng))
-           (define left (random span rng))
+           (define top (offset))
+           (define left (offset))
            (narrow (narrow (select padded 0 i) 1 top h) 2 left w))
          0))

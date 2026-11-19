@@ -22,6 +22,7 @@
          masked-fill-tensor!
          masked-scatter!
          mul-tensor!
+         random-from!
          scatter-add!
          scatter-src!
          scatter-value!)
@@ -73,6 +74,9 @@
 
 (define-generated-op mul-tensor! tr_gen_mul__tensor #:inplace
   ([self tensor] [other tensor]))
+
+(define-generated-op random-from! tr_gen_random__from #:inplace
+  ([self tensor] [from int64] [to optional-int64] [generator optional-generator]))
 
 (define-generated-op scatter-add! tr_gen_scatter_add_ #:inplace
   ([self tensor] [dim int64] [index tensor] [src tensor]))

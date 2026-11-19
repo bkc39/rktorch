@@ -243,3 +243,8 @@ optim _foreach_clamp_max_.Scalar
 math linalg_vector_norm
 optim _amp_foreach_non_finite_check_and_unscale_
 optim _amp_update_scale_
+# --- tranche 12 (#458): torchvision's random-crop ---------------------------
+# F.pad's constant mode, and torch.randint's draw into an int64 tensor: one
+# 32-bit word of the generator per value below 2^32.
+vision constant_pad_nd
+inplace random_.from

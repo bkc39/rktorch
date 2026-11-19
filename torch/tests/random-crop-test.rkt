@@ -7,8 +7,9 @@
                     + > ~> arange cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype
                     make-generator mps-available? mps-device native-memory-use
-                    randn reclaim-native-memory! reshape tensor tensor->list
-                    tensor-shape to to-dtype transpose zeros)
+                    narrow randn reclaim-native-memory! reshape tensor
+                    tensor->list tensor-shape to to-dtype transpose zeros)
+           (only-in "../generated.rkt" constant-pad-nd random-from!)
            (only-in "../vision/transforms.rkt" random-crop)
            (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/reference-crop.rkt" reference-crop)
@@ -121,15 +122,52 @@
       (check-true (<= peak (* 5/2 out))
                   (format "~a bytes at the peak for a ~a-byte crop" peak out))))
 
-  (bounded-test "random-crop keeps master's draws for a seed"
+  (bounded-test "random-crop draws torchvision's offsets for a seed"
     (define x (~> 36 arange (+ 1) (reshape 4 1 3 3) (to-dtype 'int64)))
     (define golden
-      '(0 0 0 2 3 0 5 6 0 14 15 0 17 18 0 0 0 0
-        23 24 0 26 27 0 0 0 0 0 0 0 29 30 0 32 33 0))
+      '(0 4 5 0 7 8 0 0 0 0 13 14 0 16 17 0 0 0
+        0 19 20 0 22 23 0 25 26 28 29 30 31 32 33 34 35 36))
     (for ([crop (in-list (list random-crop reference-crop))])
       (check-equal? (tensor->list
                      (crop x #:padding 1 #:generator (make-generator 0)))
                     golden)))
+
+  (bounded-test "random-crop draws two torch.randint offsets an image, none at padding 0"
+    (define (draw! generator k)
+      (~> (zeros k #:device 'cpu #:dtype 'int64)
+          (random-from! 0 9 generator)
+          tensor->list))
+    (define (next-after crop words)
+      (define g (make-generator 5))
+      (crop g)
+      (define twin (make-generator 5))
+      (unless (zero? words) (draw! twin words))
+      (equal? (draw! g 4) (draw! twin 4)))
+    (for ([n (in-list '(1 2 32))])
+      (define x (randn n 3 8 8))
+      (check-true (next-after (lambda (g) (random-crop x #:padding 4 #:generator g))
+                              (* 2 n))
+                  (format "~a images" n))
+      (check-true (next-after (lambda (g) (random-crop x #:padding 0 #:generator g)) 0)
+                  (format "~a images at padding 0" n))))
+
+  (bounded-test "random-crop of one image pads it once and narrows twice"
+    (for ([on (in-list devices)])
+      (define x (to (randn 1 3 32 32) on))
+      (parameterize ([current-generator (make-generator 1)])
+        (random-crop x)
+        (define window-calls
+          (op-calls-of (lambda ()
+                         (~> x (constant-pad-nd '(4 4 4 4) 0.0) (narrow 2 1 32)
+                             (narrow 3 2 32)))))
+        (define draw-calls
+          (op-calls-of (lambda ()
+                         (~> (zeros 1 2 #:device 'cpu #:dtype 'int64)
+                             (random-from! 0 9 #f)
+                             tensor->list))))
+        (check-equal? (op-calls-of (lambda () (random-crop x)))
+                      (+ window-calls draw-calls)
+                      (format "~a" on)))))
 
   (bounded-test "random-crop takes a batch without images or channels"
     (for ([on (in-list devices)])
