@@ -36,14 +36,11 @@
 (define cifar-std '(0.2470 0.2435 0.2616))
 (define window 128)
 
-(define (flip-one x)
-  (~> x (unsqueeze 0) random-horizontal-flip (select 0 0)))
-
 (define (jpeg-augment image)
   (~> image
-      convert-image-dtype
       (random-resized-crop 224)
-      flip-one
+      random-horizontal-flip
+      convert-image-dtype
       (normalize imagenet-mean imagenet-std)))
 
 (define (cifar-augment pixels)

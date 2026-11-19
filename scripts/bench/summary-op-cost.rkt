@@ -257,9 +257,6 @@
 
 (define tolerance-text (pct gap-tolerance))
 
-(define jpeg-order-note
-  "jpeg: PyTorch crops uint8 then converts, rktorch converts first (#458)")
-
 (define (k-table records)
   (define overhead (k1-overhead records))
   (define ratios (k2-pytorch-ratio records))
@@ -303,15 +300,13 @@
                (list "K5" "pipeline samples/s ÷ PyTorch"
                      (if (null? pipelines)
                          "-"
-                         (format "~a (~a)"
-                                 (string-join (for/list ([f (in-list pipelines)])
-                                                (format "~a w=~a: ~a" (ref f 'pipeline)
-                                                        (ref f 'workers)
-                                                        (if (ref f 'cold)
-                                                            "n/a (no warm-up epoch)"
-                                                            (num (ref f 'value) 2))))
-                                              "; ")
-                                 jpeg-order-note)))
+                         (string-join (for/list ([f (in-list pipelines)])
+                                        (format "~a w=~a: ~a" (ref f 'pipeline)
+                                                (ref f 'workers)
+                                                (if (ref f 'cold)
+                                                    "n/a (no warm-up epoch)"
+                                                    (num (ref f 'value) 2))))
+                                      "; ")))
                (list "K6" "GC CPU µs per sample, cifar (summed over OS threads)"
                      (if (null? gc)
                          "-"
