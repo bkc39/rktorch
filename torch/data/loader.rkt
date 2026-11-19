@@ -18,8 +18,8 @@
                   dataset-ref dataset? default-collate default-collate?
                   define-dataset gen:dataset indices->list indices/c)
          (only-in "workers.rkt"
-                  abort-workers! built call-with-abort raised raised? receive-batch
-                  request-batch! start-workers stop-workers!))
+                  abort-workers! built call-with-abort join-workers! raised raised?
+                  receive-batch request-batch! start-workers stop-workers!))
 
 (provide (all-from-out "dataset.rkt"))
 
@@ -283,10 +283,10 @@
   (define (exhausted!)
     (set! taken #f)
     (finish!)
-    (stop-workers! pool))
+    (join-workers! pool))
   (define (abandoned!)
     (set! taken #f)
-    (stop-workers! pool))
+    (join-workers! pool))
   (set-up (lambda ()
             (for ([r (in-range ahead)])
               (refill! r))))

@@ -5,7 +5,7 @@
            (only-in racket/match match match* match-define)
            rackunit
            "../data/loader.rkt"
-           (only-in (submod "../data/loader.rkt" private) sampler-draws traversal)
+           (only-in (submod "../data/loader.rkt" private) sampler-draws traversal with-traversal)
            (only-in (submod "../data/workers.rkt" private)
                     live-worker-count pool-guard-threads pool-guard? worker-custodian)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
@@ -13,8 +13,8 @@
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/race-harness.rkt"
-                    check-ledger hooks ledger-snapshot make-watch
-                    settle! watch-hook with-race-hook)
+                    check-ledger gate-hook hooks ledger-snapshot make-gate make-watch
+                    release-gate! settle! wait-for-arrival watch-hook with-race-hook)
            (only-in "private/within.rkt" within))
 
   (define caller (blamed "loader-workers-test.rkt"))
@@ -1010,6 +1010,114 @@
     (kill-thread waiter)
     (void more?)
     (custodian-shutdown-all c))
+
+  (define (delivered gate-index)
+    (make-gate 'batch-delivered #:when (lambda (index) (= index gate-index))))
+
+  (define (drained more? next)
+    (let drain ([n 0])
+      (cond
+        [(more?) (next) (drain (add1 n))]
+        [else n])))
+
+  (test-case "a worker parked after its hand-off holds nothing it handed off"
+    (define gate (delivered 0))
+    (with-race-hook (gate-hook gate)
+      (define-values (more? next)
+        (~> (arange 4) tensor-dataset (dataloader #:workers 1) in-dataloader sequence-generate))
+      (define boxes (within 60 (lambda () (first-batch-boxes next))))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (define waiter (thread next))
+      (check-false (sync/timeout 0.2 waiter) "batch 1 waits behind the parked worker")
+      (collect-garbage 'major)
+      (check-equal? (map weak-box-value boxes) '(#f))
+      (release-gate! gate)
+      (check-not-false (sync/timeout 10 waiter))
+      (check-equal? (within 10 (lambda () (drained more? next))) 2)))
+
+  (define (epoch-ending-at gate check!)
+    (define started (box '()))
+    (define finished (box #f))
+    (with-race-hook (hooks (noting-started started) (gate-hook gate))
+      (define consumer
+        (thread (lambda ()
+                  (for ([_ (~> (arange 4) tensor-dataset (dataloader #:batch-size 2 #:workers 2))])
+                    (void))
+                  (set-box! finished (map thread-dead? (unbox started))))))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (check! consumer finished)
+      (unbox started)))
+
+  (test-case "an epoch ends after its workers exit"
+    (define gate (delivered 1))
+    (void
+     (epoch-ending-at gate
+                      (lambda (consumer finished)
+                        (check-false (sync/timeout 0.3 consumer)
+                                     "the worker of the last batch is parked")
+                        (release-gate! gate)
+                        (check-not-false (sync/timeout 10 consumer))
+                        (check-equal? (unbox finished) '(#t #t))))))
+
+  (test-case "an epoch waits a bounded time for a worker that does not exit"
+    (define gate (delivered 1))
+    (define workers
+      (epoch-ending-at gate
+                       (lambda (consumer finished)
+                         (check-not-false (sync/timeout 30 consumer))
+                         (check-equal? (unbox finished) '(#t #f))
+                         (release-gate! gate))))
+    (check-true (dead-within? workers 10)))
+
+  (define (seconds-in thunk)
+    (define start (current-inexact-milliseconds))
+    (thunk)
+    (/ (- (current-inexact-milliseconds) start) 1000.0))
+
+  (test-case "a traversal ended twice waits for its workers once"
+    (define gate (delivered 1))
+    (define started (box '()))
+    (with-race-hook (hooks (noting-started started) (gate-hook gate))
+      (define-values (count batch finish!)
+        (traversal (~> (arange 4) tensor-dataset (dataloader #:batch-size 2 #:workers 2))))
+      (for ([k (in-range count)])
+        (batch k))
+      (check-equal? (wait-for-arrival gate) 'parked)
+      (define first-wait (seconds-in finish!))
+      (define second-wait (seconds-in finish!))
+      (check-true (>= first-wait 4.5) (format "the first end waited ~a s" first-wait))
+      (check-true (< second-wait 1) (format "the second end waited ~a s" second-wait))
+      (release-gate! gate)
+      (check-true (dead-within? (unbox started) 10))))
+
+  (define-dataset held-at (n held builder resume)
+    #:length n
+    #:ref (i)
+    (when (= i held)
+      (set-box! builder (current-thread))
+      (semaphore-wait resume))
+    (tensor (list i) #:dtype 'int64))
+
+  (test-case "leaving a traversal early waits for a worker still building"
+    (define builder (box #f))
+    (define resume (make-semaphore 0))
+    (define leave (make-semaphore 0))
+    (define started (box '()))
+    (define finished (box #f))
+    (with-race-hook (noting-started started)
+      (define consumer
+        (thread (lambda ()
+                  (with-traversal ([_count batch]
+                                   (dataloader (held-at 4 1 builder resume) #:workers 2))
+                    (batch 0)
+                    (semaphore-wait leave))
+                  (set-box! finished (map thread-dead? (unbox started))))))
+      (check-pred thread? (stalled-builder builder))
+      (semaphore-post leave)
+      (check-false (sync/timeout 0.3 consumer) "worker 1 is still building batch 1")
+      (semaphore-post resume)
+      (check-not-false (sync/timeout 10 consumer))
+      (check-equal? (unbox finished) '(#t #t))))
 
   (test-case "freeing each delivered batch at once never double-releases"
     (settle!)
