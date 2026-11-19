@@ -686,22 +686,24 @@ nix develop -c taskset -c 0-7 racket scripts/bench/m0.rkt --racket 9.3 --rounds 
 racket scripts/bench/m0.rkt m0-9.3-<stamp>.jsonl m0-9.1-<stamp>.jsonl > m0.md
 ```
 
-It writes `m0-<racket>-<stamp>.jsonl` and `.md` to `--out-dir` (default
-`BASELINE_DIR`, as `op-cost.rkt`; in the dev shell Racket's home is
-`PLTUSERHOME`, inside the checkout, so set one), and refuses a directory inside the
-repository, an existing records file, more than one ATen thread and a
-Racket other than `--racket`. `--smoke` runs one round of the smallest
-arms on the PNG fixture.
+It writes `m0-<racket>-<stamp>.jsonl` and `.md` to `--out-dir`
+(default `BASELINE_DIR`, as `scripts/bench/op-cost.rkt`; in the dev
+shell Racket's home is `PLTUSERHOME`, inside the checkout, so set one),
+and refuses a directory inside the repository, an existing records file,
+more than one ATen thread and a Racket other than `--racket`. `--smoke`
+runs one round of the smallest arms on the PNG fixture.
 
 - **Cells.** Loaders at `--workers` (0, 1, 2, 4, 7) over five
   pipelines: `cifar-png` (the CIFAR-10 PNG tree per sample, with the
-  augmentation of `workloads/cifar-pipeline.rkt`), `cifar-batched` (the
-  same tree, augmented per batch), `jpeg` (Hymenoptera, the K5 jpeg
-  pipeline of `workloads/pipelines.rkt`), and K5's `cifar` and `text`;
-  and #439's training arm, main's steps per second while `threads.rkt`'s
-  workers run, at `--train-workers` (1, 2, 4, 8). Each epoch is
-  `--samples` long (by default 2048, 4096, 512, 4096 and 4096); a PNG
-  epoch takes every (n ÷ samples)-th image of the tree, both sides alike.
+  augmentation of `scripts/bench/workloads/cifar-pipeline.rkt`),
+  `cifar-batched` (the same tree, augmented per batch), `jpeg`
+  (Hymenoptera, the K5 jpeg pipeline of
+  `scripts/bench/workloads/pipelines.rkt`), and K5's `cifar` and `text`;
+  and #439's training arm, main's steps per second while
+  `scripts/bench/threads.rkt`'s workers run, at `--train-workers` (1, 2,
+  4, 8). Each epoch is `--samples` long (by default 2048, 4096, 512,
+  4096 and 4096); a PNG epoch takes every (n ÷ samples)-th image of the
+  tree, both sides alike.
 - **Arms.** Every arm is its own child process at `OMP_NUM_THREADS=1`
   and `MKL_NUM_THREADS=1`: rktorch's `dataloader`
   (`scripts/bench/m0-cells.rkt`), PyTorch's `DataLoader` with
@@ -724,9 +726,9 @@ arms on the PNG fixture.
   over every OS thread, PyTorch's main process only), the OS threads at
   baseline and at peak, each PyTorch worker's peak (`worker_threads`),
   the intra-op thread count and peak RSS.
-- **K3.** After the blocks it runs `op-cost.rkt --suites ops,pytorch
-  --threads 1,8` for `--k3-reps` reps (default `--rounds`, 0 skips) and
-  reads K3 from its records.
+- **K3.** After the blocks it runs `scripts/bench/op-cost.rkt
+  --suites ops,pytorch --threads 1,8` for `--k3-reps` reps (default
+  `--rounds`, 0 skips) and reads K3 from its records.
 
 The summary has, per Racket version: the #555 done-when rows (Table H
 w4 ≥ 3× w0; rk ÷ py ≥ 0.5 at w4 for each Table H pipeline; main's

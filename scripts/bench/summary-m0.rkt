@@ -90,10 +90,11 @@
     (for*/list ([b (in-list valid)]
                 [r (in-value (hash-ref b arm #f))]
                 #:when r)
-      (if (equal? arm "rktorch")
-          (per-worker r workers)
-          (let ([ws (filter real? (or (ref r 'worker_threads) '()))])
-            (and (pair? ws) (apply max ws))))))
+      (cond
+        [(equal? arm "rktorch") (per-worker r workers)]
+        [else
+         (define ws (filter real? (or (ref r 'worker_threads) '())))
+         (and (pair? ws) (apply max ws))])))
   (list-median counts))
 
 (define (cell-row records pipeline workers)
@@ -257,8 +258,10 @@
                      [w (in-list (cells-of records p))])
            (append (list p (number->string w))
                    (for/list ([v (in-list vs)])
-                     (num (list-median (block-ratios (of-version records v) p w like-for-like))
-                          2))))))
+                     (~> (of-version records v)
+                         (block-ratios p w like-for-like)
+                         list-median
+                         (num 2)))))))
 
 (define (m0-markdown records #:op-cost [op-cost '()])
   (string-join
@@ -271,7 +274,7 @@
                   "with an error, or with an arm whose outside load reached the limit, is "
                   "dropped. PyTorch's GC counts its main process only."))
            (map (lambda (v) (version-section records op-cost v)) (versions records))
-           (if (> (length (versions records)) 1)
+           (if (~> (versions records) length (> 1))
                (list "## rk ÷ py by Racket version" (version-split records))
                '()))
    "\n\n"))

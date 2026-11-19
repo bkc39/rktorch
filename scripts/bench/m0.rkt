@@ -191,7 +191,10 @@
                                 (values k (if (list? v) (map ~a v) (~a v))))))
       (run-blocks plan settings #:emit emit #:log log)
       (when (positive? (hash-ref settings 'k3-reps))
-        (emit (hasheq 'kind "op-cost" 'racket label 'path (path->string (k3-run dir base settings log)))))))
+        (emit (with-handlers ([exn:fail? (lambda (e)
+                                           (hasheq 'kind "op-cost-error" 'error (exn-message e)))])
+                (hasheq 'kind "op-cost" 'racket label
+                        'path (path->string (k3-run dir base settings log))))))))
   (call-with-output-file md #:exists 'truncate
     (lambda (out) (write-string (summarize-files (list jsonl)) out)))
   (fprintf log "records: ~a\nsummary: ~a\n" jsonl md))

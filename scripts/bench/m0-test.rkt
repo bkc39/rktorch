@@ -136,7 +136,7 @@
                       (cons '(wait 4.0) (for/list ([a (in-list (hash-ref b 'arms))])
                                           (list (hash-ref b 'block) a))))))
     (check-equal? (reverse events) expected)
-    (check-equal? (length emitted) (apply + (map (lambda (b) (length (hash-ref b 'arms))) blocks))))
+    (check-equal? (length emitted) (for/sum ([b (in-list blocks)]) (length (hash-ref b 'arms)))))
 
   (test-case "measured counts the collections, the GC time and the OS threads a thunk ran"
     (call-with-process-deadline
