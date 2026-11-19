@@ -682,7 +682,7 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 export RKTORCH_CIFAR10_PNG_DIR=~/.racket/rktorch/cifar10-png
 export RKTORCH_HYMENOPTERA_DIR=~/.racket/rktorch/hymenoptera
 export BASELINE_DIR=~/.local/share/rktorch/bench
-nix develop -c taskset -c 0-7 racket scripts/bench/m0.rkt --racket 9.3 --rounds 5
+nix develop -c taskset -c 0-8 racket scripts/bench/m0.rkt --racket 9.3 --rounds 5
 racket scripts/bench/m0.rkt m0-9.3-<stamp>.jsonl m0-9.1-<stamp>.jsonl > m0.md
 ```
 
