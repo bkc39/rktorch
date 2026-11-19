@@ -20,6 +20,12 @@ extern "C" {
  * reports a status; a failure partway may leave them partly
  * updated. */
 
+tr_tensor* tr_gen__upsample_bilinear2d_aa(const tr_tensor* self,
+                                          const int64_t* output_size,
+                                          int64_t output_size_len,
+                                          bool align_corners, double scales_h,
+                                          bool scales_h_has, double scales_w,
+                                          bool scales_w_has);
 tr_tensor* tr_gen_affine_grid_generator(const tr_tensor* theta,
                                         const int64_t* size, int64_t size_len,
                                         bool align_corners);
@@ -34,6 +40,12 @@ tr_tensor* tr_gen_upsample_bicubic2d(const tr_tensor* self,
                                      bool align_corners, double scales_h,
                                      bool scales_h_has, double scales_w,
                                      bool scales_w_has);
+tr_tensor* tr_gen_upsample_bilinear2d(const tr_tensor* self,
+                                      const int64_t* output_size,
+                                      int64_t output_size_len,
+                                      bool align_corners, double scales_h,
+                                      bool scales_h_has, double scales_w,
+                                      bool scales_w_has);
 
 #ifdef __cplusplus
 }
