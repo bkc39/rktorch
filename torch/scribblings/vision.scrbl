@@ -396,8 +396,9 @@ torchvision classifier expects after @racket[resize] to 256 and
 @racket[center-crop] to 224.
 }
 
-The two random transforms take an @tt{[N C H W]} batch and return one of
-the same shape. The random choices are per image, drawn on the host from a Racket
+The two random transforms take an image, @tt{[C H W]}, or a batch,
+@tt{[N C H W]}, and return one of the same shape; an image is a batch of
+one. The random choices are per image, drawn on the host from a Racket
 generator that one @racket[draw-seed] from the torch generator seeds per
 batch, so a loader built on @racket[(make-generator 0)] replays its
 augmentation as well as its batch order. They are the transform's own
@@ -419,8 +420,8 @@ draws: a torchvision pipeline on the same seed picks different crops.
                                  [#:p p (real-in 0 1) 0.5]
                                  [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
-Mirrors each image of the rank-4 batch @racket[x] along its width with
-probability @racket[p]; the rest pass through unchanged. Each image draws
+Mirrors the image @racket[x], or each image of the batch @racket[x], along
+its width with probability @racket[p]; the rest pass through unchanged. Each image draws
 one @tt{torch.rand} from @racket[generator] and flips when it is below
 @racket[p] as a float32, as torchvision's @tt{RandomHorizontalFlip} does
 for one image. The answer is @racket[x] itself when no image flips, and
@@ -447,9 +448,6 @@ a window covering a random share of the image's area, drawn from
 @racket[size] by @racket[size]. Ten draws that do not fit fall back to
 the central window at the nearest admissible ratio, as torchvision does.
 Both pairs are ascending.
-Unlike the two transforms below, it accepts a single image, because
-photographs of different sizes cannot share a batch until it has been
-applied.
 With @racket[generator] @racket[#f], the batch seed comes from
 @racket[(current-generator)].
 
@@ -469,18 +467,19 @@ decoded bytes and converts only the crop, as torchvision's does:
 @defproc[(random-crop [x (and/c tensor?
                                (λ (x)
                                  (match (tensor-shape x)
-                                   [(list _ _ h w) (and (positive? h) (positive? w))]
+                                   [(or (list _ h w) (list _ _ h w))
+                                    (and (positive? h) (positive? w))]
                                    [_ #f])))]
                       [#:padding padding exact-nonnegative-integer? 4]
                       [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
-Pads every image of the rank-4 batch @racket[x], whose height and width are
-positive, with @racket[padding] zero pixels on each side and cuts a
+Pads the image @racket[x], or every image of the batch @racket[x], whose
+height and width are positive, with @racket[padding] zero pixels on each side and cuts a
 window of the original size at a per-image offset, torchvision's
 @tt{RandomCrop(32, padding=4)} for CIFAR-10. Each image draws its top,
 then its left offset as @tt{torch.randint(0, 2 * padding + 1)} does from
-@racket[generator]. A batch of one is padded once and answered as a view of
-the window; a larger batch is cut in a number of native calls independent
+@racket[generator]. An image or a batch of one is padded once and answered
+as a view of the window; a larger batch is cut in a number of native calls independent
 of its size. With @racket[padding] 0 it answers @racket[x] and draws
 nothing.
 With @racket[generator] @racket[#f], the draws come from

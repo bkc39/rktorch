@@ -12,7 +12,6 @@
                   device-type div draw-seed dtype flip masked-fill! mul narrow
                   ne rand reshape select stack sub tensor tensor->list
                   tensor-shape tensor? to to-dtype where zeros)
-         (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../generated.rkt"
                   constant-pad-nd index-tensor random-from! round-tensor
                   upsample-bilinear2d upsample-bilinear2d-aa)
@@ -38,17 +37,31 @@
                                              #:generator generator)))])
     (< u threshold)))
 
+(define image-or-image-batch/c
+  (flat-named-contract
+   'image-or-image-batch
+   (lambda (x)
+     (and (tensor? x) (~> (tensor-shape x) length (memv '(3 4))) #t))))
+
+(define (image-count x)
+  (match (tensor-shape x)
+    [(list _ _ _) 1]
+    [(cons n _) n]))
+
+(define (last-axis x)
+  (~> (tensor-shape x) length sub1))
+
 (define/contract-out (random-horizontal-flip x ;; noqa
                                              #:p [p 0.5]
                                              #:generator [generator #f])
-  (->* [image-batch/c]
+  (->* [image-or-image-batch/c]
        [#:p (real-in 0 1) #:generator (or/c cpu-generator/c #f)]
        tensor?)
-  (match-define (cons n _) (tensor-shape x))
+  (define n (image-count x))
   (define heads (coins n p generator))
   (cond
     [(not (memq #t heads)) x]
-    [(andmap values heads) (flip x 3)]
+    [(andmap values heads) (flip x (last-axis x))]
     [else
      (define mask
        (~> (for/list ([head? (in-list heads)]) (if head? 1 0))
@@ -57,22 +70,22 @@
            (reshape n 1 1 1)))
      (where mask (flip x 3) x)]))
 
-(define croppable-batch/c
+(define croppable/c
   (flat-named-contract
-   'image-batch-with-pixels
-   (and/c image-batch/c
+   'image-or-image-batch-with-pixels
+   (and/c image-or-image-batch/c
           (lambda (x)
-            (match-define (list _ _ h w) (tensor-shape x))
+            (match-define (list _ ... h w) (tensor-shape x))
             (and (positive? h) (positive? w))))))
 
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
                                   #:generator [generator #f])
-  (->* [croppable-batch/c]
+  (->* [croppable/c]
        [#:padding exact-nonnegative-integer?
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
-  (match-define (cons n _) (tensor-shape x))
+  (define n (image-count x))
   (cond
     [(or (zero? n) (zero? padding)) x]
     [else
@@ -84,12 +97,13 @@
          (gathered x padding corners))]))
 
 (define (windowed x padding corners)
-  (match-define (list _ _ h w) (tensor-shape x))
+  (match-define (list _ ... h w) (tensor-shape x))
   (match-define (list top left) (tensor->list corners))
+  (define width-axis (last-axis x))
   (~> x
       (constant-pad-nd (list padding padding padding padding) 0.0)
-      (narrow 2 top h)
-      (narrow 3 left w)))
+      (narrow (sub1 width-axis) top h)
+      (narrow width-axis left w)))
 
 (define (gathered x padding corners)
   (match-define (list n c h w) (tensor-shape x))

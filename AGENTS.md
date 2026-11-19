@@ -213,7 +213,8 @@ with `backward!` outside the form as PyTorch recommends). From
   device-side augmentation, SGD under `one-cycle-lr` and `with-autocast` is
   `torch/scribblings/examples/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
-  #:p` and `random-crop #:padding` on an image batch where it lives; each
+  #:p` and `random-crop #:padding` on an image `[C H W]` or a batch where it
+  lives (#458); each
   takes `#:generator` and draws torchvision's per-image values from it
   (`torch.rand` for the coin, `torch.randint` for the offsets), so a seeded
   loader replays its augmentation and a per-sample pipeline matches
