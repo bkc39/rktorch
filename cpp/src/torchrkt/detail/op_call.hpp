@@ -9,10 +9,12 @@
 #include <exception>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 #include "torchrkt/c_api/tensor.h"
 #include "torchrkt/detail/error.hpp"
@@ -93,6 +95,40 @@ int alloc_results(const char* who, tr_tensor** const (&outs)[N],
         results);
     for (std::size_t i = 0; i < N; ++i) {
       *outs[i] = handles[i].release();
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    record_failure(who, e);
+    return 1;
+  } catch (...) {
+    record_unknown_failure(who);
+    return 1;
+  }
+}
+
+// A Tensor-list return written into the caller's array of out_len slots.
+// As with alloc_results, every handle is built before any slot is written,
+// and a result whose length differs from out_len is an error.
+template <typename Fn>
+int alloc_result_list(const char* who, tr_tensor** out, int64_t out_len,
+                      Fn&& fn) noexcept {
+  for (int64_t i = 0; i < out_len; ++i) {
+    out[i] = nullptr;
+  }
+  try {
+    std::vector<at::Tensor> results = std::forward<Fn>(fn)();
+    if (results.size() != static_cast<std::size_t>(out_len)) {
+      throw std::length_error("expected " + std::to_string(out_len) +
+                              " results, got " +
+                              std::to_string(results.size()));
+    }
+    std::vector<std::unique_ptr<tr_tensor>> handles;
+    handles.reserve(results.size());
+    for (at::Tensor& value : results) {
+      handles.emplace_back(new tr_tensor{std::move(value)});
+    }
+    for (std::size_t i = 0; i < handles.size(); ++i) {
+      out[i] = handles[i].release();
     }
     return 0;
   } catch (const std::exception& e) {
@@ -203,6 +239,16 @@ int null_arg_outputs(const char* who, tr_tensor** const (&outs)[N]) {
   for (tr_tensor** out : outs) {
     if (out) {
       *out = nullptr;
+    }
+  }
+  return null_arg_status(who);
+}
+
+// A refused list-returning call clears the slots of an array it can reach.
+inline int null_arg_list(const char* who, tr_tensor** out, int64_t out_len) {
+  if (out) {
+    for (int64_t i = 0; i < out_len; ++i) {
+      out[i] = nullptr;
     }
   }
   return null_arg_status(who);

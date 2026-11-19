@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/file file->value)
-         (only-in racket/list filter-map last)
+         (only-in racket/list append* filter-map last)
          (only-in racket/match match match-lambda)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-replace)
@@ -33,11 +33,15 @@
     ['load_state_dict 'load-state!]
     [_ (string->symbol (string-replace (symbol->string name) "_" "-"))]))
 
+(define markers (hasheq 'zero_grad '(trainer zero-grad)))
+
 (define (lightning->rktorch name)
   (match (regexp-match #rx"^Callback[.](.*)$" (symbol->string name))
     [(list _ hook) (and (not (unsupported-hook? (string->symbol hook)))
                         (list 'callback (hyphenated (string->symbol hook))))]
-    [#f (and (not (unsupported-hook? name)) (list 'trainer (hyphenated name)))]))
+    [#f (and (not (unsupported-hook? name))
+             (not (hash-has-key? markers name))
+             (list 'trainer (hyphenated name)))]))
 
 (define (teardown-after-exception events)
   (match (last events)
@@ -47,15 +51,25 @@
                    (list 'trainer 'teardown epoch step #f lr)))]
     [_ events]))
 
+(define (zero-grads-run-hooks events)
+  (append*
+   (for/list ([e (in-list events)])
+     (match e
+       [(list 'trainer 'zero-grad epoch step _ lr)
+        (list (list 'callback 'on-before-zero-grad epoch step #f lr)
+              (list 'trainer 'on-before-zero-grad epoch step #f lr))]
+       [_ (list e)]))))
+
 (define deviations
-  (hasheq 'exception teardown-after-exception))
+  (hasheq 'exception teardown-after-exception
+          'manual zero-grads-run-hooks))
 
 (define (expected-events scenario)
   (define events
     (filter-map (lambda (e)
                   (match e
                     [(list name epoch step batch lr)
-                     (define mapped (lightning->rktorch name))
+                     (define mapped (hash-ref markers name (lambda () (lightning->rktorch name))))
                      (and mapped (append mapped (list epoch step batch lr)))]))
                 (hash-ref (hash-ref fixture 'scenarios) scenario)))
   ((hash-ref deviations scenario (lambda () values)) events))

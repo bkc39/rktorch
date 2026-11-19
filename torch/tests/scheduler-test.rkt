@@ -186,6 +186,17 @@
     (check-exn #rx"^rmsprop: contract violation"
                (lambda () (rmsprop ps #:weight-decay -1))))
 
+  (test-case "a later schedule starts from the rate the first recorded, as initial_lr does"
+    (define opt (fresh-opt))
+    (step! (exponential-lr opt #:gamma 0.5))
+    (set-learning-rate! opt 0.3)
+    (check-eqv? (scheduler-rate (lambda-lr opt (lambda (_t) 1.0))) 0.1))
+
+  (test-case "one-cycle-lr records max-lr over div-factor as every group's initial rate"
+    (define opt (fresh-opt))
+    (one-cycle-lr opt #:max-lr 1.0 #:total-steps 10)
+    (check-= (scheduler-rate (lambda-lr opt (lambda (_t) 1.0))) 0.04 1e-12))
+
   (test-case "set-learning-rate! and a scheduler on adam and rmsprop"
     (define a (adam (list (Parameter (zeros 2))) #:lr 0.01))
     (set-learning-rate! a 0.5)
@@ -196,4 +207,20 @@
     (step! s)
     (check-= (learning-rate r) 0.001 1e-15)
     (check-exn exn:fail:contract?
-               (lambda () (one-cycle-lr a #:max-lr 0 #:total-steps 3)))))
+               (lambda () (one-cycle-lr a #:max-lr 0 #:total-steps 3))))
+
+  (test-case "a chained schedule after a sequence's first milestone raises there, as in torch"
+    (define opt (fresh-opt))
+    (define head (exponential-lr opt #:gamma 0.9))
+    (define later (chained-scheduler (list (step-lr opt #:step-size 2))))
+    (define s (sequential-lr opt (list head later) #:milestones '(2)))
+    (check-equal? (scheduler-step-count head) 0)
+    (check-equal? (scheduler-step-count later) 0)
+    (step! s)
+    (check-equal? (scheduler-step-count s) 1)
+    (check-exn #rx"^sequential-lr: a chained or sequential schedule cannot start at a milestone"
+               (lambda () (step! s))))
+
+  (test-case "cosine-annealing-warm-restarts anneals to zero by default"
+    (check-rates (rates (cosine-annealing-warm-restarts (fresh-opt) #:t-0 2) 4)
+                 '(0.1 0.05 0.1 0.05 0.1))))

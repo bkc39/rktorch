@@ -135,6 +135,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche9_test.cpp
     tests/torchrkt/generated_tranche10_test.cpp
     tests/torchrkt/generated_tranche11_test.cpp
+    tests/torchrkt/generated_tranche12_test.cpp
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp

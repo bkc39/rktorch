@@ -28,8 +28,10 @@ classic supervised-vision recipe; three start from
 pretrained weights: classifying photographs with ImageNet's ResNet-18,
 fine-tuning it on ants and bees, and painting a photograph in the style of
 another with VGG-16's features. One builds the MNIST convnet's
-batches on worker threads. The last trains a Vision Transformer on CIFAR-10
-with @racket[fit] and augmentation on the device.
+batches on worker threads. One trains a Vision Transformer on CIFAR-10
+with @racket[fit] and augmentation on the device, and the last trains a
+Fashion-MNIST convnet with every @racket[fit] option a recipe sets, step for
+step against its Lightning twin.
 
 @include-section[(submod torch/scribblings/examples/00-randn doc)]
 @include-section[(submod torch/scribblings/examples/01-arith doc)]
@@ -50,3 +52,4 @@ with @racket[fit] and augmentation on the device.
 @include-section[(submod torch/scribblings/examples/16-style-transfer doc)]
 @include-section[(submod torch/scribblings/examples/17-workers doc)]
 @include-section[(submod torch/scribblings/examples/18-vit doc)]
+@include-section[(submod torch/scribblings/examples/20-fashion-mnist doc)]

@@ -8,7 +8,7 @@
            "../train.rkt"
            (only-in "private/lightning-names.rkt" expected-events expected-logged-steps)
            (only-in "private/trainer-kit.rkt"
-                    collecting-logger collecting-rows recorder Recorded scenario
+                    collecting-logger collecting-rows ManualRecorded recorder Recorded scenario
                     scenario-events scenario-exn toy-loader)
            (only-in "private/within.rkt" bounded-test))
 
@@ -33,20 +33,24 @@
                                 (min 3 (length actual) (length expected))))))
 
   (define (fit-scenario sc
+                        #:trainer [make Recorded]
+                        #:callbacks [callbacks '()]
+                        #:precision [precision '32-true]
                         #:train [n 6]
                         #:accumulate [accumulate 1]
                         #:val-check-interval [interval #f]
                         #:max-epochs [max-epochs 2]
                         #:max-steps [max-steps #f])
-    (fit (Recorded sc) (toy-loader n)
+    (fit (make sc) (toy-loader n)
          #:val (toy-loader 4)
          #:max-epochs max-epochs
          #:max-steps max-steps
          #:num-sanity-val-steps 1
          #:accumulate-grad-batches accumulate
          #:val-check-interval interval
+         #:precision precision
          #:logger #f
-         #:callbacks (list (recorder sc))))
+         #:callbacks (cons (recorder sc) callbacks)))
 
   (test-case "LO-1: fit with a validation loader"
     (define sc (scenario))
@@ -112,6 +116,24 @@
     (define sc (scenario #:skip-step '(0 1) #:step-scheduler? #t))
     (fit-scenario sc #:train 10 #:accumulate 2)
     (check-events 'skip-step-accumulate sc))
+
+  (test-case "G3-L17: a gradient-accumulation-scheduler of {0: 1, 1: 2}"
+    (define sc (scenario))
+    (define r (fit-scenario sc #:train 10
+                            #:callbacks (list (gradient-accumulation-scheduler (hasheqv 1 2)))))
+    (check-events 'accumulate-scheduler sc)
+    (check-equal? (run-global-step r) (+ 5 3)))
+
+  (test-case "G3-L19: manual optimization over two optimizers, with D7's zero-grad hooks"
+    (define sc (scenario))
+    (define r (fit-scenario sc #:trainer ManualRecorded))
+    (check-events 'manual sc)
+    (check-equal? (run-global-step r) (* 2 3 2) "two steps per batch"))
+
+  (test-case "G3-L22: bf16-mixed keeps fit-val's hook order"
+    (define sc (scenario))
+    (fit-scenario sc #:precision 'bf16-mixed)
+    (check-events 'bf16-mixed sc))
 
   (test-case "LO-7: test"
     (define sc (scenario))

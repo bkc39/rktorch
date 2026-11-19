@@ -218,7 +218,7 @@ with `backward!` outside the form as PyTorch recommends). From
   (`torch.rand` for the coin, `torch.randint` for the offsets), so a seeded
   loader replays its augmentation and a per-sample pipeline matches
   torchvision's for a seed; a one-image crop is a pad and two `narrow`s
-  (`constant-pad-nd` and `random-from!`, tranche 11, #458). The pretrained preprocessing (#199) on an image or a
+  (`constant-pad-nd` and `random-from!`, tranche 12, #458). The pretrained preprocessing (#199) on an image or a
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
   torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
   float only; two matmuls with host-computed bilinear or Pillow-filter
@@ -260,7 +260,8 @@ with `backward!` outside the form as PyTorch recommends). From
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`
   (binary ops take a real on either side); `maximum minimum` (tranche 10,
-  #451) take two tensors and propagate NaN
+  #451) take two tensors and propagate NaN; tranche 11's clipping and
+  `_amp_*` ops (#187) are on `torch/generated` only
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
   fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
@@ -322,7 +323,7 @@ Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
 TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
 layer-copy layer-rebuild
-sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+sgd adam rmsprop step! zero-grads! clip-grad-norm! clip-grad-value! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
@@ -343,7 +344,7 @@ on the hand-written shim) and the sampling grids (`affine-grid grid-sample
 on its N, dtype and device, bicubic `F.interpolate(size=)`; `floor-tensor`
 and `fmod-scalar` stay on `torch/generated`) and the elementwise extrema
 (`maximum minimum`, tranche 10, #451) live on `torch` beside the other
-functional ops (tranche 11, #458: `constant-pad-nd` and `random-from!`,
+functional ops (tranche 12, #458: `constant-pad-nd` and `random-from!`,
 `torch.randint`'s draw, stay on `torch/generated` for the transforms);
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
@@ -468,8 +469,8 @@ hand-written `gen:layer` without the method refuses, naming
 `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
 position tensor) and `causal-mask` (`#t` above the diagonal, or the float
-`-inf` form) live in `torch/nn/positions.rkt`. `clip-grad-norm!` (`torch/nn/clip.rkt`) keeps its scale on the
-device. Layer init mirrors
+`-inf` form) live in `torch/nn/positions.rkt`. `clip-grad-norm!` and
+`clip-grad-value!` live in `torch/nn/clip.rkt`. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
 on this.
@@ -744,9 +745,10 @@ its regression test, once a pinned libtorch fixes the kernel.
   opaque handle; `status_call` and `null_arg_status` for the int-status
   in-place shape; `alloc_results` for an op with several Tensor returns,
   an int status plus one `tr_tensor**` out pointer per return, every one
-  NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
+  NULL unless the whole call succeeded; `alloc_result_list` for a
+  `Tensor[]` return into a caller-sized out array) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..10}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..11}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -971,7 +973,8 @@ headers:
 - `cpp/{include/torchrkt/c_api,src/torchrkt}/generated/<shard>.{h,cpp}` —
   bodies reduce to the `op_call.hpp` helpers; clang-format is run by the
   generator; `generated/sources.cmake` is included from `cpp/CMakeLists.txt`
-- `torch/generated.rkt` — the UNSTABLE uncontracted surface: one compact
+- `torch/generated.rkt` — the UNSTABLE uncontracted surface, a facade over
+  `torch/generated/<shard>.rkt`: one compact
   `define-generated-op` form per allowlist entry. The hand-written macro
   in `torch/foreign/define-generated.rkt` owns the expansion into raw FFI
   binding + wrapper, so Racket marshalling knowledge lives in Racket, not
@@ -1002,7 +1005,14 @@ Conventions:
   its first list. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
-  in schema order; any non-Tensor return still skips. A private ATen name
+  in schema order. A `_foreach_*` op's `Tensor[]` return (#187) fills a
+  caller-sized out array through `alloc_result_list`, whose `out_len` must
+  equal the list length and whose every slot is NULL on error;
+  `#:returns-list arg` answers it as a list, and the manifest's `returns`
+  is `list`. A
+  write-annotated `Tensor(b!)` beside the receiver is a `mutable-tensor`
+  (`tr_tensor*`), compared after the call; an in-place op without a method
+  variant calls `at::<base>_`. Any other non-Tensor return still skips. A private ATen name
   loses its leading underscore on the Racket side
   (`_cudnn_rnn_flatten_weight` is `cudnn-rnn-flatten-weight`). Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
@@ -1283,7 +1293,8 @@ master's copy.
   `@generated by codegen ... DO NOT EDIT` header:
   `cpp/include/torchrkt/c_api/generated.h`, the `.h` files in
   `cpp/include/torchrkt/c_api/generated/`, the `.cpp` and `.cmake` files
-  in `cpp/src/torchrkt/generated/`, `torch/generated.rkt` and
+  in `cpp/src/torchrkt/generated/`, `torch/generated.rkt`, the `.rkt` files in
+  `torch/generated/` and
   `torch/tests/generated-parity.rktd`. Review the generator
   (`codegen/*.py`) and `codegen/allowlist.txt` instead of their bodies;
   when a template changes, check one emitted body per changed template

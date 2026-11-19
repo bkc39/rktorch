@@ -13,6 +13,7 @@
          (only-in "tensor.rkt" _tr-dtype))
 
 (provide _tr-device-type
+         tr-cuda-bf16-supported/raw
          tr-cuda-is-available/raw
          tr-mps-is-available/raw
          tr-mps-empty-cache/raw
@@ -112,6 +113,10 @@
 (define-torch tr-cuda-is-available/raw
   (_fun -> _int)
   #:c-id tr_cuda_is_available)
+
+(define-torch tr-cuda-bf16-supported/raw
+  (_fun _int64 -> _int)
+  #:c-id tr_cuda_bf16_supported)
 
 (define-torch tr-cuda-device-count/raw
   (_fun -> _int)

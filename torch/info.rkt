@@ -26,14 +26,14 @@
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
 (define pkg-authors (list (string-append "bkschemer" "@" "gmail" "." "com")))
 (define license
-  '(Apache-2.0 AND (CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR)))
+  '((Apache-2.0 AND MIT) AND (CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR)))
 (define pkg-tags
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
 
 (define test-omit-paths
   (if (getenv "PLT_PKG_BUILD_SERVICE")
-      '("audio" "data" "foreign" "foreign.rkt" "generated.rkt" "info.rkt" "main.rkt"
+      '("audio" "data" "foreign" "foreign.rkt" "generated" "generated.rkt" "info.rkt" "main.rkt"
         "nn" "nn.rkt" "operators.rkt" "private" "runtime" "safe.rkt" "scribblings"
         "tests" "text" "train" "train.rkt" "vision")
       '()))

@@ -9,9 +9,10 @@
                   call-hooks call-trainer note-batch-size! publish-epoch! publish-steps!
                   transfer)
          (only-in "hooks.rkt" loop-hook-names)
+         (only-in "precision.rkt" call-in-precision)
          (only-in "state.rkt"
-                  run-book run-current-stage run-device run-eval-batches run-global-step
-                  run-stepped? run-trainer set-run-batch-index! set-run-current-stage!
+                  run-batches-stepped run-book run-current-stage run-device run-eval-batches
+                  run-trainer set-run-batch-index! set-run-current-stage!
                   set-run-eval-batches!))
 
 (provide evaluate)
@@ -19,13 +20,10 @@
 (define stage-loops
   #hasheq((sanity-check . validation) (validate . validation) (test . test) (predict . predict)))
 
-(define (step-label r)
-  (if (run-stepped? r) (sub1 (run-global-step r)) (run-global-step r)))
-
 (define (eval-batch! r stage step batch-start batch-end values-in)
   (note-batch-size! r values-in)
   (apply call-hooks r batch-start values-in)
-  (define out (apply call-trainer r step values-in))
+  (define out (call-in-precision r (lambda () (apply call-trainer r step values-in))))
   (apply call-hooks r batch-end out values-in)
   (unless (eq? stage 'sanity-check)
     (publish-steps! r 'eval (run-eval-batches r))
@@ -60,7 +58,7 @@
           (set-run-batch-index! r #f)
           (epoch-end-reached! (run-book r) 'eval)
           (call-hooks r epoch-end)
-          (publish-epoch! r 'eval (step-label r))
+          (publish-epoch! r 'eval (run-batches-stepped r))
           (call-hooks r end)
           outputs))))
    (lambda () (set-run-current-stage! r outer))))
