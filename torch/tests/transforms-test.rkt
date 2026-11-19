@@ -119,8 +119,8 @@
 
   (test-case "resize: the same size answers the image"
     (define x (randn 3 4 6))
-    (check-true (same? (resize x '(4 6)) x))
-    (check-true (same? (resize x 4 #:antialias? #f) x)))
+    (check-eq? (resize x '(4 6)) x)
+    (check-eq? (resize x 4 #:antialias? #f) x))
 
   (test-case "resize: the two filters by hand"
     (define row (reshape (arange 4.0) 1 1 4))
@@ -137,13 +137,12 @@
                           '(0.0 0.25 0.75 1.0))
                   "upsampling clamps at the edges")))
 
-  (test-case "resize: float64 and the half dtypes keep their dtype"
+  (test-case "resize: uint8, float64 and the half dtypes keep their dtype"
     (for ([source-dtype (in-list '(float64 float16 bfloat16))])
       (define out (~> (rand 3 8 8) (to-dtype source-dtype) (resize 4)))
       (check-equal? (dtype out) source-dtype)
       (check-equal? (tensor-shape out) '(3 4 4)))
-    (check-exn exn:fail:contract?
-               (lambda () (resize (to-dtype (rand 3 8 8) 'uint8) 4)))
+    (check-equal? (dtype (resize (to-dtype (rand 3 8 8) 'uint8) 4)) 'uint8)
     (check-exn exn:fail:contract? (lambda () (resize (rand 8 8) 4))))
 
   (test-case "center-crop: the offset rounds half to even, as Python's round"
@@ -239,5 +238,4 @@
                (lambda () (random-resized-crop x 4 #:scale '(0 1))))
     (check-exn exn:fail:contract?
                (lambda () (random-resized-crop x 4 #:ratio '(2 1))))
-    (check-exn exn:fail:contract?
-               (lambda () (random-resized-crop (to-dtype x 'uint8) 4)))))
+    (check-equal? (dtype (random-resized-crop (to-dtype x 'uint8) 4)) 'uint8)))

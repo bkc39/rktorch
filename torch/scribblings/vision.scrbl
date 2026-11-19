@@ -302,7 +302,8 @@ input's device.
 ]
 
 The first four are torchvision's @tt{transforms.functional} of the same
-names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
+names, @racket[resize] its @tt{transforms.v2.functional} one, and take an
+image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
 @racket[imagenet-preprocess].
 
 @defproc[(convert-image-dtype [x tensor?]
@@ -324,26 +325,32 @@ lands 1.0 on 255 and nothing past it. Between two float dtypes it is
                                      exact-positive-integer?))]
                  [#:antialias? antialias? boolean? #t])
          tensor?]{
-Resamples the float image or batch @racket[x] to @racket[size]
-bilinearly. A pair is the new height and width; a single number is the
-new length of the shorter side, the longer one scaled to keep the aspect
-ratio and truncated, so @tt{[3 299 401]} resized to 256 is
-@tt{[3 256 343]}. With @racket[antialias?], the default as in
-torchvision, a downscale widens the triangle filter to the scale factor
-the way Pillow does, so every input pixel contributes; without it each
-output pixel interpolates the two inputs nearest its centre, which aliases
-when shrinking by more than two. Either way the result is
-@tt{F.interpolate(mode="bilinear", align_corners=False)} to within float
-rounding.
+torchvision v2's @tt{F.resize}: resamples the image or batch @racket[x],
+@racket['uint8] or float, to @racket[size] bilinearly, keeping its dtype. A
+pair is the new height and width; a single number is the new length of the
+shorter side, the longer one scaled to keep the aspect ratio and truncated,
+so @tt{[3 299 401]} resized to 256 is @tt{[3 256 343]}. At its own size
+@racket[x] comes back as it is. With @racket[antialias?], the default, a
+downscale widens the triangle filter to the scale factor as Pillow does
+(@tt{_upsample_bilinear2d_aa}); without it each output interpolates the two
+inputs nearest its centre (@tt{upsample_bilinear2d}).
 
-The resampling is two matrix products, one per axis, with weights
-computed on the host, rather than ATen's upsampling kernel: it is
-differentiable, it runs on any device @racket[matmul] does, and it needs
-no optional-float argument, which the generated surface does not yet
-marshal. The half dtypes are resampled in float32 and narrowed back. A
-@racket['uint8] image is a contract violation: convert it first, as
-above.
-}
+A @racket['uint8] image takes torchvision's path on the same host: on a CPU
+whose @racket[(cpu-capability)] is @racket['avx2] or @racket['avx512], or an
+arm64 CPU, ATen's kernel resamples the bytes in fixed point; anywhere else it
+is resampled in float32, rounded half to even and narrowed back. The result
+equals torchvision's byte for byte, and the two paths differ by at most one
+count. The half dtypes are resampled in float32. A float result is
+differentiable. Other dtypes are a contract violation.
+
+@torch-examples[
+(define photo
+  (read-image (collection-file-path "smooth-401x299.jpg"
+                                    "torch" "vision" "fixtures" "images")))
+(dtype (resize photo 256))
+(shape (resize photo 256))
+(eq? (resize photo '(299 401)) photo)
+]}
 
 @defproc[(center-crop [x tensor?]
                       [size (or/c exact-positive-integer?
@@ -362,7 +369,8 @@ contract violation, where torchvision would pad.
                     [std (listof (and/c real? positive?))])
          tensor?]{
 Subtracts @racket[mean] and divides by @racket[std], one value per
-channel of the float image or batch @racket[x].
+channel of the float image or batch @racket[x]. A @racket['uint8] image is
+a contract violation, as in torchvision; convert it first.
 }
 
 @deftogether[(@defthing[imagenet-mean (listof real?)]
@@ -429,6 +437,7 @@ With @racket[generator] @racket[#f], the draws come from
                               [#:ratio ratio (list/c (and/c real? positive?)
                                                      (and/c real? positive?))
                                        '(3/4 4/3)]
+                              [#:antialias? antialias? boolean? #t]
                               [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
@@ -437,14 +446,25 @@ a window covering a random share of the image's area, drawn from
 @racket[ratio], cut at a random position and resized to
 @racket[size] by @racket[size]. Ten draws that do not fit fall back to
 the central window at the nearest admissible ratio, as torchvision does.
-@racket[x] is a float image, or a batch whose images each get their own
-window. Both pairs are ascending.
+Both pairs are ascending.
 Unlike the two transforms below, it accepts a single image, because
 photographs of different sizes cannot share a batch until it has been
 applied.
 With @racket[generator] @racket[#f], the batch seed comes from
 @racket[(current-generator)].
-}
+
+@racket[x] is a @racket['uint8] or float image, or a batch whose images each
+get their own window; the window is a view, and only it is resampled, by
+@racket[resize] with @racket[antialias?]. So a training pipeline crops the
+decoded bytes and converts only the crop, as torchvision's does:
+
+@torch-examples[
+(~> photo
+    (random-resized-crop 224 #:generator (make-generator 0))
+    convert-image-dtype
+    (normalize imagenet-mean imagenet-std)
+    shape)
+]}
 
 @defproc[(random-crop [x (and/c tensor?
                                (λ (x)

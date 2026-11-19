@@ -220,9 +220,10 @@ with `backward!` outside the form as PyTorch recommends). From
   torchvision's for a seed; a one-image crop is a pad and two `narrow`s
   (`constant-pad-nd` and `random-from!`, tranche 12, #458). The pretrained preprocessing (#199) on an image or a
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
-  torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
-  float only; two matmuls with host-computed bilinear or Pillow-filter
-  weights; `upsample_bilinear2d` is not bound),
+  torchvision scaling), `resize #:antialias?` (short side or `(h w)`; uint8 or float,
+  torchvision v2's paths: the native uint8 kernel where `cpu-capability` is
+  avx2/avx512 or on arm64, else float32 + round half to even;
+  `upsample-bilinear2d` / `upsample-bilinear2d-aa`, tranche 13, #458),
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
