@@ -144,6 +144,17 @@
       (check-exn #rx"boom" (lambda () (join-all (cons raiser rest) #:seconds 30)) (~a pool))
       (check-true (andmap (lambda (w) (thread-dead? (worker-thread w))) rest) (~a pool))))
 
+  (test-case "a worker that raises fails the join at once, wherever it sits in the set"
+    (for ([pool (in-list pools)])
+      (define posted (make-semaphore 0))
+      (define waiter (spawn (lambda () (semaphore-wait posted)) #:pool pool))
+      (define raiser (spawn (lambda () (error 'worker "boom") (semaphore-post posted)) #:pool pool))
+      (define start (current-inexact-monotonic-milliseconds))
+      (check-exn #rx"boom" (lambda () (join-all (list waiter raiser) #:seconds 2)) (~a pool))
+      (define ms (- (current-inexact-monotonic-milliseconds) start))
+      (check-true (< ms 1500) (format "join-all took ~a ms (pool ~a)" ms pool))
+      (check-true (thread-dead? (worker-thread waiter)) (~a pool))))
+
   (define harness-module
     (path->string (collection-file-path "race-harness.rkt" "torch" "tests" "private")))
 

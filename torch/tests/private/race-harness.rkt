@@ -295,11 +295,20 @@
 
 (define (join-all workers #:seconds [seconds 120] #:stop-seconds [stop-seconds 60])
   (define deadline (deadline-in seconds))
+  (define (dead-evt w)
+    (wrap-evt (thread-dead-evt (worker-thread w)) (lambda (_) w)))
+  (define (await pending)
+    (match pending
+      ['() (map (lambda (w) (join-by w deadline seconds)) workers)]
+      [(cons oldest _)
+       (define done (apply sync/timeout (seconds-until deadline) (map dead-evt pending)))
+       (join-by (or done oldest) deadline seconds)
+       (await (remq done pending))]))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
                      (stop-all! workers stop-seconds)
                      (raise e))])
-    (map (lambda (w) (join-by w deadline seconds)) workers)))
+    (await workers)))
 
 (struct roster (started stop?))
 
