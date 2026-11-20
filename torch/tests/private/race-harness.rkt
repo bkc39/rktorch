@@ -242,11 +242,14 @@
 (define (seconds-until deadline)
   (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
 
+(define (post-kill-wait seconds bound)
+  (max 0 (min seconds (- bound 1))))
+
 (define (kill-and-await! threads #:seconds seconds #:bound bound #:what what)
   (define running (filter-not thread-dead? threads))
   (define (kill-and-wait)
     (for-each kill-thread running)
-    (define deadline (deadline-in seconds))
+    (define deadline (deadline-in (post-kill-wait seconds bound)))
     (andmap values
             (for/list ([t (in-list running)])
               (sync/timeout (seconds-until deadline) (thread-dead-evt t)))))
@@ -273,7 +276,8 @@
 
 (define (stop! w #:seconds [seconds 30] #:stop-seconds [stop-seconds 60])
   (unless (stopped? w #:seconds seconds #:bound stop-seconds)
-    (error 'stop! "a killed worker was still running after ~a s" seconds)))
+    (error 'stop! "a killed worker was still running after ~a s"
+           (post-kill-wait seconds stop-seconds))))
 
 (define/contract-out (stop-worker! w stop-by)
   (->i ([w worker?]
