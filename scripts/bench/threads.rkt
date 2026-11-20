@@ -21,7 +21,9 @@
 
 (module+ private
   (provide collect-with-allocating-threads!
+           collector-sweepers
            os-thread-count
+           peak-of
            run-worker!
            settled-thread-count
            task-dir
