@@ -23,7 +23,9 @@
     (cond
       [(sync/timeout seconds sp) (subprocess-status sp)]
       [else (subprocess-kill sp #t) #f]))
-  (for ([t (in-list drains)]) (sync/timeout 10 t))
+  (define drained (+ (current-inexact-monotonic-milliseconds) 2000))
+  (for ([t (in-list drains)])
+    (sync/timeout (max 0 (/ (- drained (current-inexact-monotonic-milliseconds)) 1000.0)) t))
   (close-input-port out)
   (close-input-port err)
   (values status
@@ -46,4 +48,15 @@
     (define-values (status answer _stderr) (run-child '(sync never-evt) #:within 1))
     (check-false status)
     (check-true (eof-object? answer))
-    (check-true (< (- (current-inexact-monotonic-milliseconds) start) 10000))))
+    (check-true (< (- (current-inexact-monotonic-milliseconds) start) 10000)))
+
+  (test-case "output a child leaves open past its exit is drained for 2 s in all, not per port"
+    (define start (current-inexact-monotonic-milliseconds))
+    (define-values (status _answer _stderr)
+      (run-child `(let-values ([(_sp _out in _err)
+                                (subprocess (current-output-port) #f (current-error-port)
+                                            ,(path->string (find-executable-path "sleep")) "8")])
+                    (close-output-port in))
+                 #:within 30))
+    (check-equal? status 0)
+    (check-true (< (- (current-inexact-monotonic-milliseconds) start) 5000))))

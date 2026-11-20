@@ -19,7 +19,7 @@
      `(begin
         (require (only-in (file ,(path->string wedge)) call-with-process-deadline) ,@requires)
         (write (call-with-process-deadline ,(+ seconds 5) (lambda () ,@body))))
-     #:within (+ seconds 10)))
+     #:within (+ seconds 6)))
 
   (test-case "parallel threads whose first registration is the drain's canary share one finalizer thread"
     (define-values (status answers stderr)
@@ -27,14 +27,14 @@
        `((only-in ffi/unsafe register-finalizer)
          (only-in (file ,(path->string sandbox)) with-fresh-eval))
        `((for/list ([_ (in-range 3)])
-           (with-fresh-eval (ev #:time-limit 20)
+           (with-fresh-eval (ev #:time-limit 25)
              (define thread-of (if (eq? (ev '(dynamic-require 'ffi/unsafe 'register-finalizer))
                                         register-finalizer)
                                    'the-parent
                                    'its-own))
              (ev '(require torch/tests/private/finalizer-race))
              (list thread-of (ev '(run-race ,workers ,per-worker))))))
-       #:seconds 20))
+       #:seconds 25))
     (check-equal? status 0 stderr)
     (check-equal? answers (make-list 3 (list 'its-own (list (* workers per-worker) 1)))
                   "each sandbox has its own finalizer thread to start, and one runs the race"))
@@ -54,13 +54,13 @@
 
   (test-case "inside a place, parallel threads that register first share one finalizer thread"
     (define-values (status answers stderr)
-      (place-answers-in-child place-finalizer-race 'main 3 #:seconds 45))
+      (place-answers-in-child place-finalizer-race 'main 3 #:seconds 25))
     (check-equal? status 0 stderr)
     (check-equal? answers (make-list 3 (list (* workers per-worker) 1)) stderr))
 
   (test-case "a place that ends or stalls without answering fails its run within the bound"
     (for ([entry (in-list '(quit main))]
-          [seconds (in-list '(30 2))])
+          [seconds (in-list '(20 2))])
       (define start (current-inexact-monotonic-milliseconds))
       (define-values (status answers stderr)
         (place-answers-in-child place-stall entry 1 #:seconds seconds))
