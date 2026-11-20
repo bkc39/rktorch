@@ -1,17 +1,25 @@
 #lang racket/base
 
 (require (only-in racket/match match match*)
+         (only-in racket/promise force)
          (only-in torch make-generator)
          (only-in torch/data/loader dataloader)
          (only-in "harness.rkt" clock-ms)
          (only-in "op-cost-pipelines.rkt" epoch! peak-rss-kb)
          (only-in "shim.rkt" aten-threads)
          (only-in "threads.rkt" scaling-run)
-         (only-in (submod "threads.rkt" private) settled-thread-count task-dir with-peak-sampler)
+         (only-in (submod "threads.rkt" private)
+                  collector-sweepers
+                  os-thread-count
+                  peak-of
+                  settled-thread-count
+                  task-dir
+                  with-peak-sampler)
          (only-in "workloads/cifar-pipeline.rkt" cifar-folder-loader cifar-folder-root)
          (only-in "workloads/pipelines.rkt" pipeline pipeline-names))
 
-(provide gc-count
+(provide busiest-epoch!
+         gc-count
          loader-cell
          m0-pipelines
          measured
@@ -24,6 +32,7 @@
 (define table-h-pipelines '(cifar-png cifar-batched jpeg))
 
 (define png-batch 128)
+(define idle-probe-samples 256)
 
 (define (gc-count)
   (define stats (make-vector 4 0))
@@ -63,13 +72,29 @@
              'mkl_num_threads (getenv "MKL_NUM_THREADS")
              'peak_rss_mb (let ([kb (peak-rss-kb)]) (and kb (quotient kb 1024)))))
 
+(define (busiest-epoch! loader #:tasks [tasks task-dir])
+  (define most (box (os-thread-count tasks)))
+  (define n
+    (epoch! loader #:each (lambda ()
+                            (set-box! most (peak-of (list (unbox most) (os-thread-count tasks)))))))
+  (values n (unbox most)))
+
 (define (loader-cell name workers #:warmup warmup #:epochs epochs #:samples samples
-                     #:dataset [dataset "full"])
+                     #:dataset [dataset "full"] #:tasks [tasks task-dir])
+  (force collector-sweepers)
+  (define-values (_idle-n idle)
+    (busiest-epoch! (m0-loader name 0 #:samples (min samples idle-probe-samples) #:dataset dataset)
+                    #:tasks tasks))
   (define loader (m0-loader name workers #:samples samples #:dataset dataset))
-  (for ([_ (in-range warmup)]) (epoch! loader))
+  (define warm-peaks
+    (for/list ([_ (in-range warmup)])
+      (define-values (_n peak) (busiest-epoch! loader #:tasks tasks))
+      peak))
   (define-values (n stats)
-    (measured (lambda () (for/sum ([_ (in-range epochs)]) (epoch! loader)))))
+    (measured (lambda () (for/sum ([_ (in-range epochs)]) (epoch! loader))) #:tasks tasks))
   (hash-set* (process-fields stats)
+             'os_threads_idle idle
+             'os_threads_active (and (pair? warm-peaks) (peak-of warm-peaks))
              'samples n
              'samples_per_s (/ n (hash-ref stats 'elapsed_s))
              'warmup warmup

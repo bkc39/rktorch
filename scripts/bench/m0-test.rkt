@@ -4,14 +4,16 @@
   (require (only-in racket/file make-temporary-directory)
            (only-in racket/list count remove-duplicates)
            (only-in racket/port open-output-nowhere)
+           (only-in racket/sequence sequence-map)
            rackunit
+           (only-in torch zeros)
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "cifar-folder.rkt" ensure-cifar10-folder!)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "m0.rkt"
                     block-arms cell-args m0-paths m0-plan m0-settings racket-label run-arm
                     run-blocks)
-           (only-in "m0-cells.rkt" gc-count loader-cell measured train-cell)
+           (only-in "m0-cells.rkt" busiest-epoch! gc-count loader-cell measured train-cell)
            (only-in "pytorch.rkt" pytorch-available?)
            (only-in "summary-m0.rkt" m0-markdown))
 
@@ -156,6 +158,33 @@
          (check-true (> (hash-ref stats 'os_threads_peak) (hash-ref stats 'os_threads_baseline))
                      (format "~a" stats))))))
 
+  (test-case "a traversal's thread peak is counted at every batch, however briefly the threads live"
+    (with-temporary-path (tasks (make-temporary-directory "m0-tasks-~a"))
+      (define (task! k) (close-output-port (open-output-file (build-path tasks (format "~a" k)))))
+      (define (untask! k) (delete-file (build-path tasks (format "~a" k))))
+      (task! 0)
+      (define batches
+        (in-parallel (sequence-map (lambda (step)
+                                     (step)
+                                     (zeros 2 3))
+                                   (in-list (list (lambda () (task! 1) (task! 2))
+                                                  (lambda () (untask! 1) (untask! 2))
+                                                  void)))
+                     (in-list '(#f #f #f))))
+      (define-values (n peak) (busiest-epoch! batches #:tasks tasks))
+      (check-equal? n 6)
+      (check-equal? peak 3)))
+
+  (test-case "a loader cell counts its workers' OS threads against a worker-free traversal"
+    (call-with-process-deadline
+     300
+     (lambda ()
+       (define r (loader-cell 'cifar 2 #:warmup 1 #:epochs 1 #:samples 512))
+       (check-equal? (hash-ref r 'samples) 512)
+       (when (directory-exists? "/proc/self/task")
+         (check-true (>= (- (hash-ref r 'os_threads_active) (hash-ref r 'os_threads_idle)) 2)
+                     (format "~a" r))))))
+
   (test-case "a loader cell and a training cell record their rates and the Racket that ran them"
     (call-with-process-deadline
      300
@@ -164,6 +193,7 @@
          (define r (loader-cell 'cifar w #:warmup 0 #:epochs 1 #:samples 16))
          (check-equal? (hash-ref r 'samples) 16)
          (check-true (positive? (hash-ref r 'samples_per_s)))
+         (check-false (hash-ref r 'os_threads_active) "no warmup traversal, no worker count")
          (check-equal? (hash-ref r 'racket) (version)))
        (define t (train-cell 1 #:seconds 0.1 #:warmup 0))
        (check-true (positive? (hash-ref t 'main_steps_per_s)))

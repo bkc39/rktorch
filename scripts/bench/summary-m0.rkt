@@ -80,9 +80,9 @@
   (list-median (arm-values records pipeline workers arm (rate-key pipeline))))
 
 (define (per-worker r workers)
-  (define peak (ref r 'os_threads_peak))
-  (define baseline (ref r 'os_threads_baseline))
-  (and (positive? workers) (real? peak) (real? baseline) (/ (- peak baseline) workers 1.0)))
+  (define active (ref r 'os_threads_active))
+  (define idle (ref r 'os_threads_idle))
+  (and (positive? workers) (real? active) (real? idle) (/ (- active idle) workers 1.0)))
 
 (define (worker-threads records pipeline workers arm)
   (define-values (valid _dropped) (valid-blocks records pipeline workers))

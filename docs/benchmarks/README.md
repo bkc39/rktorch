@@ -726,6 +726,15 @@ runs one round of the smallest arms on the PNG fixture.
   over every OS thread, PyTorch's main process only), the OS threads at
   baseline and at peak, each PyTorch worker's peak (`worker_threads`),
   the intra-op thread count and peak RSS.
+- **Worker threads.** rktorch's workers are threads in its own process,
+  started per traversal and gone when it ends, so a timed sampler misses
+  a short epoch's team. Instead, a rktorch loader arm counts
+  `/proc/self/task` at every batch it receives: over a worker-free
+  traversal of the same pipeline (`os_threads_idle`, up to 256 samples)
+  and over its warmup traversals (`os_threads_active`, null at
+  `--warmup 0`). The collector's sweeper threads, which never exit, are
+  started before both. The summary's rk threads per worker is
+  (active − idle) ÷ w; PyTorch's is its busiest worker process.
 - **K3.** After the blocks it runs `scripts/bench/op-cost.rkt
   --suites ops,pytorch --threads 1,8` for `--k3-reps` reps (default
   `--rounds`, 0 skips) and reads K3 from its records.

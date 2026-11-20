@@ -22,10 +22,11 @@
 (define-runtime-path self "op-cost.rkt")
 
 ;; the sum reads the batch, as the twin's batch[0].sum() does
-(define (epoch! loader)
+(define (epoch! loader #:each [each void])
   (for/sum ([vs (in-values-sequence loader)])
     (match-define (cons x _) vs)
     (void (sum x))
+    (each)
     (~> x shape car)))
 
 (define (peak-rss-kb)

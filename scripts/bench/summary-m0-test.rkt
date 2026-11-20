@@ -15,7 +15,8 @@
                           'pipeline pipeline 'workers workers 'arm which 'racket racket
                           'max_load 2.0 'load_outside load 'gc_ms gc 'gc_count 3
                           'samples 1000 'os_threads_baseline 10
-                          'os_threads_peak (+ 10 (* 2 workers)) 'worker_threads '(2 3))])
+                          'os_threads_peak 10 'os_threads_idle 12
+                          'os_threads_active (+ 12 (* 2 workers)) 'worker_threads '(2 3))])
               ([kv (in-list (list (cons (if train? 'main_steps_per_s 'samples_per_s) rate)
                                   (cons 'ops_per_s (and train? 1000.0))
                                   (cons 'error error)))]
@@ -44,7 +45,7 @@
     (define row (cell-row records "jpeg" 4))
     (check-equal? (hash-ref row 'vs-pytorch) 0.5)
     (check-equal? (hash-ref row 'blocks) 3)
-    (check-equal? (hash-ref row 'rk-threads) 2.0 "OS threads over baseline, per worker")
+    (check-equal? (hash-ref row 'rk-threads) 2.0 "the worker traversal's OS threads over the worker-free one's, per worker")
     (check-equal? (hash-ref row 'py-threads) 3 "the busiest worker process"))
 
   (test-case "a block with an error or an outside load at the limit is dropped and counted"
