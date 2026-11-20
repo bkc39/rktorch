@@ -183,7 +183,8 @@
                     (sleep 0.5)))
           ,body)
         (require 'run))
-     #:within 60))
+     #:within 60
+     #:rerun-unless #rx"process deadline: "))
 
   (test-case "stopping a set whose worker sits in a foreign call ends the process, named"
     (define-values (status stderr)

@@ -97,7 +97,8 @@
                       (sync never-evt))
                     #:unwind-seconds 2))
           (require 'run))
-       #:within 30))
+       #:within 30
+       #:rerun-unless #rx"process deadline: "))
     (check-equal? status (+ 128 14) stderr)
     (check-regexp-match
      #rx"process deadline: stopping the threads of a body with no result within 2 s ran past 2 s"

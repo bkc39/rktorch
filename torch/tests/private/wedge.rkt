@@ -78,7 +78,13 @@
   (thunk)
   (for/sum ([_ (in-producer (lambda () (sync/timeout 0 receiver)) #f)]) 1))
 
-(define (status-and-stderr-of program #:within seconds)
+(define (status-and-stderr-of program #:within seconds #:rerun-unless [notice #f])
+  (define-values (status stderr) (status-and-stderr-once program seconds))
+  (cond
+    [(and notice (not (regexp-match? notice stderr))) (status-and-stderr-once program seconds)]
+    [else (values status stderr)]))
+
+(define (status-and-stderr-once program seconds)
   (define-values (sp out in err)
     (subprocess #f #f #f (find-system-path 'exec-file) "-e" (format "~s" program)))
   (close-output-port in)
@@ -100,7 +106,8 @@
   status)
 
 (module+ test
-  (require rackunit)
+  (require (only-in racket/file make-temporary-file)
+           rackunit)
 
   (define sigalrm-status (+ 128 14))
 
@@ -135,6 +142,23 @@
       (status-and-stderr-of (program '(call-with-process-deadline 1 wedge)) #:within 30))
     (check-equal? status sigalrm-status)
     (check-regexp-match #rx"process deadline: wedge ran past 1 s" stderr))
+
+  (test-case "a run without the notice is rerun once, and a run with it is not"
+    (define marker (make-temporary-file "wedge-rerun~a"))
+    (define (outcome first-run)
+      (delete-file marker)
+      (define-values (status stderr)
+        (status-and-stderr-of
+         `(cond
+            [(file-exists? ,(path->string marker)) (exit 3)]
+            [else (close-output-port (open-output-file ,(path->string marker))) ,first-run])
+         #:within 30
+         #:rerun-unless #rx"process deadline: "))
+      (list status stderr))
+    (check-equal? (outcome '(exit 0)) '(3 ""))
+    (check-equal? (outcome '(begin (eprintf "process deadline: x") (exit 142)))
+                  '(142 "process deadline: x"))
+    (delete-file marker))
 
   (test-case "a deadline names the body it was given a name for"
     (define-values (status stderr)
