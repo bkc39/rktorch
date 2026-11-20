@@ -23,7 +23,7 @@
     (cond
       [(sync/timeout seconds sp) (subprocess-status sp)]
       [else (subprocess-kill sp #t) #f]))
-  (define drained (+ (current-inexact-monotonic-milliseconds) 2000))
+  (define drained (+ (current-inexact-monotonic-milliseconds) 5000))
   (for ([t (in-list drains)])
     (sync/timeout (max 0 (/ (- drained (current-inexact-monotonic-milliseconds)) 1000.0)) t))
   (close-input-port out)
@@ -50,13 +50,22 @@
     (check-true (eof-object? answer))
     (check-true (< (- (current-inexact-monotonic-milliseconds) start) 10000)))
 
-  (test-case "output a child leaves open past its exit is drained for 2 s in all, not per port"
+  (define sleep-exe (path->string (find-executable-path "sleep")))
+
+  (define (holding-output seconds)
+    `(let-values ([(_sp _out in _err)
+                   (subprocess (current-output-port) #f (current-error-port)
+                               ,sleep-exe ,(number->string seconds))])
+       (close-output-port in)))
+
+  (test-case "output a child leaves open past its exit is drained for 5 s in all, not per port"
     (define start (current-inexact-monotonic-milliseconds))
-    (define-values (status _answer _stderr)
-      (run-child `(let-values ([(_sp _out in _err)
-                                (subprocess (current-output-port) #f (current-error-port)
-                                            ,(path->string (find-executable-path "sleep")) "8")])
-                    (close-output-port in))
-                 #:within 30))
+    (define-values (status _answer _stderr) (run-child (holding-output 15) #:within 30))
     (check-equal? status 0)
-    (check-true (< (- (current-inexact-monotonic-milliseconds) start) 5000))))
+    (check-true (< (- (current-inexact-monotonic-milliseconds) start) 8000)))
+
+  (test-case "a child's answer survives a grandchild holding its output for 3 s"
+    (define-values (status answer stderr)
+      (run-child `(begin (write '(answered)) (flush-output) ,(holding-output 3)) #:within 30))
+    (check-equal? status 0 stderr)
+    (check-equal? answer '(answered))))
