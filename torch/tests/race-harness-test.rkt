@@ -180,7 +180,7 @@
             (define inside (make-semaphore 0))
             (begin0 (spawn (lambda () (semaphore-post inside) (c-sleep 600)) #:pool 'own)
                     (sync/timeout 30 inside)
-                    (sleep 0.1)))
+                    (sleep 0.5)))
           ,body)
         (require 'run))
      #:within 60))
