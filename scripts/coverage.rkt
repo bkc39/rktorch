@@ -13,10 +13,12 @@
          (only-in racket/file file->string)
          (only-in racket/format ~a ~r)
          (only-in racket/list first second take)
+         (only-in racket/match match match*)
          (only-in racket/port with-output-to-string)
          (only-in racket/string string-join string-prefix? string-split
-                  string-trim)
-         (only-in racket/system system* system*/exit-code))
+                  string-suffix? string-trim)
+         (only-in racket/system system* system*/exit-code)
+         (only-in setup/getinfo get-info/full))
 
 ;; The floor CI and the local loop hold the library to. Raise it as the
 ;; categories in #173 land; never lower it to make a change pass.
@@ -26,13 +28,18 @@
 (define floor% (make-parameter coverage-floor))
 (define changed-only? (make-parameter #f))
 (define run? (make-parameter #t))
+(define file-seconds (make-parameter 300))
+
+;; Instrumented code runs slower than `raco test`'s, so a file's bound under
+;; cover is its `raco test` bound times this.
+(define cover-slowdown 3)
 
 (define (die fmt . args)
   (apply eprintf fmt args)
   (exit 1))
 
-(define (raco)
-  (or (find-executable-path "raco") (die "coverage: no raco on PATH\n")))
+(define (racket)
+  (or (find-executable-path "racket") (die "coverage: no racket on PATH\n")))
 
 ;; A failed git call warns and contributes nothing: loud, because a quietly
 ;; shorter list understates what --changed covers, but not fatal, because the
@@ -55,16 +62,76 @@
 
 ;;; Running
 
+(struct overran (file seconds) #:transparent)
+
 ;; 0 and 1 are cover's own answers; anything else ended it before it wrote a
 ;; report, and a report left from an earlier run must not stand in for one.
-(define (cover-outcome code)
-  (case code
-    [(0) 'passed]
-    [(1) 'failed]
-    [(142) "raco cover was ended by SIGALRM: a test's process deadline fired (its notice is above)"]
-    [else (if (> code 128)
-              (format "raco cover was ended by signal ~a" (- code 128))
-              (format "raco cover exited with status ~a" code))]))
+(define (cover-outcome result)
+  (match result
+    [0 'passed]
+    [1 'failed]
+    [142 "raco cover was ended by SIGALRM: a test's process deadline fired (its notice is above)"]
+    [(overran file seconds)
+     (format "~a ran past its ~a s bound under raco cover, so the run and its children were ended"
+             file seconds)]
+    [code
+     #:when (> code 128)
+     (format "raco cover was ended by signal ~a" (- code 128))]
+    [code (format "raco cover exited with status ~a" code)]))
+
+;; cover runs every test file in one process with no per-file timeout, and
+;; logs each file's start on a block-buffered stdout: line buffering makes
+;; the start lines arrive when the files do, so a file past its bound is seen.
+(define (cover-command)
+  (list (racket) "-l" "racket/base"
+        "-e" "(file-stream-buffer-mode (current-output-port) 'line)"
+        "-l-" "raco" "cover" "-b" "-d" (report-dir) "torch/"))
+
+(define (test-timeouts)
+  (match (get-info/full (build-path "torch"))
+    [#f '()]
+    [info (info 'test-timeouts (lambda () '()))]))
+
+(define ((bound-for timeouts) file)
+  (* cover-slowdown
+     (or (for/first ([entry (in-list timeouts)]
+                     #:when (string-suffix? file (string-append "/torch/" (first entry))))
+           (second entry))
+         (file-seconds))))
+
+(define running-px #px"^cover: running file: (.*)$")
+
+(define (echo-lines in out running)
+  (for ([line (in-lines in)])
+    (displayln line out)
+    (flush-output out)
+    (match (regexp-match running-px line)
+      [(list _ file) (set-box! running (cons file (current-inexact-monotonic-milliseconds)))]
+      [#f (void)])))
+
+(define (watch sp running bound)
+  (let poll ()
+    (match* ((sync/timeout 1 sp) (unbox running))
+      [(#f (cons file started))
+       #:when (> (- (current-inexact-monotonic-milliseconds) started) (* 1000 (bound file)))
+       (subprocess-kill sp #t)
+       (sync/timeout 10 sp)
+       (overran file (bound file))]
+      [(#f _) (poll)]
+      [(_ _) (subprocess-status sp)])))
+
+;; The command runs in a process group of its own, so the children a test
+;; started die with it when its file overruns. Its stderr shares the stdout
+;; pipe, so a test's stderr lands after the start line of the file it ran in.
+(define (run-watched command #:bound bound)
+  (define-values (sp out in _err) (apply subprocess #f #f 'stdout 'new command))
+  (close-output-port in)
+  (define running (box #f))
+  (define stdout (current-output-port))
+  (define pump (thread (lambda () (echo-lines out stdout running))))
+  (begin0 (watch sp running bound)
+          (sync/timeout 10 pump)
+          (close-input-port out)))
 
 ;; Racket also exits 1 on a signal or an uncaught error, so an earlier
 ;; run's report goes first: a cover that wrote nothing then has nothing to read.
@@ -74,7 +141,8 @@
 (define (run-cover!)
   (when (file-exists? (index-path)) (delete-file (index-path)))
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
-  (define outcome (cover-outcome (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
+  (define outcome
+    (cover-outcome (run-watched (cover-command) #:bound (bound-for (test-timeouts)))))
   (when (string? outcome)
     (die "coverage: ~a\n" outcome))
   (eq? outcome 'passed))
@@ -236,6 +304,11 @@
                   (changed-only? #t)]
    [("--no-run") "read an existing report instead of running the suite"
                  (run? #f)]
+   [("--file-seconds") n "a test file's raco test bound, scaled for cover (default 300)"
+                       (define seconds (string->number n))
+                       (unless (exact-positive-integer? seconds)
+                         (die "coverage: --file-seconds needs a positive integer, got ~a\n" n))
+                       (file-seconds seconds)]
    #:args ()
    (define suite-ok? (or (not (run?)) (run-cover!)))
    (define entries (read-entries))
@@ -269,9 +342,11 @@
 ;; run with `raco test scripts/coverage.rkt`.
 
 (module+ test
-  (require (only-in racket/file delete-directory/files make-temporary-directory)
+  (require (only-in racket/file delete-directory/files make-temporary-directory
+                    make-temporary-file)
            (only-in racket/port open-output-nowhere)
-           (only-in rackunit check-equal? check-false check-regexp-match test-case))
+           (only-in rackunit check-equal? check-false check-pred check-regexp-match check-true
+                    test-case))
 
   (define (row name percent cov unc total)
     (string-append
@@ -338,16 +413,16 @@
 
   (define this-script (variable-reference->module-source (#%variable-reference)))
 
-  ;; a stub `raco` that exits 1 having written nothing, as a killed one can
+  ;; a stub `racket` that exits 1 having written nothing, as a killed cover can
   (define (gate-over-stale-report)
     (define dir (make-temporary-directory "coverage-test~a"))
     (define bin (build-path dir "bin"))
     (define report (build-path dir "report"))
     (make-directory bin)
     (make-directory report)
-    (with-output-to-file (build-path bin "raco")
+    (with-output-to-file (build-path bin "racket")
       (lambda () (display "#!/bin/sh\nexit 1\n")))
-    (file-or-directory-permissions (build-path bin "raco") #o755)
+    (file-or-directory-permissions (build-path bin "racket") #o755)
     (with-output-to-file (build-path report "index.html")
       (lambda () (display (string-append "<tbody>" (row "torch/main" "100" "1" "0" "1")
                                          "</tbody>"))))
@@ -366,6 +441,54 @@
 
   (test-case "a cover that exits 1 with no report fails the gate, whatever report an earlier run left"
     (check-false (zero? (gate-over-stale-report))))
+
+  (define sh (find-executable-path "sh"))
+
+  (define (watched script #:bound [seconds 1])
+    (define start (current-inexact-monotonic-milliseconds))
+    (define out (open-output-string))
+    (define result
+      (parameterize ([current-output-port out])
+        (run-watched (list sh "-c" script) #:bound (lambda (_file) seconds))))
+    (values result (- (current-inexact-monotonic-milliseconds) start) (get-output-string out)))
+
+  (test-case "a file past its bound ends the run and is named"
+    (define-values (result ms _out)
+      (watched "echo 'cover: running file: /r/torch/tests/slow-test.rkt'; sleep 60"))
+    (check-equal? result (overran "/r/torch/tests/slow-test.rkt" 1))
+    (check-true (< ms 15000.0) (format "the run ended after ~a ms" ms))
+    (check-regexp-match #rx"^/r/torch/tests/slow-test.rkt ran past its 1 s bound"
+                        (cover-outcome result)))
+
+  (test-case "the children a test started die with the run"
+    (define pid-file (make-temporary-file "coverage-pid~a"))
+    (define-values (result _ms _out)
+      (watched (format "echo 'cover: running file: /r/a.rkt'; sleep 60 & echo $! > ~a; wait"
+                       pid-file)))
+    (define pid (call-with-input-file pid-file read))
+    (delete-file pid-file)
+    (check-pred overran? result)
+    (check-false (for/and ([_ (in-range 50)])
+                   (sleep 0.1)
+                   (directory-exists? (format "/proc/~a" pid)))
+                 (format "child ~a outlived the run" pid)))
+
+  (test-case "a run inside its bound returns cover's status, its stderr in order"
+    (define-values (failed _ms1 out)
+      (watched (string-append "echo 'cover: running file: /r/a.rkt'; echo notice >&2; "
+                              "echo 'cover: running file: /r/b.rkt'; exit 1")
+               #:bound 30))
+    (check-equal? failed 1)
+    (check-equal? out "cover: running file: /r/a.rkt\nnotice\ncover: running file: /r/b.rkt\n")
+    (define-values (quiet _ms2 _out2) (watched "sleep 2; exit 0"))
+    (check-equal? quiet 0 "no start line, no bound"))
+
+  (test-case "a file's bound is its test-timeouts entry, else the default, times the slowdown"
+    (define bound (bound-for '(("tests/loader-workers-test.rkt" 600))))
+    (check-equal? (bound "/w/torch/tests/loader-workers-test.rkt") (* cover-slowdown 600))
+    (check-equal? (bound "/w/torch/tests/race-stress-test.rkt") (* cover-slowdown 300))
+    (check-equal? (parameterize ([file-seconds 10]) (bound "/w/torch/tests/a.rkt"))
+                  (* cover-slowdown 10)))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"

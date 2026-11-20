@@ -548,7 +548,10 @@ racket scripts/bench/run.rkt micro      # benchmarks, never a gate (#253):
                                # docs/benchmarks/README.md
 racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
-                               # of the files you touched that no test reaches
+                               # of the files you touched that no test reaches;
+                               # a test file past 3x its raco test bound
+                               # (test-timeouts, else --file-seconds 300)
+                               # ends the run and is named (#550)
 
 scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
