@@ -110,4 +110,35 @@
     (define a (spawn (until-stopped r 'a void) #:pool 'own #:label 'a))
     (check-exn #rx"never completed a first step within 0.05 s: \\(b c\\)"
                (lambda () (await-roles! r '(a b c) #:seconds 0.05)))
-    (check-true (positive? (join a #:seconds 30)))))
+    (check-true (positive? (join a #:seconds 30))))
+
+  (define (wedged pool)
+    (spawn (lambda () (let idle () (sleep 0.01) (idle))) #:pool pool))
+
+  (test-case "a wedged worker set fails within one deadline, not one per worker"
+    (for ([pool (in-list pools)])
+      (define workers (for/list ([_ (in-range 4)]) (wedged pool)))
+      (define start (current-inexact-monotonic-milliseconds))
+      (check-exn #rx"did not finish within 0.5 s"
+                 (lambda () (join-all workers #:seconds 0.5)) (~a pool))
+      (define ms (- (current-inexact-monotonic-milliseconds) start))
+      (check-true (< ms 1500) (format "join-all took ~a ms (pool ~a)" ms pool))
+      (check-true (andmap (lambda (w) (thread-dead? (worker-thread w))) workers) (~a pool))))
+
+  (test-case "workers that each finish inside the bound but together past it fail the join"
+    (for ([pool (in-list pools)])
+      (define workers
+        (for/list ([k (in-range 4)])
+          (spawn (lambda () (sleep (* 0.3 (add1 k))) k) #:pool pool)))
+      (define start (current-inexact-monotonic-milliseconds))
+      (check-exn #rx"did not finish within 0.5 s"
+                 (lambda () (join-all workers #:seconds 0.5)) (~a pool))
+      (define ms (- (current-inexact-monotonic-milliseconds) start))
+      (check-true (< ms 1000) (format "join-all took ~a ms (pool ~a)" ms pool))))
+
+  (test-case "a worker that raises stops the rest of the set"
+    (for ([pool (in-list pools)])
+      (define rest (for/list ([_ (in-range 3)]) (wedged pool)))
+      (define raiser (spawn (lambda () (error 'worker "boom")) #:pool pool))
+      (check-exn #rx"boom" (lambda () (join-all (cons raiser rest) #:seconds 30)) (~a pool))
+      (check-true (andmap (lambda (w) (thread-dead? (worker-thread w))) rest) (~a pool)))))

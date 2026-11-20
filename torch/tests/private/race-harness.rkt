@@ -235,14 +235,23 @@
                 (cons 'returned (thunk)))))
   (worker (if pool (thread body #:pool pool) (thread body)) outcome pool))
 
-(define (join w #:seconds [seconds 60])
-  (sync/timeout seconds (thread-dead-evt (worker-thread w)))
+(define (deadline-in seconds)
+  (+ (current-inexact-monotonic-milliseconds) (* 1000 seconds)))
+
+(define (seconds-until deadline)
+  (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
+
+(define (join-by w deadline seconds)
+  (sync/timeout (seconds-until deadline) (thread-dead-evt (worker-thread w)))
   (match (unbox (worker-outcome w))
     [(cons 'raised e) (raise e)]
     [(cons 'returned v) v]
     [#f
      (kill-thread (worker-thread w))
      (error 'join "a worker did not finish within ~a s, or was killed" seconds)]))
+
+(define (join w #:seconds [seconds 60])
+  (join-by w (deadline-in seconds) seconds))
 
 (define (stop! w #:seconds [seconds 30])
   (define t (worker-thread w))
@@ -274,8 +283,20 @@
        (error 'await-flag "a worker did not set its flag within ~a s" seconds)]
       [else (sleep 0.001) (poll)])))
 
+(define (stop-all! workers)
+  (define threads (map worker-thread workers))
+  (for-each kill-thread threads)
+  (define deadline (deadline-in 30))
+  (for ([t (in-list threads)])
+    (sync/timeout (seconds-until deadline) (thread-dead-evt t))))
+
 (define (join-all workers #:seconds [seconds 120])
-  (map (lambda (w) (join w #:seconds seconds)) workers))
+  (define deadline (deadline-in seconds))
+  (with-handlers ([(lambda (_) #t)
+                   (lambda (e)
+                     (stop-all! workers)
+                     (raise e))])
+    (map (lambda (w) (join-by w deadline seconds)) workers)))
 
 (struct roster (started stop?))
 
