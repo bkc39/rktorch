@@ -89,14 +89,16 @@
             (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
                      (file ,within-module))
             (define c-sleep (get-ffi-obj "sleep" #f (_fun #:blocking? #t _uint -> _uint)))
-            (within 0.5
+            (within 2
                     (lambda ()
-                      (thread (lambda () (c-sleep 600)) #:pool 'own)
+                      (define inside (make-semaphore 0))
+                      (thread (lambda () (semaphore-post inside) (c-sleep 600)) #:pool 'own)
+                      (semaphore-wait inside)
                       (sync never-evt))
                     #:unwind-seconds 2))
           (require 'run))
        #:within 30))
     (check-equal? status (+ 128 14) stderr)
     (check-regexp-match
-     #rx"process deadline: stopping the threads of a body with no result within 0.5 s ran past 2 s"
+     #rx"process deadline: stopping the threads of a body with no result within 2 s ran past 2 s"
      stderr)))
