@@ -51,9 +51,10 @@
 (define (calls-per-step path)
   (define decoded (decode path))
   (define float (convert-image-dtype decoded))
-  (define-values (counts _)
+  (define counts
     (for/fold ([counts (hasheq 'decode (calls-of (lambda () (decode path))))]
-               [x decoded])
+               [x decoded]
+               #:result counts)
               ([step (in-list chain)])
       (define f (cdr step))
       (values (hash-set counts (car step) (calls-of (lambda () (f x))))
