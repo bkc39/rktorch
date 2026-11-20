@@ -4,6 +4,7 @@
   (require rackunit
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in "../main.rkt" cpu-capability)
+           (only-in (submod "../foreign/switches.rkt" private) capability->symbol)
            (only-in "private/child.rkt" run-child)
            (only-in "private/within.rkt" bounded-test))
 
@@ -19,9 +20,14 @@
     (check-true (symbol? capability))
     (check-equal? (symbol->string capability)
                   (string-downcase (symbol->string capability)))
-    (check-not-false (memq capability '(default avx2 avx512 sve256 sve128 vsx zvector))
+    (check-not-false (memq capability '(default avx2 avx512 sve256 sve128 vsx z-vector))
                      (format "~a" capability))
     (check-eq? (cpu-capability) capability))
+
+  (bounded-test "C: ATen's names lowercased, a space as a hyphen"
+    (check-eq? (capability->symbol "AVX2") 'avx2)
+    (check-eq? (capability->symbol "DEFAULT") 'default)
+    (check-eq? (capability->symbol "Z VECTOR") 'z-vector))
 
   (bounded-test "C: ATEN_CPU_CAPABILITY=default at process start lowers it"
     (define-values (status capability err)

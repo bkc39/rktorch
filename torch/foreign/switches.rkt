@@ -3,6 +3,7 @@
 (require (for-syntax racket/base syntax/parse/pre)
          (only-in racket/contract/base -> ->* or/c)
          (only-in racket/list index-of)
+         (only-in racket/string string-replace)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -79,9 +80,14 @@
 (define-flag cudnn-allow-tf32? tr-get-cudnn-allow-tf32/raw ;; noqa
   set-cudnn-allow-tf32! tr-set-cudnn-allow-tf32/raw)
 
+(module+ private
+  (provide capability->symbol))
+
+(define (capability->symbol name)
+  (~> name string-downcase (string-replace " " "-") string->symbol))
+
 (define/contract-out (cpu-capability) ;; noqa
   (-> symbol?)
   (~> (tr-cpu-capability/raw)
       (check-handle 'cpu-capability _)
-      string-downcase
-      string->symbol))
+      capability->symbol))
