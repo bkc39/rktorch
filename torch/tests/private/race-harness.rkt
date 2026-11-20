@@ -24,7 +24,8 @@
                   live-bytes-by-device reset-pressure-state!)
          (only-in "../../foreign/raw/race-points.rkt" race-hook)
          (only-in "../../foreign/raw/regions.rkt" with-cleanup)
-         (only-in "../../private/contract.rkt" define/contract-out))
+         (only-in "../../private/contract.rkt" define/contract-out)
+         (only-in "wedge.rkt" call-with-process-deadline))
 
 (provide with-race-hook
          with-parked
@@ -283,18 +284,20 @@
        (error 'await-flag "a worker did not set its flag within ~a s" seconds)]
       [else (sleep 0.001) (poll)])))
 
-(define (stop-all! workers)
+(define (stop-all! workers bound)
   (define threads (map worker-thread workers))
-  (for-each kill-thread threads)
-  (define deadline (deadline-in 30))
-  (for ([t (in-list threads)])
-    (sync/timeout (seconds-until deadline) (thread-dead-evt t))))
+  (define (kill-and-wait)
+    (for-each kill-thread threads)
+    (define deadline (deadline-in 30))
+    (for ([t (in-list threads)])
+      (sync/timeout (seconds-until deadline) (thread-dead-evt t))))
+  (call-with-process-deadline bound kill-and-wait #:what "stopping a worker set"))
 
-(define (join-all workers #:seconds [seconds 120])
+(define (join-all workers #:seconds [seconds 120] #:stop-seconds [stop-seconds 60])
   (define deadline (deadline-in seconds))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
-                     (stop-all! workers)
+                     (stop-all! workers stop-seconds)
                      (raise e))])
     (map (lambda (w) (join-by w deadline seconds)) workers)))
 

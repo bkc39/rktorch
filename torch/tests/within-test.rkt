@@ -4,6 +4,7 @@
   (require (only-in ffi/unsafe/custodian make-custodian-at-root)
            (only-in racket/function const)
            rackunit
+           (only-in "private/wedge.rkt" status-and-stderr-of)
            (only-in "private/within.rkt" within))
 
   (define pools '(#f own))
@@ -75,4 +76,27 @@
                               (sleep 0.01)
                               (set-box! count (add1 (unbox count))))))))
     (check-true (stepping? count))
-    (kill-thread worker)))
+    (kill-thread worker))
+
+  (define within-module
+    (path->string (collection-file-path "within.rkt" "torch" "tests" "private")))
+
+  (test-case "a timeout whose worker sits in a foreign call ends the process, named, at its bound"
+    (define-values (status stderr)
+      (status-and-stderr-of
+       `(begin
+          (module run racket/base
+            (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
+                     (file ,within-module))
+            (define c-sleep (get-ffi-obj "sleep" #f (_fun _uint -> _uint)))
+            (within 0.5
+                    (lambda ()
+                      (thread (lambda () (c-sleep 600)) #:pool 'own)
+                      (sync never-evt))
+                    #:unwind-seconds 2))
+          (require 'run))
+       #:within 30))
+    (check-equal? status (+ 128 14) stderr)
+    (check-regexp-match
+     #rx"process deadline: stopping the threads of a body with no result within 0.5 s ran past 2 s"
+     stderr)))

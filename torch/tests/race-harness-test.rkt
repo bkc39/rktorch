@@ -5,6 +5,7 @@
            rackunit
            (only-in "../foreign/raw/race-points.rkt" race-point)
            (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/wedge.rkt" status-and-stderr-of)
            (only-in "private/race-harness.rkt"
                     await-flag await-roles! join join-all make-gate make-roster pools
                     pools-stopped-by release-pending? spawn stop! stop-roles! stop-worker!
@@ -141,4 +142,23 @@
       (define rest (for/list ([_ (in-range 3)]) (wedged pool)))
       (define raiser (spawn (lambda () (error 'worker "boom")) #:pool pool))
       (check-exn #rx"boom" (lambda () (join-all (cons raiser rest) #:seconds 30)) (~a pool))
-      (check-true (andmap (lambda (w) (thread-dead? (worker-thread w))) rest) (~a pool)))))
+      (check-true (andmap (lambda (w) (thread-dead? (worker-thread w))) rest) (~a pool))))
+
+  (define harness-module
+    (path->string (collection-file-path "race-harness.rkt" "torch" "tests" "private")))
+
+  (test-case "stopping a set whose worker sits in a foreign call ends the process, named"
+    (define-values (status stderr)
+      (status-and-stderr-of
+       `(begin
+          (module run racket/base
+            (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
+                     (only-in (file ,harness-module) join-all spawn))
+            (define c-sleep (get-ffi-obj "sleep" #f (_fun _uint -> _uint)))
+            (define sleeper (spawn (lambda () (c-sleep 600)) #:pool 'own))
+            (define raiser (spawn (lambda () (sleep 0.5) (error 'worker "boom"))))
+            (join-all (list raiser sleeper) #:seconds 30 #:stop-seconds 2))
+          (require 'run))
+       #:within 60))
+    (check-equal? status (+ 128 14) stderr)
+    (check-regexp-match #rx"process deadline: stopping a worker set ran past 2 s" stderr)))

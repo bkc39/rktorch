@@ -6,7 +6,8 @@
 
 (provide arm-process-deadline!
          call-with-process-deadline
-         exit-status-of)
+         exit-status-of
+         status-and-stderr-of)
 
 (define c-write (get-ffi-obj "write" #f (_fun _int _bytes _intptr -> _intptr)))
 (define c-sleep (get-ffi-obj "sleep" #f (_fun #:blocking? #t _uint -> _uint)))
@@ -38,10 +39,11 @@
           (c-raise sigalrm)]))))
   (lambda () (set-box! lifted #t)))
 
-(define (call-with-process-deadline seconds thunk)
+(define (call-with-process-deadline seconds thunk
+                                    #:what [what (or (object-name thunk) "a thunk")])
   (define lift! #f)
   (dynamic-wind (lambda ()
-                  (set! lift! (arm-process-deadline! seconds (or (object-name thunk) "a thunk"))))
+                  (set! lift! (arm-process-deadline! seconds what)))
                 thunk
                 (lambda () (lift!))))
 
@@ -99,6 +101,13 @@
       (status-and-stderr-of (program '(call-with-process-deadline 1 wedge)) #:within 30))
     (check-equal? status sigalrm-status)
     (check-regexp-match #rx"process deadline: wedge ran past 1 s" stderr))
+
+  (test-case "a deadline names the body it was given a name for"
+    (define-values (status stderr)
+      (status-and-stderr-of (program '(call-with-process-deadline 1 wedge #:what "the unwind"))
+                            #:within 30))
+    (check-equal? status sigalrm-status)
+    (check-regexp-match #rx"process deadline: the unwind ran past 1 s" stderr))
 
   (test-case "the deadline is lifted when its body returns"
     (check-equal? (run '(begin (call-with-process-deadline 1 void) (sleep 2)) #:within 30) 0))
