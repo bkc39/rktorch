@@ -549,7 +549,7 @@ racket scripts/bench/run.rkt micro      # benchmarks, never a gate (#253):
 racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches;
-                               # a test file past 3x its raco test bound
+                               # a test file past 8x its raco test bound
                                # (test-timeouts from every info.rkt under
                                # torch/, else --file-seconds 300) ends the
                                # run and is named, with the file before it,

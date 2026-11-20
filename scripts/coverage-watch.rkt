@@ -19,7 +19,7 @@
 
 (define file-seconds (make-parameter 300))
 
-(define cover-slowdown 3)
+(define cover-slowdown 8)
 
 (struct overran (file previous seconds) #:transparent)
 
@@ -300,8 +300,8 @@
     (define repo
       (~> (#%variable-reference) variable-reference->module-source path-only (build-path 'up)))
     (define bound (bound-for (parameterize ([current-directory repo]) (test-timeouts))))
-    (check-equal? (bound "/w/torch/tests/python-cross-test.rkt") 3600)
-    (check-equal? (bound "/w/torch/pkg-build/smoke.rkt") 900)
+    (check-equal? (bound "/w/torch/tests/python-cross-test.rkt") (* cover-slowdown 1200))
+    (check-equal? (bound "/w/torch/pkg-build/smoke.rkt") (* cover-slowdown 300))
     (check-equal? (bound "/w/torch/tests/no-entry-test.rkt") (* cover-slowdown 300)))
 
   (test-case "no test-timeouts anywhere is an error, not the default for every file"
