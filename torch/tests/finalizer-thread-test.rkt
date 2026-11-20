@@ -49,10 +49,11 @@
     (check-equal? answers (make-list 3 (list (* workers per-worker) 1)) stderr))
 
   (test-case "a place that ends or stalls without answering fails its run within the bound"
-    (for ([entry (in-list '(quit main))])
+    (for ([entry (in-list '(quit main))]
+          [seconds (in-list '(30 2))])
       (define start (current-inexact-monotonic-milliseconds))
       (define-values (status answers stderr)
-        (place-answers-in-child place-stall entry 1 #:seconds 2))
+        (place-answers-in-child place-stall entry 1 #:seconds seconds))
       (check-equal? status 0 stderr)
       (check-equal? answers '(#f) (format "~a" entry))
       (check-true (< (- (current-inexact-monotonic-milliseconds) start) 10000)
