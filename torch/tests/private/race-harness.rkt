@@ -7,7 +7,7 @@
          (only-in racket/contract/base
                   -> ->* ->i >/c any flat-named-contract listof or/c)
          (only-in racket/dict dict-ref)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list filter-not remove-duplicates)
          (only-in racket/match match)
          (only-in racket/string string-join)
          (only-in rackunit define-check fail-check)
@@ -24,7 +24,8 @@
                   live-bytes-by-device reset-pressure-state!)
          (only-in "../../foreign/raw/race-points.rkt" race-hook)
          (only-in "../../foreign/raw/regions.rkt" with-cleanup)
-         (only-in "../../private/contract.rkt" define/contract-out))
+         (only-in "../../private/contract.rkt" define/contract-out)
+         (only-in "wedge.rkt" call-with-process-deadline))
 
 (provide with-race-hook
          with-parked
@@ -235,20 +236,48 @@
                 (cons 'returned (thunk)))))
   (worker (if pool (thread body #:pool pool) (thread body)) outcome pool))
 
-(define (join w #:seconds [seconds 60])
-  (sync/timeout seconds (thread-dead-evt (worker-thread w)))
+(define (deadline-in seconds)
+  (+ (current-inexact-monotonic-milliseconds) (* 1000 seconds)))
+
+(define (seconds-until deadline)
+  (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
+
+(define (post-kill-wait seconds bound)
+  (max 0 (min seconds (- bound 1))))
+
+(define (kill-and-await! threads #:seconds seconds #:bound bound #:what what)
+  (define running (filter-not thread-dead? threads))
+  (define (kill-and-wait)
+    (for-each kill-thread running)
+    (define deadline (deadline-in (post-kill-wait seconds bound)))
+    (andmap values
+            (for/list ([t (in-list running)])
+              (sync/timeout (seconds-until deadline) (thread-dead-evt t)))))
+  (cond
+    [(null? running) #t]
+    [else (call-with-process-deadline bound kill-and-wait #:what what)]))
+
+(define (join-by w deadline seconds stop-unfinished!)
+  (sync/timeout (seconds-until deadline) (thread-dead-evt (worker-thread w)))
   (match (unbox (worker-outcome w))
     [(cons 'raised e) (raise e)]
     [(cons 'returned v) v]
     [#f
-     (kill-thread (worker-thread w))
+     (stop-unfinished! w)
      (error 'join "a worker did not finish within ~a s, or was killed" seconds)]))
 
-(define (stop! w #:seconds [seconds 30])
-  (define t (worker-thread w))
-  (kill-thread t)
-  (unless (sync/timeout seconds (thread-dead-evt t))
-    (error 'stop! "a killed worker was still running after ~a s" seconds)))
+(define (stopped? w #:seconds seconds #:bound bound)
+  (kill-and-await! (list (worker-thread w))
+                   #:seconds seconds #:bound bound #:what "stopping a worker"))
+
+(define (join w #:seconds [seconds 60] #:stop-seconds [stop-seconds 60])
+  (join-by w (deadline-in seconds) seconds
+           (lambda (w) (stopped? w #:seconds 30 #:bound stop-seconds))))
+
+(define (stop! w #:seconds [seconds 30] #:stop-seconds [stop-seconds 60])
+  (unless (stopped? w #:seconds seconds #:bound stop-seconds)
+    (error 'stop! "a killed worker was still running after ~a s"
+           (post-kill-wait seconds stop-seconds))))
 
 (define/contract-out (stop-worker! w stop-by)
   (->i ([w worker?]
@@ -274,8 +303,26 @@
        (error 'await-flag "a worker did not set its flag within ~a s" seconds)]
       [else (sleep 0.001) (poll)])))
 
-(define (join-all workers #:seconds [seconds 120])
-  (map (lambda (w) (join w #:seconds seconds)) workers))
+(define (stop-all! workers bound)
+  (kill-and-await! (map worker-thread workers)
+                   #:seconds 30 #:bound bound #:what "stopping a worker set"))
+
+(define (join-all workers #:seconds [seconds 120] #:stop-seconds [stop-seconds 60])
+  (define deadline (deadline-in seconds))
+  (define (dead-evt w)
+    (wrap-evt (thread-dead-evt (worker-thread w)) (lambda (_) w)))
+  (define (await pending)
+    (match pending
+      ['() (map (lambda (w) (join-by w deadline seconds void)) workers)]
+      [(cons oldest _)
+       (define done (apply sync/timeout (seconds-until deadline) (map dead-evt pending)))
+       (join-by (or done oldest) deadline seconds void)
+       (await (remq done pending))]))
+  (with-handlers ([(lambda (_) #t)
+                   (lambda (e)
+                     (stop-all! workers stop-seconds)
+                     (raise e))])
+    (await workers)))
 
 (struct roster (started stop?))
 
