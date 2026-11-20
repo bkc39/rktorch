@@ -21,7 +21,8 @@
         (write (call-with-process-deadline ,(+ seconds 5) (lambda () ,@body))))
      #:within (+ seconds 6)))
 
-  (test-case "parallel threads whose first registration is the drain's canary share one finalizer thread"
+  (test-case
+      "parallel threads whose first registration is the drain's canary share one finalizer thread"
     (define-values (status answers stderr)
       (answer-in-child
        `((only-in ffi/unsafe register-finalizer)
