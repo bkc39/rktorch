@@ -3,6 +3,7 @@
 (module+ test
   (require rackunit
            (only-in racket/list remove-duplicates)
+           (only-in racket/match match-define)
            "../main.rkt"
            "../vision/transforms.rkt"
            (only-in (submod "../vision/transforms.rkt" private)
@@ -76,13 +77,24 @@
         (define y (resize x s))
         (check-eq? (resize y s) y (format "~a twice to ~a" d s)))))
 
-  (bounded-test "E4: resized-crop is two narrows then resize"
+  (define (window-copy x window)
+    (match-define (list c rows cols) (shape x))
+    (match-define (list top left h w) window)
+    (define size (quotient (bytes-length (tensor->bytes x)) (* c rows cols)))
+    (define all (tensor->bytes x))
+    (define kept
+      (for*/list ([k (in-range c)] [row (in-range top (+ top h))])
+        (define start (* size (+ (* (+ (* k rows) row) cols) left)))
+        (subbytes all start (+ start (* size w)))))
+    (bytes->tensor (apply bytes-append kept) (dtype x) (list c h w)))
+
+  (bounded-test "E4: resized-crop resizes the window's pixels"
     (for* ([d (in-list '(uint8 float32))]
            [antialias? (in-list '(#t #f))]
            [window (in-list windows)])
       (define x (image '(3 37 53) d #:seed 4))
       (check-true (same-bytes? (resized-crop x window '(11 17) #:antialias? antialias?)
-                               (resize (crop x window) '(11 17) #:antialias? antialias?))
+                               (resize (window-copy x window) '(11 17) #:antialias? antialias?))
                   (format "~a ~a antialias ~a" d window antialias?))))
 
   (bounded-test "E5: a crop view resizes as its contiguous copy does"
@@ -184,8 +196,24 @@
     (define u (pixels '(3 64 64)))
     (define g (make-generator 1))
     (define rrc (calls (lambda () (random-resized-crop u 24 #:generator g))))
-    (check-true (<= rrc (budget 5 (if native-uint8-resize? 5 7)))
+    (check-true (<= rrc (if native-uint8-resize? (budget 5 5) (budget 8 6)))
                 (format "random-resized-crop: ~a" rrc)))
+
+  (bounded-test "E15: a [C H W] or [N C H W] uint8 image in NCHW order resizes to 1x1 as its channels-last copy does"
+    (define (channels-last-copy x)
+      (define-values (to-hwc from-hwc)
+        (if (= (length (shape x)) 3)
+            (values '(1 2 0) '(2 0 1))
+            (values '(0 2 3 1) '(0 3 1 2))))
+      (define hwc (apply permute x to-hwc))
+      (apply permute (bytes->tensor (tensor->bytes hwc) 'uint8 (shape hwc)) from-hwc))
+    (for* ([lead (in-list '(() (1) (2)))]
+           [c (in-list '(1 3 4))]
+           [antialias? (in-list '(#t #f))])
+      (define x (pixels (append lead (list c 8 8)) #:seed 9))
+      (check-true (same-bytes? (resize x '(1 1) #:antialias? antialias?)
+                               (resize (channels-last-copy x) '(1 1) #:antialias? antialias?))
+                  (format "~a ~a antialias ~a" lead c antialias?))))
 
   (define accelerators
     (append (if (cuda-available?) (list (cuda-device)) '())

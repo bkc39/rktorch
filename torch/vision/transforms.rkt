@@ -10,7 +10,7 @@
          (only-in "../foreign.rkt"
                   add arange clamp cpu-capability cpu-generator/c device
                   device-type div draw-seed dtype flip masked-fill! mul narrow
-                  ne rand reshape select stack sub tensor tensor->list
+                  ne permute rand reshape select stack sub tensor tensor->list
                   tensor-shape tensor? to to-dtype where zeros)
          (only-in "../generated.rkt"
                   constant-pad-nd index-tensor random-from! round-tensor
@@ -42,6 +42,12 @@
    'image-or-image-batch
    (lambda (x)
      (and (tensor? x) (~> (tensor-shape x) length (memv '(3 4))) #t))))
+
+(define image-or-batch/c
+  (flat-named-contract
+   'image-or-batch
+   (and/c image-or-image-batch/c
+          (lambda (x) (andmap positive? (tensor-shape x))))))
 
 (define (image-count x)
   (match (tensor-shape x)
@@ -152,15 +158,6 @@
 (define (channels x)
   (caddr (reverse (tensor-shape x))))
 
-(define image-or-batch/c
-  (flat-named-contract
-   'image-or-batch
-   (lambda (x)
-     (and (tensor? x)
-          (memv (length (tensor-shape x)) '(3 4))
-          (andmap positive? (tensor-shape x))
-          #t))))
-
 (define float-image/c
   (flat-named-contract
    'float-image-or-batch
@@ -233,10 +230,16 @@
   ((if antialias? upsample-bilinear2d-aa upsample-bilinear2d)
    x (list oh ow) #f #f #f))
 
-(define (batched x oh ow antialias?)
+(define (channels-last x n c h w)
+  (~> x (permute 0 2 3 1) (reshape -1) (reshape n h w c) (permute 0 3 1 2)))
+
+(define (batched x oh ow antialias? [native-uint8? #f])
   (match (tensor-shape x)
     [(list c h w)
-     (~> x (reshape 1 c h w) (interpolated oh ow antialias?) (reshape c oh ow))]
+     (~> x (reshape 1 c h w) (batched oh ow antialias? native-uint8?) (reshape c oh ow))]
+    [(list n 3 h w)
+     #:when (and native-uint8? (= oh 1) (= ow 1))
+     (~> x (channels-last n 3 h w) (interpolated oh ow antialias?))]
     [_ (interpolated x oh ow antialias?)]))
 
 (define (through-float32 x source oh ow antialias? narrow-back)
@@ -253,7 +256,7 @@
      (through-float32 x source oh ow antialias? values)]
     [(and (eq? source 'uint8) (eq? (or path (uint8-path x)) 'float))
      (through-float32 x source oh ow antialias? round-tensor)]
-    [else (batched x oh ow antialias?)]))
+    [else (batched x oh ow antialias? (eq? source 'uint8))]))
 
 (define (resize/path x size antialias? [path #f])
   (define-values (h w) (spatial-size x))
