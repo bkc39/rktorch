@@ -6,20 +6,25 @@
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "private/child.rkt" run-child)
-           "private/sandbox.rkt")
+           "private/sandbox.rkt"
+           (only-in "private/wedge.rkt" call-with-process-deadline))
 
   (define workers 8)
   (define per-worker 2000)
 
   (test-case "parallel threads whose first registration is the drain's canary share one finalizer thread"
-    (for ([_ (in-range 3)])
-      (with-fresh-eval (ev #:time-limit 60)
-        (check-false (eq? (ev '(dynamic-require 'ffi/unsafe 'register-finalizer))
-                          register-finalizer)
-                     "the sandbox has its own finalizer thread to start")
-        (ev '(require torch/tests/private/finalizer-race))
-        (check-equal? (ev `(run-race ,workers ,per-worker))
-                      (list (* workers per-worker) 1)))))
+    (call-with-process-deadline
+     20
+     (lambda ()
+       (for ([_ (in-range 3)])
+         (with-fresh-eval (ev #:time-limit 20)
+           (check-false (eq? (ev '(dynamic-require 'ffi/unsafe 'register-finalizer))
+                             register-finalizer)
+                        "the sandbox has its own finalizer thread to start")
+           (ev '(require torch/tests/private/finalizer-race))
+           (check-equal? (ev `(run-race ,workers ,per-worker))
+                         (list (* workers per-worker) 1)))))
+     #:what "three sandboxed finalizer races"))
 
   (define-runtime-path place-finalizer-race "private/place-finalizer-race.rkt")
   (define-runtime-path place-stall "private/place-stall.rkt")
@@ -38,13 +43,13 @@
             (sync/timeout left p (handle-evt (place-dead-evt p) (lambda (_) (sync/timeout 0 p))))
             (place-kill p)))
         (write (call-with-process-deadline
-                ,(+ seconds 10)
+                ,(+ seconds 5)
                 (lambda () (for/list ([_ (in-range ,runs)]) (answer))))))
-     #:within (+ seconds 20)))
+     #:within (+ seconds 10)))
 
   (test-case "inside a place, parallel threads that register first share one finalizer thread"
     (define-values (status answers stderr)
-      (place-answers-in-child place-finalizer-race 'main 3 #:seconds 75))
+      (place-answers-in-child place-finalizer-race 'main 3 #:seconds 45))
     (check-equal? status 0 stderr)
     (check-equal? answers (make-list 3 (list (* workers per-worker) 1)) stderr))
 
