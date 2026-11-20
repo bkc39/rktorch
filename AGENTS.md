@@ -550,8 +550,10 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches;
                                # a test file past 3x its raco test bound
-                               # (test-timeouts, else --file-seconds 300)
-                               # ends the run and is named (#550)
+                               # (test-timeouts from every info.rkt under
+                               # torch/, else --file-seconds 300) ends the
+                               # run and is named, with the file before it,
+                               # since cover logs each start late (#550)
 
 scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
