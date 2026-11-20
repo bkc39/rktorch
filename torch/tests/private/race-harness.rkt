@@ -242,22 +242,34 @@
 (define (seconds-until deadline)
   (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
 
-(define (join-by w deadline seconds)
+(define (kill-and-await! threads #:seconds seconds #:bound bound #:what what)
+  (define (kill-and-wait)
+    (for-each kill-thread threads)
+    (define deadline (deadline-in seconds))
+    (andmap values
+            (for/list ([t (in-list threads)])
+              (sync/timeout (seconds-until deadline) (thread-dead-evt t)))))
+  (call-with-process-deadline bound kill-and-wait #:what what))
+
+(define (join-by w deadline seconds stop-unfinished!)
   (sync/timeout (seconds-until deadline) (thread-dead-evt (worker-thread w)))
   (match (unbox (worker-outcome w))
     [(cons 'raised e) (raise e)]
     [(cons 'returned v) v]
     [#f
-     (kill-thread (worker-thread w))
+     (stop-unfinished! w)
      (error 'join "a worker did not finish within ~a s, or was killed" seconds)]))
 
-(define (join w #:seconds [seconds 60])
-  (join-by w (deadline-in seconds) seconds))
+(define (stopped? w #:seconds seconds #:bound bound)
+  (kill-and-await! (list (worker-thread w))
+                   #:seconds seconds #:bound bound #:what "stopping a worker"))
 
-(define (stop! w #:seconds [seconds 30])
-  (define t (worker-thread w))
-  (kill-thread t)
-  (unless (sync/timeout seconds (thread-dead-evt t))
+(define (join w #:seconds [seconds 60] #:stop-seconds [stop-seconds 60])
+  (join-by w (deadline-in seconds) seconds
+           (lambda (w) (stopped? w #:seconds 30 #:bound stop-seconds))))
+
+(define (stop! w #:seconds [seconds 30] #:stop-seconds [stop-seconds 60])
+  (unless (stopped? w #:seconds seconds #:bound stop-seconds)
     (error 'stop! "a killed worker was still running after ~a s" seconds)))
 
 (define/contract-out (stop-worker! w stop-by)
@@ -285,13 +297,8 @@
       [else (sleep 0.001) (poll)])))
 
 (define (stop-all! workers bound)
-  (define threads (map worker-thread workers))
-  (define (kill-and-wait)
-    (for-each kill-thread threads)
-    (define deadline (deadline-in 30))
-    (for ([t (in-list threads)])
-      (sync/timeout (seconds-until deadline) (thread-dead-evt t))))
-  (call-with-process-deadline bound kill-and-wait #:what "stopping a worker set"))
+  (kill-and-await! (map worker-thread workers)
+                   #:seconds 30 #:bound bound #:what "stopping a worker set"))
 
 (define (join-all workers #:seconds [seconds 120] #:stop-seconds [stop-seconds 60])
   (define deadline (deadline-in seconds))
@@ -299,10 +306,10 @@
     (wrap-evt (thread-dead-evt (worker-thread w)) (lambda (_) w)))
   (define (await pending)
     (match pending
-      ['() (map (lambda (w) (join-by w deadline seconds)) workers)]
+      ['() (map (lambda (w) (join-by w deadline seconds void)) workers)]
       [(cons oldest _)
        (define done (apply sync/timeout (seconds-until deadline) (map dead-evt pending)))
-       (join-by (or done oldest) deadline seconds)
+       (join-by (or done oldest) deadline seconds void)
        (await (remq done pending))]))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
