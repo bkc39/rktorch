@@ -21,7 +21,7 @@
          (only-in "runtime.rkt" outside-cores process-cpu-times)
          (only-in "session.rkt" fresh-run-id wait-for-load)
          (only-in "shim.rkt" aten-threads)
-         (only-in "summary-m0.rkt" m0-markdown)
+         (only-in "summary-m0.rkt" block-arms m0-markdown)
          (only-in "summary.rkt" read-records))
 
 (provide block-arms
@@ -42,11 +42,6 @@
 
 (define smoke-settings
   (hasheq 'rounds 1 'samples 64 'epochs 1 'warmup 1 'seconds 0.5 'dataset "fixture" 'k3-smoke? #t))
-
-(define (block-arms pipeline workers)
-  (if (or (zero? workers) (eq? pipeline 'train))
-      '(rktorch pytorch)
-      '(rktorch pytorch pytorch-persistent)))
 
 (define (m0-plan #:rounds rounds #:pipelines pipelines #:workers workers
                  #:train-workers train-workers #:seed seed)

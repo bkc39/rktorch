@@ -1,11 +1,11 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list last)
+  (require (only-in racket/list last take)
            rackunit
            (only-in "summary-m0.rkt"
-                    arm-rate block-ratios cell-row done-when m0-markdown scaling training-row
-                    valid-blocks))
+                    arm-rate block-ratios cell-row done-when k6-column m0-markdown scaling
+                    training-row valid-blocks))
 
   (define (arm pipeline workers which rate
                #:block block #:round [round 0] #:racket [racket "9.3"] #:load [load 0.5]
@@ -56,6 +56,23 @@
     (check-equal? (list (length valid) dropped) '(1 2))
     (check-equal? (block-ratios records "cifar" 0 "pytorch") '(0.5))
     (check-equal? (hash-ref (cell-row records "cifar" 0) 'dropped) 2))
+
+  (test-case "a block missing an arm its cell runs is dropped, so an interrupted run's rate is not used"
+    (define records (append (keyword-block "jpeg" 4 0 100.0 200.0 150.0)
+                            (keyword-block "jpeg" 4 1 #:round 1 900.0 400.0)
+                            (take (keyword-block "jpeg" 0 2 #:round 1 900.0 400.0) 1)))
+    (define-values (valid dropped) (valid-blocks records "jpeg" 4))
+    (check-equal? (list (length valid) dropped) '(1 1))
+    (check-equal? (arm-rate records "jpeg" 4 "rktorch") 100.0)
+    (check-equal? (hash-ref (cell-row records "jpeg" 0) 'dropped) 1)
+    (check-false (arm-rate records "jpeg" 0 "rktorch")))
+
+  (test-case "K6 reads the rktorch arms of accepted blocks only"
+    (define clean (keyword-block "jpeg" 0 0 100.0 200.0))
+    (define py-failed (for/list ([r (in-list (keyword-block "jpeg" 0 1 #:round 1 100.0 200.0))])
+                        (if (equal? (hash-ref r 'arm) "pytorch") (hash-set r 'error "boom") r)))
+    (check-equal? (hash-count (k6-column py-failed "jpeg")) 0)
+    (check-equal? (k6-column (append clean py-failed) "jpeg") (k6-column clean "jpeg")))
 
   (test-case "scaling is w4 over w0 on each side; the persistent twin's base is the plain twin's w0"
     (define records (append (keyword-block "cifar-png" 0 0 100.0 400.0)

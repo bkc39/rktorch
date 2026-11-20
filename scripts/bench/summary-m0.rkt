@@ -8,9 +8,11 @@
          (only-in "summary-op-cost.rkt" k3-thread-scaling k6-gc-per-sample))
 
 (provide arm-rate
+         block-arms
          block-ratios
          cell-row
          done-when
+         k6-column
          m0-markdown
          m0-records
          scaling
@@ -42,6 +44,11 @@
 (define (block-key r)
   (list (ref r 'run_id) (ref r 'round) (ref r 'block)))
 
+(define (block-arms pipeline workers)
+  (if (or (zero? workers) (eq? pipeline 'train))
+      '(rktorch pytorch)
+      '(rktorch pytorch pytorch-persistent)))
+
 (define (cell-blocks records pipeline workers)
   (define arms
     (filter (lambda (r) (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)))
@@ -59,13 +66,20 @@
 
 (define (valid-blocks records pipeline workers)
   (define blocks (cell-blocks records pipeline workers))
+  (define expected (map symbol->string (block-arms (string->symbol pipeline) workers)))
   (define valid
-    (filter (lambda (b) (and (hash-ref b "rktorch" #f) (andmap clean-arm? (hash-values b))))
+    (filter (lambda (b)
+              (and (andmap (lambda (arm) (hash-ref b arm #f)) expected)
+                   (andmap clean-arm? (hash-values b))))
             blocks))
   (values valid (- (length blocks) (length valid))))
 
-(define (block-ratios records pipeline workers arm)
+(define (accepted-blocks records pipeline workers)
   (define-values (valid _dropped) (valid-blocks records pipeline workers))
+  valid)
+
+(define (block-ratios records pipeline workers arm)
+  (define valid (accepted-blocks records pipeline workers))
   (define key (rate-key pipeline))
   (for*/list ([b (in-list valid)]
               [other (in-value (hash-ref b arm #f))]
@@ -73,7 +87,7 @@
     (/ (ref (hash-ref b "rktorch") key) (ref other key))))
 
 (define (arm-values records pipeline workers arm key)
-  (define-values (valid _dropped) (valid-blocks records pipeline workers))
+  (define valid (accepted-blocks records pipeline workers))
   (filter-map (lambda (b) (ref (hash-ref b arm #f) key)) valid))
 
 (define (arm-rate records pipeline workers arm)
@@ -85,7 +99,7 @@
   (and (positive? workers) (real? active) (real? idle) (/ (- active idle) workers 1.0)))
 
 (define (worker-threads records pipeline workers arm)
-  (define-values (valid _dropped) (valid-blocks records pipeline workers))
+  (define valid (accepted-blocks records pipeline workers))
   (define counts
     (for*/list ([b (in-list valid)]
                 [r (in-value (hash-ref b arm #f))]
@@ -173,9 +187,9 @@
       (number->string (hash-ref row 'blocks))))
 
 (define (k6-column records pipeline)
-  (define rk (for/list ([r (in-list (m0-records records))]
-                        #:when (and (equal? (ref r 'arm) "rktorch") (clean-arm? r)))
-               (hash-set r 'kind "pipeline")))
+  (define rk (for*/list ([w (in-list (cells-of records pipeline))]
+                         [b (in-list (accepted-blocks records pipeline w))])
+               (hash-set (hash-ref b "rktorch") 'kind "pipeline")))
   (for/hash ([row (in-list (k6-gc-per-sample rk #:pipeline pipeline))])
     (values (hash-ref row 'workers) (hash-ref row 'value))))
 
