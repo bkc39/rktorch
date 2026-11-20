@@ -74,11 +74,9 @@ tr_tensor* tr_image_decode(const uint8_t* data, int64_t len, int32_t channels) {
       decode_failure();
     }
     const int kept = channels == 0 ? stored : channels;
-    // clone, not contiguous: a one-channel permute is already contiguous and
-    // would come back as a view of the buffer freed on return
     return torch::from_blob(pixels.get(), {height, width, kept}, torch::kUInt8)
-        .permute({2, 0, 1})
-        .clone(at::MemoryFormat::Contiguous);
+        .clone()
+        .permute({2, 0, 1});
   });
 }
 

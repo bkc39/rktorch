@@ -248,3 +248,10 @@ optim _amp_update_scale_
 # 32-bit word of the generator per value below 2^32.
 vision constant_pad_nd
 inplace random_.from
+# --- tranche 13 (#458): bilinear resizing on uint8 and float -----------------
+# F.interpolate(mode="bilinear", align_corners=False) with and without
+# antialias, the kernels torchvision v2's resize calls; round is the float
+# path's half-to-even narrowing back to uint8.
+vision upsample_bilinear2d
+vision _upsample_bilinear2d_aa
+math round

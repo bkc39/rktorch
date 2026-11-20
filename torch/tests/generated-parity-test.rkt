@@ -229,7 +229,12 @@
                                (scalar-tensor 0.0) (double 2.0) (double 0.5) (int64 2))
           'constant-pad-nd '((tensor 2 3) (int-array (1 2 0 1)) (double 0.5))
           'random-from! '((tensor 6) (int64 2) (optional-int64 9)
-                          (kwarg "generator" none))))
+                          (kwarg "generator" none))
+          'round-tensor '((tensor 2 3))
+          'upsample-bilinear2d '((tensor 1 2 3 3) (int-array (5 4)) (bool #f)
+                                 (kwarg "scales_h" none) (kwarg "scales_w" none))
+          'upsample-bilinear2d-aa '((tensor 1 2 6 7) (int-array (3 4)) (bool #f)
+                                    (kwarg "scales_h" none) (kwarg "scales_w" none))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.

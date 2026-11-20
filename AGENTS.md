@@ -213,16 +213,18 @@ with `backward!` outside the form as PyTorch recommends). From
   device-side augmentation, SGD under `one-cycle-lr` and `with-autocast` is
   `torch/scribblings/examples/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
-  #:p` and `random-crop #:padding` on an image batch where it lives; each
+  #:p` and `random-crop #:padding` on an image `[C H W]` or a batch where it
+  lives (#458); each
   takes `#:generator` and draws torchvision's per-image values from it
   (`torch.rand` for the coin, `torch.randint` for the offsets), so a seeded
   loader replays its augmentation and a per-sample pipeline matches
   torchvision's for a seed; a one-image crop is a pad and two `narrow`s
   (`constant-pad-nd` and `random-from!`, tranche 12, #458). The pretrained preprocessing (#199) on an image or a
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
-  torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
-  float only; two matmuls with host-computed bilinear or Pillow-filter
-  weights; `upsample_bilinear2d` is not bound),
+  torchvision scaling), `resize #:antialias?` (short side or `(h w)`; uint8 or float,
+  torchvision v2's paths: the native uint8 kernel where `cpu-capability` is
+  avx2/avx512 or on arm64, else float32 + round half to even;
+  `upsample-bilinear2d` / `upsample-bilinear2d-aa`, tranche 13, #458),
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
@@ -297,7 +299,9 @@ with `backward!` outside the form as PyTorch recommends). From
   autocast-dtype` (`torch/foreign/autocast.rkt` over
   `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
   grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
-- determinism and precision switches, process-wide: `torch/foreign/switches.rkt` (#482, #483)
+- determinism and precision switches, process-wide: `torch/foreign/switches.rkt` (#482, #483);
+  `cpu-capability`, ATen's CPU dispatch level as a lowercase symbol, fixed
+  for the process (#458)
 
 **Name shadowing convention:** the 22 ops named like a `racket` export
 (`+ - * / < <= > >= abs argmax cos exp flatten length log max min sin sort

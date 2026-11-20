@@ -33,6 +33,7 @@ tr_tensor* tr_gen_linalg_vector_norm(const tr_tensor* self, double ord,
                                      bool dim_has, bool keepdim, int32_t dtype);
 tr_tensor* tr_gen_maximum(const tr_tensor* self, const tr_tensor* other);
 tr_tensor* tr_gen_minimum(const tr_tensor* self, const tr_tensor* other);
+tr_tensor* tr_gen_round(const tr_tensor* self);
 tr_tensor* tr_gen_sin(const tr_tensor* self);
 
 #ifdef __cplusplus

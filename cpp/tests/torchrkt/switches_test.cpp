@@ -313,4 +313,11 @@ TEST(TorchrktSwitches, PrecisionGetterRefusesAMixedState) {
   EXPECT_EQ(read_flag(tr_get_float32_matmul_precision), 0);
 }
 
+TEST(TorchrktSwitches, CpuCapabilityIsAtensAndFixedForTheProcess) {
+  const char* first = tr_cpu_capability();
+  ASSERT_NE(first, nullptr) << tr_last_error();
+  EXPECT_EQ(std::string(first), at::get_cpu_capability());
+  EXPECT_EQ(tr_cpu_capability(), first);
+}
+
 }  // namespace

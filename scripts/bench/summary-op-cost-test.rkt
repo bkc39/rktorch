@@ -163,7 +163,7 @@
 (test-case "K5 divides pipeline throughput by PyTorch's per worker count, skipping failed runs"
   (check-equal? (map (lambda (k) (ref k 'workers)) (k5-pipelines records)) '(0 8))
   (check-near (map (lambda (k) (ref k 'value)) (k5-pipelines records)) '(0.25 1))
-  (check-true (string-contains? (op-cost-markdown records) "rktorch converts first (#458)")))
+  (check-false (string-contains? (op-cost-markdown records) "converts first")))
 
 (test-case "K5 at w > 0 is n/a when a side timed its first epoch, worker start-up included"
   (define cold
