@@ -18,7 +18,9 @@
                   string-trim)
          (only-in racket/system system* system*/exit-code)
          (only-in "coverage-watch.rkt"
-                  bound-for cover-outcome file-seconds run-watched test-timeouts))
+                  bound-for cover-outcome cover-slowdown file-seconds run-watched
+                  test-timeouts)
+         (only-in "../torch/tests/private/wedge.rkt" deadline-scale-variable))
 
 ;; The floor CI and the local loop hold the library to. Raise it as the
 ;; categories in #173 land; never lower it to make a change pass.
@@ -61,10 +63,16 @@
 ;; logs each file's start on a block-buffered stdout: line buffering makes
 ;; the start lines arrive near the files they name, so a file past its bound
 ;; is seen.
+(define cover-prelude
+  (list "-l" "racket/base" "-l" "racket/os"
+        "-e" (format "~s" `(begin (file-stream-buffer-mode (current-output-port) 'line)
+                                  (void (putenv ,deadline-scale-variable
+                                                (format "~a@~a" ,cover-slowdown (getpid))))))))
+
 (define (cover-command)
-  (list (racket) "-l" "racket/base"
-        "-e" "(file-stream-buffer-mode (current-output-port) 'line)"
-        "-l-" "raco" "cover" "-b" "-d" (report-dir) "torch/"))
+  (append (list (racket))
+          cover-prelude
+          (list "-l-" "raco" "cover" "-b" "-d" (report-dir) "torch/")))
 
 ;; Racket also exits 1 on a signal or an uncaught error, so an earlier
 ;; run's report goes first: a cover that wrote nothing then has nothing to read.
@@ -373,6 +381,15 @@
     (define-values (status stderr) (gate-over-stale-report))
     (check-false (zero? status) stderr)
     (check-regexp-match #rx"coverage: no report at .*index[.]html" stderr))
+
+  (test-case "the cover process scales its own deadlines by the watchdog's slowdown"
+    (define wedge (path->string (build-path repo-root "torch" "tests" "private" "wedge.rkt")))
+    (define read-scale (format "~s" `(write ((dynamic-require '(file ,wedge) 'deadline-scale)))))
+    (check-equal? (with-output-to-string
+                    (lambda ()
+                      (apply system* (find-executable-path (find-system-path 'exec-file))
+                             (append cover-prelude (list "-e" read-scale)))))
+                  (number->string cover-slowdown)))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"
