@@ -2,11 +2,13 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
+           (only-in racket/list append*)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
-                    bytes->tensor cpu-device device dtype narrow select tensor->bytes
-                    tensor->list tensor-shape)
+                    cpu-device device dtype narrow reshape select tensor->bytes
+                    tensor->list tensor-shape view)
+           (only-in "../foreign/addresses.rkt" tensor-data-ptr)
            (only-in "../vision/image.rkt" decode-image read-image)
            (only-in "../vision/transforms.rkt" resize))
 
@@ -56,12 +58,17 @@
     (check-equal? (tensor-shape (read-image (fixture "palette.png")))
                   '(3 23 37)))
 
-  (test-case "a decode's bytes are those of a contiguous copy, for one to four channels"
+  (test-case "a decode is channels-last: the next channel is the next byte"
     (define bs (file->bytes (fixture "gradient.png")))
-    (for ([mode (in-list '(gray gray-alpha rgb rgba))])
+    (for ([mode (in-list '(gray-alpha rgb rgba))])
       (define img (decode-image bs #:mode mode #:device 'cpu))
-      (define copy (bytes->tensor (tensor->bytes img) 'uint8 (tensor-shape img)))
-      (check-equal? (tensor->bytes img) (tensor->bytes copy) (symbol->string mode))))
+      (check-equal? (- (tensor-data-ptr (select img 0 1)) (tensor-data-ptr img)) 1
+                    (symbol->string mode))
+      (check-exn exn:fail? (lambda () (view img -1)))
+      (check-equal? (tensor->list (reshape img -1))
+                    (append* (for/list ([c (in-range (car (tensor-shape img)))])
+                               (plane img c)))
+                    (symbol->string mode))))
 
   (test-case "a decoded image resizes to 1x1, each channel as it would alone"
     (for ([mode (in-list '(rgb rgba))])

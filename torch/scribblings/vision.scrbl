@@ -396,13 +396,15 @@ torchvision classifier expects after @racket[resize] to 256 and
 @racket[center-crop] to 224.
 }
 
-The two random transforms take an image, @tt{[C H W]}, or a batch,
-@tt{[N C H W]}, and return one of the same shape; an image is a batch of
-one. The random choices are per image, drawn on the host from a Racket
-generator that one @racket[draw-seed] from the torch generator seeds per
-batch, so a loader built on @racket[(make-generator 0)] replays its
-augmentation as well as its batch order. They are the transform's own
-draws: a torchvision pipeline on the same seed picks different crops.
+The random transforms take an image, @tt{[C H W]}, or a batch,
+@tt{[N C H W]}, and return one of the same rank; an image is a batch of
+one. @racket[random-horizontal-flip] and @racket[random-crop] draw from the
+torch generator as torchvision's do, so the same seed picks the same flips
+and windows. @racket[random-resized-crop] draws per image on the host from
+a Racket generator that one @racket[draw-seed] from the torch generator
+seeds per batch, so a loader built on @racket[(make-generator 0)] replays
+its crops as well as its batch order, but a torchvision pipeline on the
+same seed picks different ones.
 
 @racketblock[
 (define g (make-generator 0))
@@ -991,7 +993,9 @@ torchvision's @tt{ImageReadMode} does, gray as stb's integer luma
 truncated, is an error naming the reason. So is an image of more than
 178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
 from its header before any pixel is decoded, so a small file cannot
-claim gigabytes of memory.
+claim gigabytes of memory. The result is a channels-last view of the
+decoded @tt{[H W C]} buffer, as torchvision's is: @racket[view] on it
+raises, so flatten it with @racket[reshape].
 }
 
 @defproc[(read-image [path path-string?]
@@ -1000,7 +1004,8 @@ claim gigabytes of memory.
                              'unchanged]
                      [#:device device (or/c #f device/c) #f])
          tensor?]{
-@racket[decode-image] on the contents of the file at @racket[path].
+@racket[decode-image] on the contents of the file at @racket[path], so a
+channels-last view as well.
 }
 
 @section{Image folders}
