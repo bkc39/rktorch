@@ -7,7 +7,7 @@
          (only-in racket/contract/base
                   -> ->* ->i >/c any flat-named-contract listof or/c)
          (only-in racket/dict dict-ref)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list filter-not remove-duplicates)
          (only-in racket/match match)
          (only-in racket/string string-join)
          (only-in rackunit define-check fail-check)
@@ -243,13 +243,16 @@
   (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
 
 (define (kill-and-await! threads #:seconds seconds #:bound bound #:what what)
+  (define running (filter-not thread-dead? threads))
   (define (kill-and-wait)
-    (for-each kill-thread threads)
+    (for-each kill-thread running)
     (define deadline (deadline-in seconds))
     (andmap values
-            (for/list ([t (in-list threads)])
+            (for/list ([t (in-list running)])
               (sync/timeout (seconds-until deadline) (thread-dead-evt t)))))
-  (call-with-process-deadline bound kill-and-wait #:what what))
+  (cond
+    [(null? running) #t]
+    [else (call-with-process-deadline bound kill-and-wait #:what what)]))
 
 (define (join-by w deadline seconds stop-unfinished!)
   (sync/timeout (seconds-until deadline) (thread-dead-evt (worker-thread w)))

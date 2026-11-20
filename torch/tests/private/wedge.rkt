@@ -6,6 +6,7 @@
 
 (provide arm-process-deadline!
          call-with-process-deadline
+         deadlines-armed
          exit-status-of
          status-and-stderr-of)
 
@@ -49,6 +50,11 @@
                   (set! lift! (arm-process-deadline! seconds what)))
                 thunk
                 (lambda () (lift!))))
+
+(define (deadlines-armed thunk)
+  (define receiver (make-log-receiver (current-logger) 'debug 'process-deadline))
+  (thunk)
+  (for/sum ([_ (in-producer (lambda () (sync/timeout 0 receiver)) #f)]) 1))
 
 (define (status-and-stderr-of program #:within seconds)
   (define-values (sp out in err)

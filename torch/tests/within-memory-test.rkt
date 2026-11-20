@@ -3,7 +3,7 @@
 (module+ test
   (require (only-in racket/function const)
            rackunit
-           (only-in "private/wedge.rkt" status-and-stderr-of)
+           (only-in "private/wedge.rkt" deadlines-armed status-and-stderr-of)
            (only-in "private/within-memory.rkt" within-memory))
 
   (test-case "a timed-out within-memory stops its body"
@@ -22,11 +22,6 @@
     (check-equal? (call-with-values (lambda () (within-memory 64 (lambda () (values 1 2))))
                                     list)
                   '(1 2)))
-
-  (define (deadlines-armed thunk)
-    (define receiver (make-log-receiver (current-logger) 'debug 'process-deadline))
-    (thunk)
-    (for/sum ([_ (in-producer (lambda () (sync/timeout 0 receiver)) #f)]) 1))
 
   (test-case "a within-memory whose body leaves no threads arms no process deadline"
     (check-equal? (deadlines-armed (lambda () (within-memory 64 void))) 0)

@@ -5,11 +5,12 @@
            rackunit
            (only-in "../foreign/raw/race-points.rkt" race-point)
            (only-in "private/blame.rkt" blames-caller?)
-           (only-in "private/wedge.rkt" status-and-stderr-of)
+           (only-in "private/wedge.rkt" deadlines-armed status-and-stderr-of)
            (only-in "private/race-harness.rkt"
                     await-flag await-roles! join join-all make-gate make-roster pools
                     pools-stopped-by release-pending? spawn stop! stop-roles! stop-worker!
-                    stops-for until-stopped wait-for-arrival with-parked worker-thread))
+                    stops-for until-stopped wait-for-arrival while-inside with-parked
+                    worker-thread))
 
   (define (left-parked pool)
     (define g (make-gate 'harness-parked))
@@ -80,6 +81,16 @@
   (test-case "a worker left parked never passes its race point"
     (for ([pool (in-list '(#f own))])
       (check-equal? (left-parked pool) '(#t #f #f) (~a pool))))
+
+  (test-case "stopping workers that have already ended arms no process deadline"
+    (for ([pool (in-list pools)])
+      (define ended (spawn void #:pool pool))
+      (join ended)
+      (check-equal? (deadlines-armed (lambda () (stop! ended))) 0 (~a pool))
+      (check-equal? (deadlines-armed (lambda () (while-inside (lambda (k) (k)) void #:pool pool)))
+                    0 (~a pool))
+      (define running (spawn (lambda () (sync never-evt)) #:pool pool))
+      (check-equal? (deadlines-armed (lambda () (stop! running))) 1 (~a pool))))
 
   (define (slow-first-step done)
     (define first? #t)
