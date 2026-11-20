@@ -84,7 +84,7 @@
     (define all (tensor->bytes x))
     (define kept
       (for*/list ([k (in-range c)] [row (in-range top (+ top h))])
-        (define start (* size (+ (* (+ (* k rows) row) cols) left)))
+        (define start (* size (~> (* k rows) (+ row) (* cols) (+ left))))
         (subbytes all start (+ start (* size w)))))
     (bytes->tensor (apply bytes-append kept) (dtype x) (list c h w)))
 
@@ -202,7 +202,7 @@
   (bounded-test "E15: a [C H W] or [N C H W] uint8 image in NCHW order resizes to 1x1 as its channels-last copy does"
     (define (channels-last-copy x)
       (define-values (to-hwc from-hwc)
-        (if (= (length (shape x)) 3)
+        (if (~> (shape x) length (= 3))
             (values '(1 2 0) '(2 0 1))
             (values '(0 2 3 1) '(0 3 1 2))))
       (define hwc (apply permute x to-hwc))

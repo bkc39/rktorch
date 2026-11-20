@@ -994,7 +994,7 @@ truncated, is an error naming the reason. So is an image of more than
 178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
 from its header before any pixel is decoded, so a small file cannot
 claim gigabytes of memory. The result is a channels-last view of the
-decoded @tt{[H W C]} buffer, as torchvision's is: @racket[view] on it
+decoded @tt{[H W C]} buffer, as torchvision's is: @tt{view} on it
 raises, so flatten it with @racket[reshape].
 }
 
