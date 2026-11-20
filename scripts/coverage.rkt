@@ -399,7 +399,7 @@
     (define-values (_status _stderr called) (gate-under-stub make-then-fail-cover))
     (check-equal? (length called) 2 (format "~s" called))
     (check-regexp-match #rx"^-l- raco make -j 4 .*torch/tests/private/wedge[.]rkt" (first called))
-    (check-regexp-match #rx"-l- raco cover " (second called)))
+    (check-regexp-match #rx"RKTORCH_DEADLINE_SCALE.*-l- raco cover " (second called)))
 
   (test-case "a failed compile fails the gate before cover runs"
     (define-values (status stderr called) (gate-under-stub "exit 3"))
