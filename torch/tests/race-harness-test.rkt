@@ -158,22 +158,6 @@
   (define harness-module
     (path->string (collection-file-path "race-harness.rkt" "torch" "tests" "private")))
 
-  (test-case "stopping a set whose worker sits in a foreign call ends the process, named"
-    (define-values (status stderr)
-      (status-and-stderr-of
-       `(begin
-          (module run racket/base
-            (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
-                     (only-in (file ,harness-module) join-all spawn))
-            (define c-sleep (get-ffi-obj "sleep" #f (_fun _uint -> _uint)))
-            (define sleeper (spawn (lambda () (c-sleep 600)) #:pool 'own))
-            (define raiser (spawn (lambda () (sleep 0.5) (error 'worker "boom"))))
-            (join-all (list raiser sleeper) #:seconds 30 #:stop-seconds 2))
-          (require 'run))
-       #:within 60))
-    (check-equal? status (+ 128 14) stderr)
-    (check-regexp-match #rx"process deadline: stopping a worker set ran past 2 s" stderr))
-
   (define (stopped-in-child body)
     (status-and-stderr-of
      `(begin
@@ -187,6 +171,13 @@
           ,body)
         (require 'run))
      #:within 60))
+
+  (test-case "stopping a set whose worker sits in a foreign call ends the process, named"
+    (define-values (status stderr)
+      (stopped-in-child '(join-all (list (spawn (lambda () (error 'worker "boom"))) (sleeper))
+                                   #:seconds 30 #:stop-seconds 2)))
+    (check-equal? status (+ 128 14) stderr)
+    (check-regexp-match #rx"process deadline: stopping a worker set ran past 2 s" stderr))
 
   (test-case "a set that times out with a worker in a foreign call ends the process, named"
     (define-values (status stderr)

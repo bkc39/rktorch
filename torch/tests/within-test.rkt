@@ -88,7 +88,7 @@
           (module run racket/base
             (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
                      (file ,within-module))
-            (define c-sleep (get-ffi-obj "sleep" #f (_fun _uint -> _uint)))
+            (define c-sleep (get-ffi-obj "sleep" #f (_fun #:blocking? #t _uint -> _uint)))
             (within 0.5
                     (lambda ()
                       (thread (lambda () (c-sleep 600)) #:pool 'own)
