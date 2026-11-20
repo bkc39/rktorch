@@ -2,11 +2,10 @@
 
 (module+ test
   (require (only-in ffi/unsafe register-finalizer)
-           (only-in racket/place dynamic-place place-kill)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           "private/sandbox.rkt"
-           (only-in "private/within.rkt" within))
+           (only-in "private/child.rkt" run-child)
+           "private/sandbox.rkt")
 
   (define workers 8)
   (define per-worker 2000)
@@ -22,12 +21,29 @@
                       (list (* workers per-worker) 1)))))
 
   (define-runtime-path place-finalizer-race "private/place-finalizer-race.rkt")
+  (define-runtime-path place-stall "private/place-stall.rkt")
+  (define-runtime-path wedge "private/wedge.rkt")
+
+  (define (place-answer-in-child place #:seconds seconds)
+    (run-child
+     `(begin
+        (require (only-in racket/place dynamic-place place-kill)
+                 (only-in (file ,(path->string wedge)) call-with-process-deadline))
+        (call-with-process-deadline
+         ,seconds
+         (lambda ()
+           (define p (dynamic-place (string->path ,(path->string place)) 'main))
+           (write (sync/timeout ,(* 2 seconds) p))
+           (place-kill p))))))
 
   (test-case "inside a place, parallel threads that register first share one finalizer thread"
-    (within 300
-            (lambda ()
-              (for ([_ (in-range 3)])
-                (define p (dynamic-place place-finalizer-race 'main))
-                (define answer (sync/timeout 90 p))
-                (place-kill p)
-                (check-equal? answer (list (* workers per-worker) 1)))))))
+    (for ([_ (in-range 3)])
+      (define-values (status answer stderr) (place-answer-in-child place-finalizer-race
+                                                                   #:seconds 100))
+      (check-equal? status 0 stderr)
+      (check-equal? answer (list (* workers per-worker) 1) stderr)))
+
+  (test-case "a place that never answers fails the test, not the process running it"
+    (define-values (status _answer stderr) (place-answer-in-child place-stall #:seconds 2))
+    (check-equal? status (+ 128 14))
+    (check-regexp-match #rx"process deadline: .* ran past 2 s" stderr)))
