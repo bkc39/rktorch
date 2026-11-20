@@ -278,7 +278,7 @@
   (require (only-in racket/file delete-directory/files make-temporary-directory
                     make-temporary-file)
            (only-in racket/port open-output-nowhere)
-           (only-in rackunit check-equal? check-false test-case))
+           (only-in rackunit check-equal? check-false check-regexp-match test-case))
 
   (define (row name percent cov unc total)
     (string-append
@@ -338,6 +338,7 @@
                   "the discrepancy is what read-entries refuses to average over"))
 
   (define this-script (variable-reference->module-source (#%variable-reference)))
+  (define repo-root (simplify-path (build-path this-script 'up 'up)))
 
   ;; a stub `racket` that exits 1 having written nothing, as a killed cover can
   (define (gate-over-stale-report)
@@ -357,16 +358,21 @@
     (environment-variables-set!
      env #"PATH"
      (bytes-append (path->bytes bin) #":" (or (environment-variables-ref env #"PATH") #"")))
-    (begin0
+    (define stderr (open-output-string))
+    (define status
       (parameterize ([current-environment-variables env]
+                     [current-directory repo-root]
                      [current-output-port (open-output-nowhere)]
-                     [current-error-port (open-output-nowhere)])
+                     [current-error-port stderr])
         (system*/exit-code racket
-                           this-script "-d" (path->string report)))
-      (delete-directory/files dir)))
+                           this-script "-d" (path->string report))))
+    (delete-directory/files dir)
+    (values status (get-output-string stderr)))
 
   (test-case "a cover that exits 1 with no report fails the gate, whatever report an earlier run left"
-    (check-false (zero? (gate-over-stale-report))))
+    (define-values (status stderr) (gate-over-stale-report))
+    (check-false (zero? status) stderr)
+    (check-regexp-match #rx"coverage: no report at .*index[.]html" stderr))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"
