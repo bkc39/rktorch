@@ -9,9 +9,11 @@
     (place-channel-put ch (list (cpointer? v) v))))
 
 (module+ test
-  (require (only-in racket/future future touch)
-           (only-in racket/match match-define)
-           (only-in racket/place place-wait)
+  (require (only-in racket/format ~a)
+           (only-in racket/future future touch)
+           (only-in racket/match match match-define)
+           (only-in racket/place dynamic-place place-dead-evt place-kill place-wait)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../foreign.rkt" shape tensor? zeros)
            (only-in "private/wedge.rkt" exit-status-of))
@@ -21,12 +23,31 @@
     (check-true (tensor? v))
     (check-equal? (shape v) '(2 3)))
 
+  (define (reply-within p seconds)
+    (sync/timeout seconds p (handle-evt (place-dead-evt p) (lambda (_) (sync/timeout 0 p)))))
+
+  (define-runtime-path place-stall "private/place-stall.rkt")
+
+  (test-case "a place that ends or stalls without answering is not waited on past its bound"
+    (for ([entry (in-list '(quit main))])
+      (define p (dynamic-place place-stall entry))
+      (define start (current-inexact-monotonic-milliseconds))
+      (check-false (reply-within p (if (eq? entry 'quit) 60 1)) (~a entry))
+      (check-true (< (- (current-inexact-monotonic-milliseconds) start) 30000) (~a entry))
+      (place-kill p)))
+
   (test-case "a tensor sent to another place arrives as a bare pointer"
     (define t (zeros 2 2))
     (define p (echo-place))
     (place-channel-put p t)
-    (match-define (list pointer-there? echoed) (place-channel-get p))
-    (check-equal? (place-wait p) 0)
+    (define reply (reply-within p 120))
+    (define status (and (sync/timeout 30 (place-dead-evt p)) (place-wait p)))
+    (place-kill p)
+    (match-define (list pointer-there? echoed)
+      (match reply
+        [(list _ _) reply]
+        [_ (fail "the echo place died or did not answer within 120 s")]))
+    (check-equal? status 0)
     (check-true pointer-there?)
     (check-false (tensor? echoed))
     (check-equal? (cast echoed _pointer _intptr) (cast t _pointer _intptr)
