@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in ffi/unsafe register-finalizer)
+           (only-in racket/list make-list)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "private/child.rkt" run-child)
@@ -24,26 +25,35 @@
   (define-runtime-path place-stall "private/place-stall.rkt")
   (define-runtime-path wedge "private/wedge.rkt")
 
-  (define (place-answer-in-child place #:seconds seconds)
+  (define (place-answers-in-child place entry runs #:seconds seconds)
     (run-child
      `(begin
-        (require (only-in racket/place dynamic-place place-kill)
+        (require (only-in racket/place dynamic-place place-dead-evt place-kill)
                  (only-in (file ,(path->string wedge)) call-with-process-deadline))
-        (call-with-process-deadline
-         ,seconds
-         (lambda ()
-           (define p (dynamic-place (string->path ,(path->string place)) 'main))
-           (write (sync/timeout ,(* 2 seconds) p))
-           (place-kill p))))))
+        (define deadline (+ (current-inexact-monotonic-milliseconds) ,(* 1000 seconds)))
+        (define (answer)
+          (define p (dynamic-place (string->path ,(path->string place)) ',entry))
+          (define left (max 0 (/ (- deadline (current-inexact-monotonic-milliseconds)) 1000.0)))
+          (begin0
+            (sync/timeout left p (handle-evt (place-dead-evt p) (lambda (_) (sync/timeout 0 p))))
+            (place-kill p)))
+        (write (call-with-process-deadline
+                ,(+ seconds 10)
+                (lambda () (for/list ([_ (in-range ,runs)]) (answer))))))
+     #:within (+ seconds 20)))
 
   (test-case "inside a place, parallel threads that register first share one finalizer thread"
-    (for ([_ (in-range 3)])
-      (define-values (status answer stderr) (place-answer-in-child place-finalizer-race
-                                                                   #:seconds 100))
-      (check-equal? status 0 stderr)
-      (check-equal? answer (list (* workers per-worker) 1) stderr)))
+    (define-values (status answers stderr)
+      (place-answers-in-child place-finalizer-race 'main 3 #:seconds 75))
+    (check-equal? status 0 stderr)
+    (check-equal? answers (make-list 3 (list (* workers per-worker) 1)) stderr))
 
-  (test-case "a place that never answers fails the test, not the process running it"
-    (define-values (status _answer stderr) (place-answer-in-child place-stall #:seconds 2))
-    (check-equal? status (+ 128 14))
-    (check-regexp-match #rx"process deadline: .* ran past 2 s" stderr)))
+  (test-case "a place that ends or stalls without answering fails its run within the bound"
+    (for ([entry (in-list '(quit main))])
+      (define start (current-inexact-monotonic-milliseconds))
+      (define-values (status answers stderr)
+        (place-answers-in-child place-stall entry 1 #:seconds 2))
+      (check-equal? status 0 stderr)
+      (check-equal? answers '(#f) (format "~a" entry))
+      (check-true (< (- (current-inexact-monotonic-milliseconds) start) 10000)
+                  (format "~a" entry)))))
