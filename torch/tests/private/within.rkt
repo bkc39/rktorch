@@ -37,7 +37,9 @@
 (define (shut-down-body! c super
                          #:what [what "stopping a body's threads"]
                          #:seconds [seconds 60])
-  (call-with-process-deadline seconds (lambda () (shut-down! c super)) #:what what))
+  (cond
+    [(null? (threads-under c super)) (custodian-shutdown-all c)]
+    [else (call-with-process-deadline seconds (lambda () (shut-down! c super)) #:what what)]))
 
 (define (unwind-body! body c super)
   (kill-threads-under! c super #:except body)

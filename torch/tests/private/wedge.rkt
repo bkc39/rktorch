@@ -14,6 +14,8 @@
 (define c-raise (get-ffi-obj "raise" #f (_fun _int -> _int)))
 (define sigalrm 14)
 
+(define-logger process-deadline)
+
 ;; The watch runs on an OS thread of its own, so it ends a process wedged in
 ;; atomic mode, and it names itself on stderr first: under raco cover the
 ;; process it ends is the whole suite's. It sleeps to the deadline in one
@@ -27,6 +29,7 @@
     (string->bytes/utf-8
      (format "process deadline: ~a ran past ~a s; ending the process with SIGALRM\n"
              what seconds)))
+  (log-process-deadline-debug "armed for ~a: ~a s" what seconds)
   (call-in-os-thread
    (lambda ()
      (let watch ([left (inexact->exact (ceiling seconds))])

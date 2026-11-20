@@ -23,6 +23,18 @@
                                     list)
                   '(1 2)))
 
+  (define (deadlines-armed thunk)
+    (define receiver (make-log-receiver (current-logger) 'debug 'process-deadline))
+    (thunk)
+    (for/sum ([_ (in-producer (lambda () (sync/timeout 0 receiver)) #f)]) 1))
+
+  (test-case "a within-memory whose body leaves no threads arms no process deadline"
+    (check-equal? (deadlines-armed (lambda () (within-memory 64 void))) 0)
+    (check-equal? (deadlines-armed (lambda () (within-memory 64 (lambda () (sleep 0.01) 1)))) 0)
+    (check-equal? (deadlines-armed
+                   (lambda () (within-memory 64 (lambda () (thread (lambda () (sync never-evt)))))))
+                  1))
+
   (define within-memory-module
     (path->string (collection-file-path "within-memory.rkt" "torch" "tests" "private")))
 

@@ -26,20 +26,20 @@
   (define super (current-custodian))
   (define limited (make-custodian))
   (custodian-limit-memory limited (* megabytes 1024 1024) limited)
-  (define results (make-channel))
+  (define result (box #f))
   (define worker
     (parameterize ([current-custodian limited])
       (thread (lambda ()
-                (channel-put results
-                             (with-handlers ([(const #t) (lambda (v) (lambda () (raise v)))])
-                               (call-with-values thunk
-                                                 (lambda vs (lambda () (apply values vs))))))))))
-  (define outcome
-    (sync/timeout seconds results (handle-evt worker (const 'shut-down))))
+                (set-box! result
+                          (with-handlers ([(const #t) (lambda (v) (lambda () (raise v)))])
+                            (call-with-values thunk
+                                              (lambda vs (lambda () (apply values vs))))))))))
+  (define ended? (sync/timeout seconds worker))
   (shut-down-body! limited super)
+  (define outcome (unbox result))
   (cond
-    [(not outcome) (fail (format "no result within ~a s" seconds))]
-    [(eq? outcome 'shut-down) (fail (format "shut down past its ~a MB memory limit" megabytes))]
+    [(not ended?) (fail (format "no result within ~a s" seconds))]
+    [(not outcome) (fail (format "shut down past its ~a MB memory limit" megabytes))]
     [else (outcome)]))
 
 (define-syntax-parse-rule (memory-bounded-test name:expr body:expr ...+)
