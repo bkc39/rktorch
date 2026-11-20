@@ -10,7 +10,7 @@
 ;; `cover` writes only HTML, so the numbers come back out of its report.
 
 (require (only-in racket/cmdline command-line) ;; noqa
-         (only-in racket/file file->string)
+         (only-in racket/file file->string find-files)
          (only-in racket/format ~a ~r)
          (only-in racket/list first second take)
          (only-in racket/port with-output-to-string)
@@ -79,8 +79,17 @@
 (define (index-path)
   (build-path (report-dir) "index.html"))
 
+(define (make-command)
+  (define sources
+    (find-files (lambda (p) (regexp-match? #rx"[.]rkt$" (path->string p))) "torch"))
+  (append (list (racket) "-l-" "raco" "make" "-j" "4") (map path->string sources)))
+
 (define (run-cover!)
   (when (file-exists? (index-path)) (delete-file (index-path)))
+  (displayln "compiling torch/: cover writes no bytecode, and the suite's children load it")
+  (define made (apply system*/exit-code (make-command)))
+  (unless (zero? made)
+    (die "coverage: raco make over torch/ exited with status ~a\n" made))
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
   (define outcome
     (cover-outcome (run-watched (cover-command) #:bound (bound-for (test-timeouts)))))
@@ -283,7 +292,7 @@
 ;; run with `raco test scripts/coverage.rkt`.
 
 (module+ test
-  (require (only-in racket/file delete-directory/files make-temporary-directory
+  (require (only-in racket/file delete-directory/files file->lines make-temporary-directory
                     make-temporary-file)
            (only-in racket/port open-output-nowhere)
            (only-in rackunit check-equal? check-false check-regexp-match test-case))
@@ -348,15 +357,15 @@
   (define this-script (variable-reference->module-source (#%variable-reference)))
   (define repo-root (simplify-path (build-path this-script 'up 'up)))
 
-  ;; a stub `racket` that exits 1 having written nothing, as a killed cover can
-  (define (gate-over-stale-report)
+  (define (gate-under-stub racket-script)
     (define dir (make-temporary-directory "coverage-test~a"))
     (define bin (build-path dir "bin"))
     (define report (build-path dir "report"))
+    (define calls (build-path dir "calls"))
     (make-directory bin)
     (make-directory report)
     (with-output-to-file (build-path bin "racket")
-      (lambda () (display "#!/bin/sh\nexit 1\n")))
+      (lambda () (printf "#!/bin/sh\necho \"$*\" >> '~a'\n~a\n" calls racket-script)))
     (file-or-directory-permissions (build-path bin "racket") #o755)
     (with-output-to-file (build-path report "index.html")
       (lambda () (display (string-append "<tbody>" (row "torch/main" "100" "1" "0" "1")
@@ -374,13 +383,29 @@
                      [current-error-port stderr])
         (system*/exit-code racket
                            this-script "-d" (path->string report))))
+    (define called (if (file-exists? calls) (file->lines calls) '()))
     (delete-directory/files dir)
-    (values status (get-output-string stderr)))
+    (values status (get-output-string stderr) called))
+
+  (define make-then-fail-cover
+    "case \"$*\" in *\"raco make\"*) exit 0;; *) exit 1;; esac")
 
   (test-case "a cover that exits 1 with no report fails the gate, whatever report an earlier run left"
-    (define-values (status stderr) (gate-over-stale-report))
+    (define-values (status stderr _called) (gate-under-stub make-then-fail-cover))
     (check-false (zero? status) stderr)
     (check-regexp-match #rx"coverage: no report at .*index[.]html" stderr))
+
+  (test-case "torch/ is compiled before cover runs, in parallel"
+    (define-values (_status _stderr called) (gate-under-stub make-then-fail-cover))
+    (check-equal? (length called) 2 (format "~s" called))
+    (check-regexp-match #rx"^-l- raco make -j 4 .*torch/tests/private/wedge[.]rkt" (first called))
+    (check-regexp-match #rx"-l- raco cover " (second called)))
+
+  (test-case "a failed compile fails the gate before cover runs"
+    (define-values (status stderr called) (gate-under-stub "exit 3"))
+    (check-equal? status 1 stderr)
+    (check-regexp-match #rx"coverage: raco make over torch/ exited with status 3" stderr)
+    (check-equal? (length called) 1 (format "~s" called)))
 
   (test-case "the cover process scales its own deadlines by the watchdog's slowdown"
     (define wedge (path->string (build-path repo-root "torch" "tests" "private" "wedge.rkt")))
