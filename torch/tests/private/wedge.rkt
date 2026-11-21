@@ -30,13 +30,28 @@
 (define sigalrm 14)
 (define etimedout (match (system-type 'os) ['macosx 60] [_ 110]))
 
-(define mutex-init (libc "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
-(define mutex-lock (libc "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
-(define mutex-unlock (libc "pthread_mutex_unlock" (_fun _pointer -> _int)))
-(define condition-init (libc "pthread_cond_init" (_fun _pointer _pointer -> _int)))
-(define condition-signal (libc "pthread_cond_signal" (_fun _pointer -> _int)))
+(define (pthread-failed! call status)
+  (define notice
+    (string->bytes/utf-8
+     (string-append "process deadline: " call " returned " (number->string status)
+                    "; ending the process with SIGALRM\n")))
+  (c-write 2 notice (bytes-length notice))
+  (c-raise sigalrm))
+
+(define (pthread-call name type)
+  (define call (libc name type))
+  (lambda arguments
+    (define status (apply call arguments))
+    (unless (zero? status)
+      (pthread-failed! name status))))
+
+(define mutex-init (pthread-call "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
+(define mutex-lock (pthread-call "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
+(define mutex-unlock (pthread-call "pthread_mutex_unlock" (_fun _pointer -> _int)))
+(define condition-init (pthread-call "pthread_cond_init" (_fun _pointer _pointer -> _int)))
+(define condition-signal (pthread-call "pthread_cond_signal" (_fun _pointer -> _int)))
 (define condition-wait
-  (libc "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
+  (pthread-call "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
 (define condition-wait-until
   (libc "pthread_cond_timedwait" (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
 
@@ -117,9 +132,10 @@
           (set-timespec-after! deadline wall-clock remaining)
           (watch)]
          [(zero? status) (watch)]
-         [else
+         [(= status etimedout)
           (c-write 2 notice notice-length)
-          (c-raise sigalrm)]))))
+          (c-raise sigalrm)]
+         [else (pthread-failed! "pthread_cond_timedwait" status)]))))
   (let park ()
     (unless (unbox parked)
       (condition-wait condition mutex)
@@ -299,6 +315,17 @@
        #:within 30))
     (check-equal? status sigalrm-status)
     (check-regexp-match #rx"process deadline: the stepped wedge ran past 3 s" stderr))
+
+  (test-case "a wait the OS refuses ends the process naming the call, not a deadline"
+    (define-values (status stderr)
+      (status-and-stderr-of
+       (program '(begin
+                   (arm-process-deadline! 60 #:wall-clock (lambda () -10000000.5))
+                   (sleep 5)))
+       #:within 30))
+    (check-equal? status sigalrm-status)
+    (check-regexp-match #rx"process deadline: pthread_cond_timedwait returned 22;" stderr)
+    (check-false (regexp-match? #rx"ran past" stderr) stderr))
 
   (test-case "an armed deadline adds nothing to main's heap allocation (#460)"
     (define-values (status stderr)
