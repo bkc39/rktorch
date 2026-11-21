@@ -513,21 +513,26 @@ OMP_NUM_THREADS=1 taskset -c 0-7 racket scripts/bench/run.rkt runtime \
   --max-load 4 --rounds 3 --out runtime.jsonl
 ```
 
-What it reproduces:
+What it reproduces, each figure on the Racket that measured it:
 
 - retained allocation gets no parallel speedup: `alloc-retain` runs
   7-9× slower at k = 7 than at k = 1, against a CPU floor of about 2×,
-  and summed GC time grows from 0.1-0.2 s to 8-13 s (#532, E1);
-- one worker in a plain 2 ms foreign call stalls an allocating main for
-  hundreds of milliseconds at a time, about 150 calls, and a
-  collect-safe call removes the stall (#532, E2; the mechanism in #538);
+  and summed GC time grows from 0.1-0.2 s to 8-13 s (Racket 9.3; #532,
+  E1);
+- on Racket 9.3, one worker in a plain 2 ms foreign call stalls an
+  allocating main for hundreds of milliseconds at a time, about 150
+  calls (main's p99 pause 494-500 ms), and a collect-safe call removes
+  the stall (0.09-0.10 ms) (#532, E2; the mechanism in #538). On Racket
+  9.1 the same plain call holds a collection off for about one call
+  (p99 0.91-0.97 ms; collect-safe 0.11-0.12 ms), so the stall is a 9.2+
+  effect (#551);
 - places share the collector, so `alloc-retain` slows in k places about
-  as it does in k threads (#532, E5);
+  as it does in k threads (Racket 9.3; #532, E5);
 - on real ops, long native calls hurt: 1024² matmuls in plain calls cut a
   training main's rate several-fold at k = 7, collect-safe calls do not,
   and the poll only bounds the pause to one call; small ops lose the same
-  in every mode, so that loss is allocation and GC, not the FFI (#538,
-  and the recommendation in #263).
+  in every mode, so that loss is allocation and GC, not the FFI (Racket
+  9.3; #538, and the recommendation in #263).
 
 ## Records
 
@@ -664,3 +669,84 @@ override it.
 The summary's K1–K6 table follows the #255 metrics comment. K1 and K2 set
 process CPU per op (every OS thread, the reapers included) beside wall time,
 n/a for records written before it was recorded.
+
+## M0: the gap budget (#555)
+
+`scripts/bench/m0.rkt` re-measures the loader and multi-worker gap to
+PyTorch, and is the scoreboard every #555 leg reports against. It runs
+under one Racket at a time, so a full M0 is two runs, on 9.3 and on 9.1,
+summarized together:
+
+```bash
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export RKTORCH_CIFAR10_PNG_DIR=~/.racket/rktorch/cifar10-png
+export RKTORCH_HYMENOPTERA_DIR=~/.racket/rktorch/hymenoptera
+export BASELINE_DIR=~/.local/share/rktorch/bench
+nix develop -c taskset -c 0-8 racket scripts/bench/m0.rkt --racket 9.3 --rounds 5
+racket scripts/bench/m0.rkt m0-9.3-<stamp>.jsonl m0-9.1-<stamp>.jsonl > m0.md
+```
+
+It writes `m0-<racket>-<stamp>.jsonl` and `.md` to `--out-dir`
+(default `BASELINE_DIR`, as `scripts/bench/op-cost.rkt`; in the dev
+shell Racket's home is `PLTUSERHOME`, inside the checkout, so set one),
+and refuses a directory inside the repository, an existing records file,
+more than one ATen thread and a Racket other than `--racket`. `--smoke`
+runs one round of the smallest arms on the PNG fixture.
+
+- **Cells.** Loaders at `--workers` (0, 1, 2, 4, 7) over five
+  pipelines: `cifar-png` (the CIFAR-10 PNG tree per sample, with the
+  augmentation of `scripts/bench/workloads/cifar-pipeline.rkt`),
+  `cifar-batched` (the same tree, augmented per batch), `jpeg`
+  (Hymenoptera, the K5 jpeg pipeline of
+  `scripts/bench/workloads/pipelines.rkt`), and K5's `cifar` and `text`;
+  and #439's training arm, main's steps per second while
+  `scripts/bench/threads.rkt`'s workers run, at `--train-workers` (1, 2,
+  4, 8). Each epoch is `--samples` long (by default 2048, 4096, 512,
+  4096 and 4096); a PNG epoch takes every (n ÷ samples)-th image of the
+  tree, both sides alike.
+- **Arms.** Every arm is its own child process at `OMP_NUM_THREADS=1`
+  and `MKL_NUM_THREADS=1`: rktorch's `dataloader`
+  (`scripts/bench/m0-cells.rkt`), PyTorch's `DataLoader` with
+  `persistent_workers=False` (`py`, like for like, since rktorch starts
+  its workers per traversal, #536) and, at w > 0, with
+  `persistent_workers=True` (`py persistent`, the K5 twin's setting)
+  (`scripts/bench/python/loaders.py`). Each runs `--warmup` untimed
+  epochs, then `--epochs` timed ones.
+- **Blocks.** A block runs one cell's arms back to back in shuffled
+  order; each round runs every block once, in shuffled order, from
+  `--seed`. A ratio is the median over blocks of rktorch over its own
+  block's PyTorch arm, so drift between blocks, about 2× on the lab host,
+  cancels. Each block waits for fewer than `--max-load` busy cores (2 by
+  default); each arm records the outside load as Table R does, counting
+  the waited-for children's CPU as the suite's own, and a block with an
+  arm at or over the limit, or an error, is dropped and counted.
+- **Records.** Each arm adds `round`, `block`, `order`, `pipeline`,
+  `workers`, `arm`, `racket`, `load_outside`, `samples_per_s` or
+  `main_steps_per_s` and `ops_per_s`, `gc_ms` and `gc_count` (Racket's
+  over every OS thread, PyTorch's main process only), the OS threads at
+  baseline and at peak, each PyTorch worker's peak (`worker_threads`),
+  the intra-op thread count and peak RSS.
+- **Worker threads.** rktorch's workers are threads in its own process,
+  started per traversal and gone when it ends, so a timed sampler misses
+  a short epoch's team. Instead, a rktorch loader arm counts
+  `/proc/self/task` at every batch it receives: over a worker-free
+  traversal of the same pipeline (`os_threads_idle`, up to 256 samples)
+  and over its warmup traversals (`os_threads_active`, null at
+  `--warmup 0`). The collector's sweeper threads, which never exit, are
+  started before both. The summary's rk threads per worker is
+  (active − idle) ÷ w; PyTorch's is its busiest worker process.
+- **K3.** After the blocks it runs `scripts/bench/op-cost.rkt
+  --suites ops,pytorch --threads 1,8` for `--k3-reps` reps (default
+  `--rounds`, 0 skips) and reads K3 from its records.
+
+The summary has, per Racket version: the #555 done-when rows (Table H
+w4 ≥ 3× w0; rk ÷ py ≥ 0.5 at w4 for each Table H pipeline; main's
+training rate at w4 ≥ PyTorch's; K3 ≤ 2×), each met, unmet or n/a; Table
+H, samples per second with both ratios, GC ms, collections and GC µs per
+sample (K6), and OS threads per worker; w4 ÷ w0 on each side; the
+training arm; and K3. Given two versions' records, it adds rk ÷ py by
+version.
+
+A 9.1 run needs a checkout whose `compiled/` and `PLTUSERHOME` are 9.1's:
+a separate worktree with Racket 9.1 first on `PATH` and its packages
+installed as `nix/matrix/racket-cell.sh install` does.

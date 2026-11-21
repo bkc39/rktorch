@@ -3,10 +3,9 @@
 (module+ test
   (require (only-in ffi/unsafe _int _intptr _pointer cast ptr-ref)
            (only-in racket/port port->string)
-           (only-in racket/sandbox get-output)
            rackunit
            (only-in "../foreign/raw/fault.rkt" native-fault? native-fault-policy)
-           "private/sandbox.rkt")
+           (only-in "private/child.rkt" run-child))
 
   ;; A handle at address 8 faults on first use, the same way every time.
   (define prelude
@@ -72,13 +71,18 @@
     env)
 
   ;; What the program printed, and what disabled the library, if anything.
-  ;; Under the raise policy a fresh evaluator has its own instance of the
+  ;; Under the raise policy a fresh child has its own instance of the
   ;; latch, so each case starts with the library enabled.
-  (define (run-in-sandbox program)
-    (parameterize ([current-environment-variables (environment-with #f)])
-      (with-fresh-eval (ev #:prelude prelude)
-        (for ([form (in-list program)]) (ev form))
-        (values (get-output ev) (ev '(native-faulted))))))
+  (define (run-in-child program)
+    (define-values (status answer stderr)
+      (run-child `(begin ,@prelude
+                         (define printed (open-output-string))
+                         (parameterize ([current-output-port printed]) ,@program)
+                         (write (list (get-output-string printed) (native-faulted))))
+                 #:environment (list (cons "RKTORCH_ON_NATIVE_FAULT" #f))
+                 #:within 60))
+    (check-equal? status 0 stderr)
+    (apply values answer))
 
   ;; The exit policy ends the process, and its notice goes to file
   ;; descriptor 2 past every port, and a stalled collection stops every
@@ -142,7 +146,7 @@
     (check-true (< (string-length stderr) 4096) "one message, not a cascade"))
 
   (test-case "a fault while printing falls back to the shape and disables"
-    (define-values (stdout faulted) (run-in-sandbox printer-fault))
+    (define-values (stdout faulted) (run-in-child printer-fault))
     (check-true (regexp-match? #rx"#<tensor:2x2>\nsurvived" stdout) stdout)
     (check-true (regexp-match? disabled stdout) stdout)
     (check-equal? faulted "printing a tensor"))
@@ -154,6 +158,6 @@
     (check-true (regexp-match? #rx"while printing a tensor" stderr) stderr))
 
   (test-case "a fault in a caller's own call raises to it and disables nothing"
-    (define-values (stdout faulted) (run-in-sandbox call-fault))
+    (define-values (stdout faulted) (run-in-child call-fault))
     (check-true (regexp-match? #rx"caught\nsurvived\nthen: usable" stdout) stdout)
     (check-false faulted)))

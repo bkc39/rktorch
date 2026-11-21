@@ -28,7 +28,8 @@
          cpu-warning
          default-out-dir
          inside-repo?
-         out-paths)
+         out-paths
+         stamp)
 
 (define-runtime-path repo-root "../..")
 
