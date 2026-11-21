@@ -35,7 +35,12 @@
     ['macosx '(60 6)]
     [_ (raise-arguments-error 'process-deadline "no ETIMEDOUT known for this OS" "os" os)]))
 
-(define os (system-type 'os*))
+(define (platform os*)
+  (match os*
+    [(or 'macosx 'darwin) 'macosx]
+    [_ os*]))
+
+(define os (platform (system-type 'os*)))
 (match-define (list etimedout clock-monotonic) (pthread-constants os))
 
 (define (call-failed! call status)
@@ -256,6 +261,9 @@
     (check-equal? (pthread-constants 'macosx) '(60 6))
     (check-exn #rx"no ETIMEDOUT known for this OS.*freebsd"
                (lambda () (pthread-constants 'freebsd))))
+
+  (test-case "a nix-built darwin Racket's os* name reads as macOS"
+    (check-equal? (map platform '(darwin macosx linux)) '(macosx macosx linux)))
 
   (test-case "a wake is read as lifted first, then as spurious, a deadline, or a failed call"
     (check-equal? (wake-outcome 22 #t) 'lifted)
