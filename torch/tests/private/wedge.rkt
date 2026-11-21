@@ -11,7 +11,7 @@
                   get-ffi-obj
                   malloc)
          (only-in ffi/unsafe/os-thread call-in-os-thread)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
          (only-in racket/math exact-floor)
          (only-in racket/os getpid)
          (only-in racket/port port->string))
@@ -29,15 +29,16 @@
 (define c-raise (libc "raise" (_fun _int -> _int)))
 (define sigalrm 14)
 
-(define (etimedout-of os)
+(define (pthread-constants os)
   (match os
-    ['linux 110]
-    ['macosx 60]
+    ['linux '(110 1)]
+    ['macosx '(60 6)]
     [_ (raise-arguments-error 'process-deadline "no ETIMEDOUT known for this OS" "os" os)]))
 
-(define etimedout (etimedout-of (system-type 'os*)))
+(define os (system-type 'os*))
+(match-define (list etimedout clock-monotonic) (pthread-constants os))
 
-(define (pthread-failed! call status)
+(define (call-failed! call status)
   (define notice
     (string->bytes/utf-8
      (string-append "process deadline: " call " returned " (number->string status)
@@ -45,36 +46,87 @@
   (c-write 2 notice (bytes-length notice))
   (c-raise sigalrm))
 
-(define (pthread-call name type)
+(define (checked-call name type)
   (define call (libc name type))
   (lambda arguments
     (define status (apply call arguments))
     (unless (zero? status)
-      (pthread-failed! name status))))
+      (call-failed! name status))))
 
-(define mutex-init (pthread-call "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
-(define mutex-lock (pthread-call "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
-(define mutex-unlock (pthread-call "pthread_mutex_unlock" (_fun _pointer -> _int)))
-(define condition-init (pthread-call "pthread_cond_init" (_fun _pointer _pointer -> _int)))
-(define condition-signal (pthread-call "pthread_cond_signal" (_fun _pointer -> _int)))
+(define read-clock (libc "clock_gettime" (_fun _int _pointer -> _int)))
+(define checked-read-clock (checked-call "clock_gettime" (_fun _int _pointer -> _int)))
+(define mutex-init (checked-call "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
+(define mutex-lock (checked-call "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
+(define mutex-unlock (checked-call "pthread_mutex_unlock" (_fun _pointer -> _int)))
+(define condition-init (checked-call "pthread_cond_init" (_fun _pointer _pointer -> _int)))
+(define condition-signal (checked-call "pthread_cond_signal" (_fun _pointer -> _int)))
 (define condition-wait
-  (pthread-call "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
-(define condition-wait-until
-  (libc "pthread_cond_timedwait" (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+  (checked-call "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
 
 (define pthread-object-bytes 128)
 
-(define (pthread-object init!)
+(define (pthread-object init! . arguments)
   (define object (malloc pthread-object-bytes 'atomic-interior))
-  (init! object #f)
+  (apply init! object arguments)
   object)
 
 (define-cstruct _timespec ([sec _long] [nsec _long]) #:malloc-mode 'atomic-interior)
 
-(define (set-timespec-after! deadline wall-clock milliseconds)
-  (define-values (sec ms) (quotient/remainder (exact-floor (+ (wall-clock) milliseconds)) 1000))
-  (set-timespec-sec! deadline sec)
-  (set-timespec-nsec! deadline (* ms 1000000)))
+(define nanoseconds-per-second 1000000000)
+
+(define (timespec->nanoseconds time)
+  (+ (* nanoseconds-per-second (timespec-sec time)) (timespec-nsec time)))
+
+(define (set-timespec-nanoseconds! time nanoseconds)
+  (define-values (sec nsec) (quotient/remainder nanoseconds nanoseconds-per-second))
+  (set-timespec-sec! time sec)
+  (set-timespec-nsec! time nsec))
+
+(define (set-time-left! left deadline now)
+  (set-timespec-nanoseconds!
+   left
+   (max 1 (- (timespec->nanoseconds deadline) (timespec->nanoseconds now)))))
+
+(define (monotonic-deadline-after milliseconds)
+  (define deadline (make-timespec 0 0))
+  (checked-read-clock clock-monotonic deadline)
+  (set-timespec-nanoseconds!
+   deadline
+   (+ (timespec->nanoseconds deadline) (exact-floor (* 1000000 milliseconds))))
+  deadline)
+
+(define-values (monotonic-condition-attributes wait-name wait-until)
+  (match os
+    ['linux
+     (define attributes-init (checked-call "pthread_condattr_init" (_fun _pointer -> _int)))
+     (define attributes-set-clock
+       (checked-call "pthread_condattr_setclock" (_fun _pointer _int -> _int)))
+     (define wait-until-deadline
+       (libc "pthread_cond_timedwait" (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+     (values (lambda ()
+               (define attributes (pthread-object attributes-init))
+               (attributes-set-clock attributes clock-monotonic)
+               attributes)
+             "pthread_cond_timedwait"
+             (lambda (condition mutex deadline _left)
+               (wait-until-deadline condition mutex deadline)))]
+    ['macosx
+     (define wait-for
+       (libc "pthread_cond_timedwait_relative_np"
+             (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+     (values (lambda () #f)
+             "pthread_cond_timedwait_relative_np"
+             (lambda (condition mutex deadline left)
+               (read-clock clock-monotonic left)
+               (set-time-left! left deadline left)
+               (wait-for condition mutex left)))]))
+
+(define (wake-outcome status lifted?)
+  (cond
+    [lifted? 'lifted]
+    [(zero? status) 'spurious]
+    [(= status etimedout) 'ran-past]
+    [else 'failed]))
 
 (define-logger process-deadline)
 
@@ -104,22 +156,16 @@
 ;; a lifted watch waits on, and arm returns only once the watch is inside that
 ;; wait: main gets the mutex back only when the wait releases it, so the watch
 ;; runs no Racket code in any window main opens after arm returns until the
-;; wait wakes, at its deadline or spuriously. The wait's deadline is on the
-;; wall clock, so a wake that finds the monotonic target still ahead, as after
-;; a clock step, waits out what is left of it.
-(define (arm-process-deadline! seconds
-                               [what "a deadline's body"]
-                               #:wall-clock [wall-clock current-inexact-milliseconds])
+;; wait wakes, at its deadline or spuriously.
+(define (arm-process-deadline! seconds [what "a deadline's body"])
   (define scale (deadline-scale))
   (define bound (bound-text seconds scale))
   (define lifted (box #f))
   (define parked (box #f))
-  (define mutex (pthread-object mutex-init))
-  (define condition (pthread-object condition-init))
-  (define milliseconds (* 1000 scale seconds))
-  (define target (+ (current-inexact-monotonic-milliseconds) milliseconds))
-  (define deadline (make-timespec 0 0))
-  (set-timespec-after! deadline wall-clock milliseconds)
+  (define mutex (pthread-object mutex-init #f))
+  (define condition (pthread-object condition-init (monotonic-condition-attributes)))
+  (define deadline (monotonic-deadline-after (* 1000 scale seconds)))
+  (define left (make-timespec 0 0))
   (define notice
     (string->bytes/utf-8
      (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n" what bound)))
@@ -132,18 +178,14 @@
      (set-box! parked #t)
      (condition-signal condition)
      (let watch ()
-       (define status (condition-wait-until condition mutex deadline))
-       (define remaining (- target (current-inexact-monotonic-milliseconds)))
-       (cond
-         [(unbox lifted) (void)]
-         [(and (= status etimedout) (positive? remaining))
-          (set-timespec-after! deadline wall-clock remaining)
-          (watch)]
-         [(zero? status) (watch)]
-         [(= status etimedout)
+       (define status (wait-until condition mutex deadline left))
+       (match (wake-outcome status (unbox lifted))
+         ['lifted (void)]
+         ['spurious (watch)]
+         ['ran-past
           (c-write 2 notice notice-length)
           (c-raise sigalrm)]
-         [else (pthread-failed! "pthread_cond_timedwait" status)]))))
+         ['failed (call-failed! wait-name status)]))))
   (let park ()
     (unless (unbox parked)
       (condition-wait condition mutex)
@@ -209,11 +251,6 @@
          (define usleep (get-ffi-obj "usleep" #f (_fun _uint -> _int)))
          (define (stamp! factor pid) ;; noqa
            (putenv deadline-scale-variable (format "~a@~a" factor pid)))
-         (define (stepped-forward-by milliseconds) ;; noqa
-           (define step (box milliseconds))
-           (lambda ()
-             (begin0 (- (current-inexact-milliseconds) (unbox step))
-                     (set-box! step 0))))
          (define (wedge) ;; noqa
            (start-atomic)
            (let loop ()
@@ -225,10 +262,33 @@
   (define (run body #:within seconds)
     (exit-status-of (program body) #:within seconds))
 
-  (test-case "ETIMEDOUT is read for the OS os* names, and an unknown OS is refused"
-    (check-equal? (etimedout-of 'linux) 110)
-    (check-equal? (etimedout-of 'macosx) 60)
-    (check-exn #rx"no ETIMEDOUT known for this OS.*freebsd" (lambda () (etimedout-of 'freebsd))))
+  (test-case "ETIMEDOUT and CLOCK_MONOTONIC are read for the OS os* names, and others refused"
+    (check-equal? (pthread-constants 'linux) '(110 1))
+    (check-equal? (pthread-constants 'macosx) '(60 6))
+    (check-exn #rx"no ETIMEDOUT known for this OS.*freebsd"
+               (lambda () (pthread-constants 'freebsd))))
+
+  (test-case "a wake is read as lifted first, then as spurious, a deadline, or a failed call"
+    (check-equal? (wake-outcome 22 #t) 'lifted)
+    (check-equal? (wake-outcome etimedout #t) 'lifted)
+    (check-equal? (wake-outcome 0 #f) 'spurious)
+    (check-equal? (wake-outcome etimedout #f) 'ran-past)
+    (check-equal? (wake-outcome 22 #f) 'failed))
+
+  (test-case "the time left to a deadline is its difference from now, and never zero"
+    (define (left-of deadline now)
+      (define left (make-timespec 0 0))
+      (set-time-left! left (apply make-timespec deadline) (apply make-timespec now))
+      (list (timespec-sec left) (timespec-nsec left)))
+    (check-equal? (left-of '(10 500000000) '(8 700000000)) '(1 800000000))
+    (check-equal? (left-of '(10 0) '(10 0)) '(0 1))
+    (check-equal? (left-of '(10 0) '(12 0)) '(0 1)))
+
+  (test-case "a wedge ends at its bound, not before it"
+    (define start (current-inexact-monotonic-milliseconds))
+    (check-equal? (run '(call-with-process-deadline 2 wedge) #:within 30) sigalrm-status)
+    (define elapsed (- (current-inexact-monotonic-milliseconds) start))
+    (check-true (>= elapsed 2000) (format "ended after ~a ms" elapsed)))
 
   (test-case "a process wedged in atomic mode ends at its deadline"
     (check-equal? (run '(call-with-process-deadline 1 wedge) #:within 30) sigalrm-status))
@@ -309,36 +369,6 @@
                          (lambda () (call-with-process-deadline 60 wedge)))
                        #:within 10)
                   sigalrm-status))
-
-  (test-case "a wall clock stepped forward after arming does not end the process early"
-    (check-equal? (run '(begin
-                          (arm-process-deadline! 3 #:wall-clock (stepped-forward-by 2500))
-                          (sleep 1.5))
-                       #:within 30)
-                  0))
-
-  (test-case "a wall clock stepped forward after arming still ends a wedge at its deadline"
-    (define-values (status stderr)
-      (status-and-stderr-of
-       (program '(begin
-                   (arm-process-deadline! 3
-                                          "the stepped wedge"
-                                          #:wall-clock (stepped-forward-by 2500))
-                   (wedge)))
-       #:within 30))
-    (check-equal? status sigalrm-status)
-    (check-regexp-match #rx"process deadline: the stepped wedge ran past 3 s" stderr))
-
-  (test-case "a wait the OS refuses ends the process naming the call, not a deadline"
-    (define-values (status stderr)
-      (status-and-stderr-of
-       (program '(begin
-                   (arm-process-deadline! 60 #:wall-clock (lambda () -10000000.5))
-                   (sleep 5)))
-       #:within 30))
-    (check-equal? status sigalrm-status)
-    (check-regexp-match #rx"process deadline: pthread_cond_timedwait returned 22;" stderr)
-    (check-false (regexp-match? #rx"ran past" stderr) stderr))
 
   (test-case "an armed deadline adds nothing to main's heap allocation (#460)"
     (define-values (status stderr)
