@@ -1,8 +1,18 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _bytes _fun _int _intptr _uint get-ffi-obj)
+(require (only-in ffi/unsafe
+                  _bytes
+                  _fun
+                  _int
+                  _intptr
+                  _long
+                  _pointer
+                  define-cstruct
+                  get-ffi-obj
+                  malloc)
          (only-in ffi/unsafe/os-thread call-in-os-thread)
          (only-in racket/match match)
+         (only-in racket/math exact-floor)
          (only-in racket/os getpid)
          (only-in racket/port port->string))
 
@@ -14,10 +24,34 @@
          exit-status-of
          status-and-stderr-of)
 
-(define c-write (get-ffi-obj "write" #f (_fun _int _bytes _intptr -> _intptr)))
-(define c-sleep (get-ffi-obj "sleep" #f (_fun #:blocking? #t _uint -> _uint)))
-(define c-raise (get-ffi-obj "raise" #f (_fun _int -> _int)))
+(define (libc name type) (get-ffi-obj name #f type))
+(define c-write (libc "write" (_fun _int _bytes _intptr -> _intptr)))
+(define c-raise (libc "raise" (_fun _int -> _int)))
 (define sigalrm 14)
+
+(define mutex-init (libc "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
+(define mutex-lock (libc "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
+(define mutex-unlock (libc "pthread_mutex_unlock" (_fun _pointer -> _int)))
+(define condition-init (libc "pthread_cond_init" (_fun _pointer _pointer -> _int)))
+(define condition-signal (libc "pthread_cond_signal" (_fun _pointer -> _int)))
+(define condition-wait
+  (libc "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
+(define condition-wait-until
+  (libc "pthread_cond_timedwait" (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+
+(define pthread-object-bytes 128)
+
+(define (pthread-object init!)
+  (define object (malloc pthread-object-bytes 'atomic-interior))
+  (init! object #f)
+  object)
+
+(define-cstruct _timespec ([sec _long] [nsec _long]) #:malloc-mode 'atomic-interior)
+
+(define (timespec-after seconds)
+  (define-values (sec ms)
+    (quotient/remainder (exact-floor (+ (current-inexact-milliseconds) (* 1000 seconds))) 1000))
+  (make-timespec sec (* ms 1000000)))
 
 (define-logger process-deadline)
 
@@ -39,30 +73,46 @@
 ;; atomic mode, and it names itself on stderr first: under raco cover the
 ;; process it ends is the whole suite's, which runs instrumented, so there the
 ;; deadline is scaled by the factor cover stamped with that process's pid; its
-;; children inherit the stamp but load compiled code, and keep theirs. It
-;; sleeps to the deadline in one blocking call, and a lifted watch sleeps on: a
-;; thread that returns from a blocking call after a collection claims a fresh
-;; 16 KiB allocation area, which (current-memory-use 'cumulative) counts in
-;; whatever window main has open, so a watch that woke to poll would land in
-;; heap measurements.
+;; children inherit the stamp but load compiled code, and keep theirs. An OS
+;; thread that runs at all after a collection is charged a fresh 16 KiB
+;; allocation area when it next enters a blocking call, and
+;; (current-memory-use 'cumulative) counts it in whatever window main has open.
+;; So the watch waits out the deadline in one blocking pthread_cond_timedwait,
+;; a lifted watch waits on, and arm returns only once the watch is inside that
+;; wait: main gets the mutex back only when the wait releases it, so the watch
+;; runs no Racket code in any window main opens after arm returns.
 (define (arm-process-deadline! seconds [what "a deadline's body"])
   (define scale (deadline-scale))
+  (define bound (bound-text seconds scale))
   (define lifted (box #f))
+  (define parked (box #f))
+  (define mutex (pthread-object mutex-init))
+  (define condition (pthread-object condition-init))
+  (define deadline (timespec-after (* scale seconds)))
   (define notice
     (string->bytes/utf-8
-     (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n"
-             what (bound-text seconds scale))))
-  (log-process-deadline-debug "armed for ~a: ~a" what (bound-text seconds scale))
+     (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n" what bound)))
+  (define notice-length (bytes-length notice))
+  (log-process-deadline-debug "armed for ~a: ~a" what bound)
+  (mutex-lock mutex)
   (call-in-os-thread
    (lambda ()
-     (let watch ([left (inexact->exact (ceiling (* scale seconds)))])
-       (define unslept (c-sleep left))
+     (mutex-lock mutex)
+     (set-box! parked #t)
+     (condition-signal condition)
+     (let watch ()
+       (define status (condition-wait-until condition mutex deadline))
        (cond
          [(unbox lifted) (void)]
-         [(positive? unslept) (watch unslept)]
+         [(zero? status) (watch)]
          [else
-          (c-write 2 notice (bytes-length notice))
+          (c-write 2 notice notice-length)
           (c-raise sigalrm)]))))
+  (let park ()
+    (unless (unbox parked)
+      (condition-wait condition mutex)
+      (park)))
+  (mutex-unlock mutex)
   (lambda () (set-box! lifted #t)))
 
 (define (call-with-process-deadline seconds thunk
@@ -219,7 +269,6 @@
       (status-and-stderr-of
        (program '(begin
                    (arm-process-deadline! 300)
-                   (usleep 200000)
                    (define spans
                      (for/list ([_ (in-range 3)])
                        (collect-garbage 'minor)
