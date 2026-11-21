@@ -28,6 +28,7 @@
 (define c-write (libc "write" (_fun _int _bytes _intptr -> _intptr)))
 (define c-raise (libc "raise" (_fun _int -> _int)))
 (define sigalrm 14)
+(define etimedout (match (system-type 'os) ['macosx 60] [_ 110]))
 
 (define mutex-init (libc "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
 (define mutex-lock (libc "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
@@ -48,10 +49,10 @@
 
 (define-cstruct _timespec ([sec _long] [nsec _long]) #:malloc-mode 'atomic-interior)
 
-(define (timespec-after seconds)
-  (define-values (sec ms)
-    (quotient/remainder (exact-floor (+ (current-inexact-milliseconds) (* 1000 seconds))) 1000))
-  (make-timespec sec (* ms 1000000)))
+(define (set-timespec-after! deadline wall-clock milliseconds)
+  (define-values (sec ms) (quotient/remainder (exact-floor (+ (wall-clock) milliseconds)) 1000))
+  (set-timespec-sec! deadline sec)
+  (set-timespec-nsec! deadline (* ms 1000000)))
 
 (define-logger process-deadline)
 
@@ -80,15 +81,22 @@
 ;; So the watch waits out the deadline in one blocking pthread_cond_timedwait,
 ;; a lifted watch waits on, and arm returns only once the watch is inside that
 ;; wait: main gets the mutex back only when the wait releases it, so the watch
-;; runs no Racket code in any window main opens after arm returns.
-(define (arm-process-deadline! seconds [what "a deadline's body"])
+;; runs no Racket code in any window main opens after arm returns. The wait's
+;; deadline is on the wall clock, so a wake that finds the monotonic target
+;; still ahead, as after a clock step, waits out what is left of it.
+(define (arm-process-deadline! seconds
+                               [what "a deadline's body"]
+                               #:wall-clock [wall-clock current-inexact-milliseconds])
   (define scale (deadline-scale))
   (define bound (bound-text seconds scale))
   (define lifted (box #f))
   (define parked (box #f))
   (define mutex (pthread-object mutex-init))
   (define condition (pthread-object condition-init))
-  (define deadline (timespec-after (* scale seconds)))
+  (define milliseconds (* 1000 scale seconds))
+  (define target (+ (current-inexact-monotonic-milliseconds) milliseconds))
+  (define deadline (make-timespec 0 0))
+  (set-timespec-after! deadline wall-clock milliseconds)
   (define notice
     (string->bytes/utf-8
      (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n" what bound)))
@@ -102,8 +110,12 @@
      (condition-signal condition)
      (let watch ()
        (define status (condition-wait-until condition mutex deadline))
+       (define remaining (- target (current-inexact-monotonic-milliseconds)))
        (cond
          [(unbox lifted) (void)]
+         [(and (= status etimedout) (positive? remaining))
+          (set-timespec-after! deadline wall-clock remaining)
+          (watch)]
          [(zero? status) (watch)]
          [else
           (c-write 2 notice notice-length)
@@ -173,6 +185,11 @@
          (define usleep (get-ffi-obj "usleep" #f (_fun _uint -> _int)))
          (define (stamp! factor pid) ;; noqa
            (putenv deadline-scale-variable (format "~a@~a" factor pid)))
+         (define (stepped-forward-by milliseconds) ;; noqa
+           (define step (box milliseconds))
+           (lambda ()
+             (begin0 (- (current-inexact-milliseconds) (unbox step))
+                     (set-box! step 0))))
          (define (wedge) ;; noqa
            (start-atomic)
            (let loop ()
@@ -263,6 +280,25 @@
                          (lambda () (call-with-process-deadline 60 wedge)))
                        #:within 10)
                   sigalrm-status))
+
+  (test-case "a wall clock stepped forward after arming does not end the process early"
+    (check-equal? (run '(begin
+                          (arm-process-deadline! 3 #:wall-clock (stepped-forward-by 2500))
+                          (sleep 1.5))
+                       #:within 30)
+                  0))
+
+  (test-case "a wall clock stepped forward after arming still ends a wedge at its deadline"
+    (define-values (status stderr)
+      (status-and-stderr-of
+       (program '(begin
+                   (arm-process-deadline! 3
+                                          "the stepped wedge"
+                                          #:wall-clock (stepped-forward-by 2500))
+                   (wedge)))
+       #:within 30))
+    (check-equal? status sigalrm-status)
+    (check-regexp-match #rx"process deadline: the stepped wedge ran past 3 s" stderr))
 
   (test-case "an armed deadline adds nothing to main's heap allocation (#460)"
     (define-values (status stderr)
