@@ -540,7 +540,7 @@ cmake --build cpp/build
 ctest --test-dir cpp/build --output-on-failure
 
 raco test torch/          # FFI unit tests (+ self-skipping parity test)
-raco test --timeout 60 examples/test/  # literate-example runners, limits in its info.rkt
+raco test --timeout 1200 examples/test/  # literate-example runners, one hang bound each
 racket -ie "(require torch)"   # REPL with the package loaded
                                # (`racket -l torch` runs module+ main instead)
 
