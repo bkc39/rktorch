@@ -28,7 +28,14 @@
 (define c-write (libc "write" (_fun _int _bytes _intptr -> _intptr)))
 (define c-raise (libc "raise" (_fun _int -> _int)))
 (define sigalrm 14)
-(define etimedout (match (system-type 'os) ['macosx 60] [_ 110]))
+
+(define (etimedout-of os)
+  (match os
+    ['linux 110]
+    ['macosx 60]
+    [_ (raise-arguments-error 'process-deadline "no ETIMEDOUT known for this OS" "os" os)]))
+
+(define etimedout (etimedout-of (system-type 'os*)))
 
 (define (pthread-failed! call status)
   (define notice
@@ -217,6 +224,11 @@
 
   (define (run body #:within seconds)
     (exit-status-of (program body) #:within seconds))
+
+  (test-case "ETIMEDOUT is read for the OS os* names, and an unknown OS is refused"
+    (check-equal? (etimedout-of 'linux) 110)
+    (check-equal? (etimedout-of 'macosx) 60)
+    (check-exn #rx"no ETIMEDOUT known for this OS.*freebsd" (lambda () (etimedout-of 'freebsd))))
 
   (test-case "a process wedged in atomic mode ends at its deadline"
     (check-equal? (run '(call-with-process-deadline 1 wedge) #:within 30) sigalrm-status))
