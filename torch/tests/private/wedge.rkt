@@ -96,9 +96,10 @@
 ;; So the watch waits out the deadline in one blocking pthread_cond_timedwait,
 ;; a lifted watch waits on, and arm returns only once the watch is inside that
 ;; wait: main gets the mutex back only when the wait releases it, so the watch
-;; runs no Racket code in any window main opens after arm returns. The wait's
-;; deadline is on the wall clock, so a wake that finds the monotonic target
-;; still ahead, as after a clock step, waits out what is left of it.
+;; runs no Racket code in any window main opens after arm returns until the
+;; wait wakes, at its deadline or spuriously. The wait's deadline is on the
+;; wall clock, so a wake that finds the monotonic target still ahead, as after
+;; a clock step, waits out what is left of it.
 (define (arm-process-deadline! seconds
                                [what "a deadline's body"]
                                #:wall-clock [wall-clock current-inexact-milliseconds])
