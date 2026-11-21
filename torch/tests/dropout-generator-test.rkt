@@ -15,8 +15,8 @@
                     tensor->list to-dtype zeros)
            (only-in "../nn.rkt" Dropout dropout eval!)
            (only-in "private/blame.rkt" blamed contract-violation?)
+           (only-in "private/child.rkt" run-child)
            (only-in "private/python-env.rkt" python-check python-torch-available?)
-           (only-in "private/sandbox.rkt" with-fresh-eval)
            (only-in "private/within.rkt" bounded-test))
 
   (define caller (blamed "dropout-generator-test.rkt"))
@@ -200,18 +200,23 @@
       (dropout-example
        (call-with-input-file nn-scrbl (lambda (in) (read-line in 'any) (read-inside in)))))
     (check-not-false example "nn.scrbl has the define-layer Dropout example")
-    (with-fresh-eval (ev #:time-limit 120)
-      (ev `(module example racket/base
-             (require racket/contract torch torch/nn)
-             ,example))
-      (ev '(require torch (only-in torch/nn eval!) 'example))
-      (check-equal? (ev '(~> (arange 1 257)
-                             (reshape 4 64)
-                             ((Dropout #:p 0.3) #:generator (make-generator 9))
-                             tensor->list))
-                    (layer (make-generator 9)))
-      (check-equal? (ev '(~> (arange 3) ((eval! (Dropout))) tensor->list))
-                    (tensor->list (arange 3)))))
+    (define-values (status drawn stderr)
+      (run-child `(begin
+                    (module example racket/base
+                      (require racket/contract torch torch/nn)
+                      ,example)
+                    (require torch (only-in torch/nn eval!) 'example)
+                    (write (list (~> (arange 1 257)
+                                     (reshape 4 64)
+                                     ((Dropout #:p 0.3) #:generator (make-generator 9))
+                                     tensor->list)
+                                 (~> (arange 3) ((eval! (Dropout))) tensor->list))))
+                 #:within 50))
+    (check-equal? status 0 stderr)
+    (match drawn
+      [(list masked evaluated)
+       (check-equal? masked (layer (make-generator 9)))
+       (check-equal? evaluated (tensor->list (arange 3)))]))
 
   (if (python-torch-available?)
       (bounded-test "the global stream draws F.dropout's mask, a generator torch.rand's"
