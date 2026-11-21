@@ -15,6 +15,7 @@
          linalg-vector-norm
          maximum
          minimum
+         round-tensor
          sin-tensor)
 
 (define-generated-op abs-tensor tr_gen_abs
@@ -43,6 +44,9 @@
 
 (define-generated-op minimum tr_gen_minimum
   ([self tensor] [other tensor]))
+
+(define-generated-op round-tensor tr_gen_round
+  ([self tensor]))
 
 (define-generated-op sin-tensor tr_gen_sin
   ([self tensor]))

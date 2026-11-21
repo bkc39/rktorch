@@ -4,12 +4,15 @@
   (require (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-true)
            (only-in "../main.rkt"
-                    abs bytes->tensor item max mean mul sub tensor->bytes
-                    tensor-shape to-dtype)
+                    abs bytes->tensor cpu-capability item max mean mul permute
+                    sub tensor->bytes tensor-shape to-dtype)
            (only-in "../vision/image.rkt" read-image)
            (only-in "../vision/transforms.rkt"
                     center-crop convert-image-dtype imagenet-normalize
                     normalize resize imagenet-mean imagenet-std)
+           (only-in (submod "../vision/transforms.rkt" private)
+                    native-uint8-resize? resize/path resized-crop)
+           (only-in "private/within.rkt" bounded-test)
            "private/python-env.rkt")
 
   (define-runtime-path fixtures "../vision/fixtures/images")
@@ -30,13 +33,23 @@
 
   (define (jpeg? name) (regexp-match? #rx"[.]jpg$" name))
 
-  (define (check-transform label ours theirs tolerance)
+  (define (check-transform label ours theirs tolerance [dtype 'float32])
     (check-equal? (tensor-shape ours) (hash-ref theirs 'shape)
                   (format "~a: shape" label))
-    (define-values (worst _) (gap ours (unpack theirs 'float32)))
+    (define-values (worst _) (gap ours (unpack theirs dtype)))
     (check-true (<= worst tolerance)
                 (format "~a: max |difference| ~a over ~a" label worst
                         tolerance)))
+
+  (define (check-bytes label ours theirs)
+    (check-equal? (tensor-shape ours) (hash-ref theirs 'shape)
+                  (format "~a: shape" label))
+    (check-equal? (tensor->bytes ours) (hex->bytes (hash-ref theirs 'hex))
+                  (format "~a: every byte" label)))
+
+  (define (case-label name case)
+    (format "~a ~a #:antialias? ~a" name (hash-ref case 'size)
+            (hash-ref case 'antialias)))
 
   (cond
     [(not (python-module-available? "torchvision"))
@@ -84,7 +97,7 @@
        (define antialias? (hash-ref case 'antialias))
        (check-transform (format "resize ~a #:antialias? ~a" size antialias?)
                         (resize gradient size #:antialias? antialias?)
-                        case 1e-5))
+                        case 1e-6))
      (for ([case (in-list (hash-ref j 'crop))])
        (check-transform (format "center-crop ~a" (hash-ref case 'size))
                         (center-crop gradient (hash-ref case 'size))
@@ -111,4 +124,68 @@
             (unpack (hash-ref j 'chain) 'float32)))
      (check-true (and (<= worst 0.05) (<= typical 0.005))
                  (format "the chain from our own decode: max ~a mean ~a"
-                         worst typical))]))
+                         worst typical))
+
+     (define (channels-last image)
+       (define hwc (permute image 1 2 0))
+       (permute (bytes->tensor (tensor->bytes hwc) 'uint8 (tensor-shape hwc)) 2 0 1))
+     (define (decoded-pixels name mode)
+       (channels-last
+        (unpack (hash-ref (hash-ref (hash-ref j 'decoded) name) mode) 'uint8)))
+     (define sources
+       (hash 'gradient (decoded-pixels 'gradient.png 'unchanged)
+             'photo (decoded-pixels 'smooth-401x299.jpg 'rgb)))
+
+     (bounded-test "P0: the capability and the uint8 path are torchvision's"
+       (check-equal? (symbol->string (cpu-capability)) (hash-ref j 'capability))
+       (check-equal? native-uint8-resize? (hash-ref j 'native_uint8)
+                     (format "on ~a" (hash-ref j 'machine))))
+
+     (bounded-test "P1: uint8 resize equals torchvision's byte for byte"
+       (for ([case (in-list (hash-ref j 'resize_u8))])
+         (define src (string->symbol (hash-ref case 'src)))
+         (check-bytes (case-label (format "uint8 ~a resize" src) case)
+                      (resize (hash-ref sources src) (hash-ref case 'size)
+                              #:antialias? (hash-ref case 'antialias))
+                      case)))
+
+     (define (window-label name case)
+       (format "~a ~a" (case-label name case) (hash-ref case 'window)))
+
+     (bounded-test "P2: uint8 resized-crop equals torchvision's byte for byte"
+       (for ([case (in-list (hash-ref j 'resized_crop_u8))])
+         (define size (hash-ref case 'size))
+         (check-bytes (window-label "uint8 resized-crop" case)
+                      (resized-crop (hash-ref sources 'photo) (hash-ref case 'window)
+                                    (list size size)
+                                    #:antialias? (hash-ref case 'antialias))
+                      case)))
+
+     (bounded-test "P3: the uint8 float path equals v1 resize byte for byte"
+       (for ([case (in-list (hash-ref j 'resize_u8_float_path))])
+         (check-bytes (case-label "uint8 float path" case)
+                      (resize/path (hash-ref sources 'gradient) (hash-ref case 'size)
+                                   (hash-ref case 'antialias) 'float)
+                      case)))
+
+     (bounded-test "P4: float64 resize and float32 resized-crop within float rounding"
+       (for ([case (in-list (hash-ref j 'resize_f64))])
+         (check-transform (case-label "float64 resize" case)
+                          (resize (to-dtype gradient 'float64) (hash-ref case 'size)
+                                  #:antialias? (hash-ref case 'antialias))
+                          case 1e-12 'float64))
+       (define photo-f32 (convert-image-dtype (hash-ref sources 'photo)))
+       (for ([case (in-list (hash-ref j 'resized_crop_f32))])
+         (define size (hash-ref case 'size))
+         (check-transform (window-label "float32 resized-crop" case)
+                          (resized-crop photo-f32 (hash-ref case 'window) (list size size)
+                                        #:antialias? (hash-ref case 'antialias))
+                          case 1e-6)))
+
+     (bounded-test "P5: the half dtypes equal torchvision's through float32"
+       (for ([case (in-list (hash-ref j 'resize_half))])
+         (define half (string->symbol (hash-ref case 'dtype)))
+         (check-bytes (case-label (format "~a resize" half) case)
+                      (resize (to-dtype gradient half) (hash-ref case 'size)
+                              #:antialias? (hash-ref case 'antialias))
+                      case)))]))

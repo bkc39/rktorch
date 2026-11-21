@@ -381,6 +381,15 @@ back, and changes nothing.
 
 @torch-examples[(cudnn-allow-tf32?)]}
 
+@defproc[(cpu-capability) symbol?]{
+@tt{torch.backends.cpu.get_cpu_capability()}, lowercased with a space as a
+hyphen: the vector instruction set ATen's CPU kernels dispatch to,
+@racket['default], @racket['avx2] or @racket['avx512] on x86
+(@racket['sve256], @racket['vsx], @racket['z-vector] elsewhere). @tt{ATEN_CPU_CAPABILITY} at process start
+lowers it. Fixed for the process.
+
+@torch-examples[(cpu-capability)]}
+
 @section{Choosing a device}
 
 @defproc*[([(device [t tensor?]) device?]

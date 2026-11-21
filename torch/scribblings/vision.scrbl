@@ -302,7 +302,8 @@ input's device.
 ]
 
 The first four are torchvision's @tt{transforms.functional} of the same
-names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
+names, @racket[resize] its @tt{transforms.v2.functional} one, and take an
+image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
 @racket[imagenet-preprocess].
 
 @defproc[(convert-image-dtype [x tensor?]
@@ -324,26 +325,32 @@ lands 1.0 on 255 and nothing past it. Between two float dtypes it is
                                      exact-positive-integer?))]
                  [#:antialias? antialias? boolean? #t])
          tensor?]{
-Resamples the float image or batch @racket[x] to @racket[size]
-bilinearly. A pair is the new height and width; a single number is the
-new length of the shorter side, the longer one scaled to keep the aspect
-ratio and truncated, so @tt{[3 299 401]} resized to 256 is
-@tt{[3 256 343]}. With @racket[antialias?], the default as in
-torchvision, a downscale widens the triangle filter to the scale factor
-the way Pillow does, so every input pixel contributes; without it each
-output pixel interpolates the two inputs nearest its centre, which aliases
-when shrinking by more than two. Either way the result is
-@tt{F.interpolate(mode="bilinear", align_corners=False)} to within float
-rounding.
+torchvision v2's @tt{F.resize}: resamples the image or batch @racket[x],
+@racket['uint8] or float, to @racket[size] bilinearly, keeping its dtype. A
+pair is the new height and width; a single number is the new length of the
+shorter side, the longer one scaled to keep the aspect ratio and truncated,
+so @tt{[3 299 401]} resized to 256 is @tt{[3 256 343]}. At its own size
+@racket[x] comes back as it is. With @racket[antialias?], the default, a
+downscale widens the triangle filter to the scale factor as Pillow does
+(@tt{_upsample_bilinear2d_aa}); without it each output interpolates the two
+inputs nearest its centre (@tt{upsample_bilinear2d}).
 
-The resampling is two matrix products, one per axis, with weights
-computed on the host, rather than ATen's upsampling kernel: it is
-differentiable, it runs on any device @racket[matmul] does, and it needs
-no optional-float argument, which the generated surface does not yet
-marshal. The half dtypes are resampled in float32 and narrowed back. A
-@racket['uint8] image is a contract violation: convert it first, as
-above.
-}
+A @racket['uint8] image takes torchvision's path on the same host: on a CPU
+whose @racket[(cpu-capability)] is @racket['avx2] or @racket['avx512], or an
+arm64 CPU, ATen's kernel resamples the bytes in fixed point; anywhere else it
+is resampled in float32, rounded half to even and narrowed back. The result
+equals torchvision's byte for byte, and the two paths differ by at most one
+count. The half dtypes are resampled in float32. A float result is
+differentiable. Other dtypes are a contract violation.
+
+@torch-examples[
+(define photo
+  (read-image (collection-file-path "smooth-401x299.jpg"
+                                    "torch" "vision" "fixtures" "images")))
+(dtype (resize photo 256))
+(shape (resize photo 256))
+(eq? (resize photo '(299 401)) photo)
+]}
 
 @defproc[(center-crop [x tensor?]
                       [size (or/c exact-positive-integer?
@@ -362,7 +369,8 @@ contract violation, where torchvision would pad.
                     [std (listof (and/c real? positive?))])
          tensor?]{
 Subtracts @racket[mean] and divides by @racket[std], one value per
-channel of the float image or batch @racket[x].
+channel of the float image or batch @racket[x]. A @racket['uint8] image is
+a contract violation, as in torchvision; convert it first.
 }
 
 @deftogether[(@defthing[imagenet-mean (listof real?)]
@@ -388,12 +396,15 @@ torchvision classifier expects after @racket[resize] to 256 and
 @racket[center-crop] to 224.
 }
 
-The two random transforms take an @tt{[N C H W]} batch and return one of
-the same shape. The random choices are per image, drawn on the host from a Racket
-generator that one @racket[draw-seed] from the torch generator seeds per
-batch, so a loader built on @racket[(make-generator 0)] replays its
-augmentation as well as its batch order. They are the transform's own
-draws: a torchvision pipeline on the same seed picks different crops.
+The random transforms take an image, @tt{[C H W]}, or a batch,
+@tt{[N C H W]}, and return one of the same rank; an image is a batch of
+one. @racket[random-horizontal-flip] and @racket[random-crop] draw from the
+torch generator as torchvision's do, so the same seed picks the same flips
+and windows. @racket[random-resized-crop] draws per image on the host from
+a Racket generator that one @racket[draw-seed] from the torch generator
+seeds per batch, so a loader built on @racket[(make-generator 0)] replays
+its crops as well as its batch order, but a torchvision pipeline on the
+same seed picks different ones.
 
 @racketblock[
 (define g (make-generator 0))
@@ -411,8 +422,8 @@ draws: a torchvision pipeline on the same seed picks different crops.
                                  [#:p p (real-in 0 1) 0.5]
                                  [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
-Mirrors each image of the rank-4 batch @racket[x] along its width with
-probability @racket[p]; the rest pass through unchanged. Each image draws
+Mirrors the image @racket[x], or each image of the batch @racket[x], along
+its width with probability @racket[p]; the rest pass through unchanged. Each image draws
 one @tt{torch.rand} from @racket[generator] and flips when it is below
 @racket[p] as a float32, as torchvision's @tt{RandomHorizontalFlip} does
 for one image. The answer is @racket[x] itself when no image flips, and
@@ -429,6 +440,7 @@ With @racket[generator] @racket[#f], the draws come from
                               [#:ratio ratio (list/c (and/c real? positive?)
                                                      (and/c real? positive?))
                                        '(3/4 4/3)]
+                              [#:antialias? antialias? boolean? #t]
                               [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
@@ -437,30 +449,39 @@ a window covering a random share of the image's area, drawn from
 @racket[ratio], cut at a random position and resized to
 @racket[size] by @racket[size]. Ten draws that do not fit fall back to
 the central window at the nearest admissible ratio, as torchvision does.
-@racket[x] is a float image, or a batch whose images each get their own
-window. Both pairs are ascending.
-Unlike the two transforms below, it accepts a single image, because
-photographs of different sizes cannot share a batch until it has been
-applied.
+Both pairs are ascending.
 With @racket[generator] @racket[#f], the batch seed comes from
 @racket[(current-generator)].
-}
+
+@racket[x] is a @racket['uint8] or float image, or a batch whose images each
+get their own window; the window is a view, and only it is resampled, by
+@racket[resize] with @racket[antialias?]. So a training pipeline crops the
+decoded bytes and converts only the crop, as torchvision's does:
+
+@torch-examples[
+(~> photo
+    (random-resized-crop 224 #:generator (make-generator 0))
+    convert-image-dtype
+    (normalize imagenet-mean imagenet-std)
+    shape)
+]}
 
 @defproc[(random-crop [x (and/c tensor?
                                (λ (x)
                                  (match (tensor-shape x)
-                                   [(list _ _ h w) (and (positive? h) (positive? w))]
+                                   [(or (list _ h w) (list _ _ h w))
+                                    (and (positive? h) (positive? w))]
                                    [_ #f])))]
                       [#:padding padding exact-nonnegative-integer? 4]
                       [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
-Pads every image of the rank-4 batch @racket[x], whose height and width are
-positive, with @racket[padding] zero pixels on each side and cuts a
+Pads the image @racket[x], or every image of the batch @racket[x], whose
+height and width are positive, with @racket[padding] zero pixels on each side and cuts a
 window of the original size at a per-image offset, torchvision's
 @tt{RandomCrop(32, padding=4)} for CIFAR-10. Each image draws its top,
 then its left offset as @tt{torch.randint(0, 2 * padding + 1)} does from
-@racket[generator]. A batch of one is padded once and answered as a view of
-the window; a larger batch is cut in a number of native calls independent
+@racket[generator]. An image or a batch of one is padded once and answered
+as a view of the window; a larger batch is cut in a number of native calls independent
 of its size. With @racket[padding] 0 it answers @racket[x] and draws
 nothing.
 With @racket[generator] @racket[#f], the draws come from
@@ -972,7 +993,9 @@ torchvision's @tt{ImageReadMode} does, gray as stb's integer luma
 truncated, is an error naming the reason. So is an image of more than
 178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
 from its header before any pixel is decoded, so a small file cannot
-claim gigabytes of memory.
+claim gigabytes of memory. The result is a channels-last view of the
+decoded @tt{[H W C]} buffer, as torchvision's is: @tt{view} on it
+raises, so flatten it with @racket[reshape].
 }
 
 @defproc[(read-image [path path-string?]
@@ -981,7 +1004,8 @@ claim gigabytes of memory.
                              'unchanged]
                      [#:device device (or/c #f device/c) #f])
          tensor?]{
-@racket[decode-image] on the contents of the file at @racket[path].
+@racket[decode-image] on the contents of the file at @racket[path], so a
+channels-last view as well.
 }
 
 @section{Image folders}

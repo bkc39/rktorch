@@ -8,6 +8,7 @@
          tr-last-error/raw
          tr-last-error-kind/raw
          tr-manual-seed/raw
+         tr-cpu-capability/raw
          tr-set-deterministic-algorithms/raw
          tr-get-deterministic-algorithms/raw
          tr-get-deterministic-algorithms-warn-only/raw
@@ -33,6 +34,10 @@
 (define-torch tr-manual-seed/raw
   (_fun _uint64 -> _int)
   #:c-id tr_manual_seed)
+
+(define-torch tr-cpu-capability/raw
+  (_fun -> _string/utf-8)
+  #:c-id tr_cpu_capability)
 
 (define _flag-setter
   (_fun (on? : _bool) -> _int))

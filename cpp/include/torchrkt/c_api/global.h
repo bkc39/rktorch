@@ -19,6 +19,12 @@ int tr_last_error_kind(void);
 
 int tr_manual_seed(uint64_t seed);
 
+/* at::get_cpu_capability(): the instruction set ATen's CPU kernels dispatch
+ * to ("DEFAULT", "AVX2", "AVX512", ...), lowered by ATEN_CPU_CAPABILITY at
+ * process start. Read once and fixed for the process; NULL with
+ * tr_last_error set if it could not be read. */
+const char* tr_cpu_capability(void);
+
 /* Process-wide flags of at::globalContext(), shared by every thread: a write
  * is seen by every op dispatched after it on any thread, and nothing orders
  * it against an op already running. The cuDNN flags are stored on a build
