@@ -144,19 +144,8 @@
     [1 (format "~a s" seconds)]
     [_ (format "~a s (~a s x ~a under raco cover)" (* scale seconds) seconds scale)]))
 
-;; The watch runs on an OS thread of its own, so it ends a process wedged in
-;; atomic mode, and it names itself on stderr first: under raco cover the
-;; process it ends is the whole suite's, which runs instrumented, so there the
-;; deadline is scaled by the factor cover stamped with that process's pid; its
-;; children inherit the stamp but load compiled code, and keep theirs. An OS
-;; thread that runs at all after a collection is charged a fresh 16 KiB
-;; allocation area when it next enters a blocking call, and
-;; (current-memory-use 'cumulative) counts it in whatever window main has open.
-;; So the watch waits out the deadline in one blocking pthread_cond_timedwait,
-;; a lifted watch waits on, and arm returns only once the watch is inside that
-;; wait: main gets the mutex back only when the wait releases it, so the watch
-;; runs no Racket code in any window main opens after arm returns until the
-;; wait wakes, at its deadline or spuriously.
+;; arm returns only once the watch is parked in its blocking wait, so the watch
+;; charges no allocation to any heap window main opens afterwards (#460).
 (define (arm-process-deadline! seconds [what "a deadline's body"])
   (define scale (deadline-scale))
   (define bound (bound-text seconds scale))
