@@ -1,28 +1,26 @@
 #lang racket/base
 
-(require (only-in ffi/vector
-                  f32vector-set! f64vector-set! make-f32vector make-f64vector)
-         (only-in racket/contract/base
+(require (only-in racket/contract/base
                   -> ->* ->i and/c flat-contract-predicate flat-named-contract
                   list/c listof or/c real-in)
          (only-in racket/flonum flsingle)
-         (only-in racket/match match-define)
-         (only-in racket/math exact-floor exact-round exact-truncate)
+         (only-in racket/match match match-define)
+         (only-in racket/math exact-round)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  @ add arange clamp cpu-generator/c device device-type div
-                  draw-seed dtype flip masked-fill! mul narrow ne rand reshape
-                  select stack sub tensor tensor->list tensor-shape tensor? to
-                  to-dtype transpose where zeros)
-         (only-in "../foreign/contracts.rkt" image-batch/c)
+                  add arange clamp cpu-capability cpu-generator/c device
+                  device-type div draw-seed dtype flip masked-fill! mul narrow
+                  ne permute rand reshape select stack sub tensor tensor->list
+                  tensor-shape tensor? to to-dtype where zeros)
          (only-in "../generated.rkt"
-                  constant-pad-nd index-tensor random-from!)
+                  constant-pad-nd index-tensor random-from! round-tensor
+                  upsample-bilinear2d upsample-bilinear2d-aa)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/contracts.rkt"
                   default-ratio default-scale ratio/c scale/c))
 
 (module+ private
-  (provide batch-rng))
+  (provide batch-rng native-uint8-resize? resize/path resized-crop))
 
 ;; One draw from the torch generator seeds a Racket generator for the batch,
 ;; so a seeded loader replays its augmentation while the images stay on the
@@ -39,17 +37,37 @@
                                              #:generator generator)))])
     (< u threshold)))
 
+(define image-or-image-batch/c
+  (flat-named-contract
+   'image-or-image-batch
+   (lambda (x)
+     (and (tensor? x) (~> (tensor-shape x) length (memv '(3 4))) #t))))
+
+(define image-or-batch/c
+  (flat-named-contract
+   'image-or-batch
+   (and/c image-or-image-batch/c
+          (lambda (x) (andmap positive? (tensor-shape x))))))
+
+(define (image-count x)
+  (match (tensor-shape x)
+    [(list _ _ _) 1]
+    [(cons n _) n]))
+
+(define (last-axis x)
+  (~> (tensor-shape x) length sub1))
+
 (define/contract-out (random-horizontal-flip x ;; noqa
                                              #:p [p 0.5]
                                              #:generator [generator #f])
-  (->* [image-batch/c]
+  (->* [image-or-image-batch/c]
        [#:p (real-in 0 1) #:generator (or/c cpu-generator/c #f)]
        tensor?)
-  (match-define (cons n _) (tensor-shape x))
+  (define n (image-count x))
   (define heads (coins n p generator))
   (cond
     [(not (memq #t heads)) x]
-    [(andmap values heads) (flip x 3)]
+    [(andmap values heads) (flip x (last-axis x))]
     [else
      (define mask
        (~> (for/list ([head? (in-list heads)]) (if head? 1 0))
@@ -58,22 +76,22 @@
            (reshape n 1 1 1)))
      (where mask (flip x 3) x)]))
 
-(define croppable-batch/c
+(define croppable/c
   (flat-named-contract
-   'image-batch-with-pixels
-   (and/c image-batch/c
+   'image-or-image-batch-with-pixels
+   (and/c image-or-image-batch/c
           (lambda (x)
-            (match-define (list _ _ h w) (tensor-shape x))
+            (match-define (list _ ... h w) (tensor-shape x))
             (and (positive? h) (positive? w))))))
 
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
                                   #:generator [generator #f])
-  (->* [croppable-batch/c]
+  (->* [croppable/c]
        [#:padding exact-nonnegative-integer?
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
-  (match-define (cons n _) (tensor-shape x))
+  (define n (image-count x))
   (cond
     [(or (zero? n) (zero? padding)) x]
     [else
@@ -85,12 +103,13 @@
          (gathered x padding corners))]))
 
 (define (windowed x padding corners)
-  (match-define (list _ _ h w) (tensor-shape x))
+  (match-define (list _ ... h w) (tensor-shape x))
   (match-define (list top left) (tensor->list corners))
+  (define width-axis (last-axis x))
   (~> x
       (constant-pad-nd (list padding padding padding padding) 0.0)
-      (narrow 2 top h)
-      (narrow 3 left w)))
+      (narrow (sub1 width-axis) top h)
+      (narrow width-axis left w)))
 
 (define (gathered x padding corners)
   (match-define (list n c h w) (tensor-shape x))
@@ -139,20 +158,25 @@
 (define (channels x)
   (caddr (reverse (tensor-shape x))))
 
-(define image-or-batch/c
-  (flat-named-contract
-   'image-or-batch
-   (lambda (x)
-     (and (tensor? x)
-          (memv (length (tensor-shape x)) '(3 4))
-          (andmap positive? (tensor-shape x))
-          #t))))
-
 (define float-image/c
   (flat-named-contract
    'float-image-or-batch
    (and/c image-or-batch/c
           (lambda (x) (and (memq (dtype x) float-dtypes) #t)))))
+
+(define image-dtype/c
+  (flat-named-contract 'image-dtype
+                       (lambda (d) (and (memq d image-dtypes) #t))))
+
+(define image-tensor/c
+  (flat-named-contract
+   'image-dtype-tensor
+   (lambda (t) (and (tensor? t) (memq (dtype t) image-dtypes) #t))))
+
+(define resizable-image/c
+  (flat-named-contract
+   'uint8-or-float-image-or-batch
+   (and/c image-or-batch/c image-tensor/c)))
 
 (define size/c
   (flat-named-contract
@@ -192,69 +216,58 @@
     [(<= w h) (values (quotient (* size h) w) size)]
     [else (values size (quotient (* size w) h))]))
 
-(define (triangle x)
-  (define a (abs x))
-  (if (< a 1.0) (- 1.0 a) 0.0))
+(define native-uint8-resize?
+  (and (or (memq (cpu-capability) '(avx2 avx512))
+           (eq? (system-type 'arch) 'aarch64))
+       #t))
 
-;; upsample_bilinear2d with align_corners=False: each output samples the
-;; two inputs around its centre, the source index clamped at zero
-(define (bilinear-row row in scale)
-  (define src (max 0.0 (- (* scale (+ row 0.5)) 0.5)))
-  (define i0 (min (exact-floor src) (sub1 in)))
-  (define i1 (min (add1 i0) (sub1 in)))
-  (define l1 (min (max (- src i0) 0.0) 1.0))
-  (if (= i0 i1)
-      (list (cons i0 1.0))
-      (list (cons i0 (- 1.0 l1)) (cons i1 l1))))
+(define (uint8-path x)
+  (if (and native-uint8-resize? (~> x device device-type (eq? 'cpu)))
+      'native
+      'float))
 
-;; _upsample_bilinear2d_aa, Pillow's filter: a downscale widens the
-;; triangle to the scale, and each row is renormalized
-(define (antialias-row row in scale)
-  (define support (max scale 1.0))
-  (define invscale (if (>= scale 1.0) (/ 1.0 scale) 1.0))
-  (define center (* scale (+ row 0.5)))
-  (define lo (max (exact-truncate (+ (- center support) 0.5)) 0))
-  (define hi (min (exact-truncate (+ center support 0.5)) in))
-  (define ws
-    (for/list ([k (in-range lo hi)])
-      (cons k (triangle (* (+ (- k center) 0.5) invscale)))))
-  (define total (for/sum ([kw (in-list ws)]) (cdr kw)))
-  (for/list ([kw (in-list ws)]) (cons (car kw) (/ (cdr kw) total))))
+(define (interpolated x oh ow antialias?)
+  ((if antialias? upsample-bilinear2d-aa upsample-bilinear2d)
+   x (list oh ow) #f #f #f))
 
-;; the weights are written at the image's own width, so the matrix is built
-;; where the image lives with no float64 copy, which MPS could not hold
-(define (interpolation-matrix in out antialias? image)
-  (define-values (make-weights put!)
-    (if (eq? (dtype image) 'float64)
-        (values make-f64vector f64vector-set!)
-        (values make-f32vector f32vector-set!)))
-  (define weights (make-weights (* out in) 0.0))
-  (define scale (exact->inexact (/ in out)))
-  (define row-of (if antialias? antialias-row bilinear-row))
-  (for* ([row (in-range out)]
-         [kw (in-list (row-of row in scale))])
-    (put! weights (+ (* row in) (car kw)) (cdr kw)))
-  (reshape (tensor weights #:device (device image)) out in))
+(define (channels-last x n c h w)
+  (~> x (permute 0 2 3 1) (reshape -1) (reshape n h w c) (permute 0 3 1 2)))
 
-(define (resized x oh ow antialias?)
-  (define-values (h w) (spatial-size x))
-  (define rows
-    (if (= oh h)
-        x
-        (@ (interpolation-matrix h oh antialias? x) x)))
-  (if (= ow w)
-      rows
-      (@ rows (transpose (interpolation-matrix w ow antialias? x) 0 1))))
+(define (batched x oh ow antialias? [native-uint8? #f])
+  (match (tensor-shape x)
+    [(list c h w)
+     (~> x (reshape 1 c h w) (batched oh ow antialias? native-uint8?) (reshape c oh ow))]
+    [(list n 3 h w)
+     #:when (and native-uint8? (= oh 1) (= ow 1))
+     (~> x (channels-last n 3 h w) (interpolated oh ow antialias?))]
+    [_ (interpolated x oh ow antialias?)]))
 
-(define/contract-out (resize x size #:antialias? [antialias? #t]) ;; noqa
-  (->* [float-image/c size/c] [#:antialias? boolean?] tensor?)
+(define (through-float32 x source oh ow antialias? narrow-back)
+  (~> x
+      (to-dtype 'float32)
+      (batched oh ow antialias?)
+      narrow-back
+      (to-dtype source)))
+
+(define (resampled x oh ow antialias? path)
+  (define source (dtype x))
+  (cond
+    [(memq source '(float16 bfloat16))
+     (through-float32 x source oh ow antialias? values)]
+    [(and (eq? source 'uint8) (eq? (or path (uint8-path x)) 'float))
+     (through-float32 x source oh ow antialias? round-tensor)]
+    [else (batched x oh ow antialias? (eq? source 'uint8))]))
+
+(define (resize/path x size antialias? [path #f])
   (define-values (h w) (spatial-size x))
   (define-values (oh ow) (output-size size h w))
-  (define source-dtype (dtype x))
-  ;; the half dtypes interpolate in float32, as ATen's CPU kernels do
-  (if (memq source-dtype '(float16 bfloat16))
-      (to-dtype (resized (to-dtype x 'float32) oh ow antialias?) source-dtype)
-      (resized x oh ow antialias?)))
+  (if (and (= oh h) (= ow w))
+      x
+      (resampled x oh ow antialias? path)))
+
+(define/contract-out (resize x size #:antialias? [antialias? #t]) ;; noqa
+  (->* [resizable-image/c size/c] [#:antialias? boolean?] tensor?)
+  (resize/path x size antialias?))
 
 (define/contract-out (center-crop x size) ;; noqa
   (->i ([x image-or-batch/c] [size (x) (crop-size/c x)]) [result tensor?])
@@ -291,15 +304,6 @@
 (define/contract-out (imagenet-normalize x) ;; noqa
   (-> rgb-float-image/c tensor?)
   (normalize x imagenet-mean imagenet-std))
-
-(define image-dtype/c
-  (flat-named-contract 'image-dtype
-                       (lambda (d) (and (memq d image-dtypes) #t))))
-
-(define image-tensor/c
-  (flat-named-contract
-   'image-dtype-tensor
-   (lambda (t) (and (tensor? t) (memq (dtype t) image-dtypes) #t))))
 
 (define/contract-out (convert-image-dtype x [target-dtype 'float32]) ;; noqa
   (->* [image-tensor/c] [image-dtype/c] tensor?)
@@ -346,25 +350,30 @@
       [else (values h w)]))
   (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
 
-(define (resized-crop image window size)
+(define (resized-crop image window size #:antialias? [antialias? #t])
+  (match-define (list top left height width) window)
   (define rank (length (tensor-shape image)))
-  (resize (narrow (narrow image (- rank 2) (car window) (caddr window))
-                  (- rank 1) (cadr window) (cadddr window))
-          (list size size)))
+  (~> image
+      (narrow (- rank 2) top height)
+      (narrow (- rank 1) left width)
+      (resize/path size antialias?)))
 
 (define/contract-out (random-resized-crop x size ;; noqa
                                           #:scale [scale default-scale]
                                           #:ratio [ratio default-ratio]
+                                          #:antialias? [antialias? #t]
                                           #:generator [generator #f])
-  (->* [float-image/c exact-positive-integer?]
+  (->* [resizable-image/c exact-positive-integer?]
        [#:scale scale/c
         #:ratio ratio/c
+        #:antialias? boolean?
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (define rng (batch-rng generator))
   (define-values (h w) (spatial-size x))
   (define (one image)
-    (resized-crop image (crop-window rng h w scale ratio) size))
+    (resized-crop image (crop-window rng h w scale ratio) (list size size)
+                  #:antialias? antialias?))
   (if (= 3 (length (tensor-shape x)))
       (one x)
       (stack (for/list ([i (in-range (car (tensor-shape x)))])

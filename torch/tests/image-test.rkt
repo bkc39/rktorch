@@ -2,12 +2,15 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
+           (only-in racket/list append*)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
-                    cpu-device device dtype select tensor->bytes tensor->list
-                    tensor-shape)
-           (only-in "../vision/image.rkt" decode-image read-image))
+                    cpu-device device dtype narrow reshape select tensor->bytes
+                    tensor->list tensor-shape view)
+           (only-in "../foreign/addresses.rkt" tensor-data-ptr)
+           (only-in "../vision/image.rkt" decode-image read-image)
+           (only-in "../vision/transforms.rkt" resize))
 
   (define-runtime-path fixtures "../vision/fixtures/images")
   (define (fixture name) (build-path fixtures name))
@@ -54,6 +57,30 @@
     (check-equal? (plane reduced 0) (drawn luma))
     (check-equal? (tensor-shape (read-image (fixture "palette.png")))
                   '(3 23 37)))
+
+  (test-case "a decode is channels-last: the next channel is the next byte"
+    (define bs (file->bytes (fixture "gradient.png")))
+    (for ([mode (in-list '(gray-alpha rgb rgba))])
+      (define img (decode-image bs #:mode mode #:device 'cpu))
+      (check-equal? (- (tensor-data-ptr (select img 0 1)) (tensor-data-ptr img)) 1
+                    (symbol->string mode))
+      (check-exn exn:fail? (lambda () (view img -1)))
+      (check-equal? (tensor->list (reshape img -1))
+                    (append* (for/list ([c (in-range (car (tensor-shape img)))])
+                               (plane img c)))
+                    (symbol->string mode))))
+
+  (test-case "a decoded image resizes to 1x1, each channel as it would alone"
+    (for ([mode (in-list '(rgb rgba))])
+      (define img (read-image (fixture "gradient.png") #:mode mode))
+      (define c (car (tensor-shape img)))
+      (for ([antialias? (in-list '(#t #f))])
+        (check-equal? (tensor->bytes (resize img '(1 1) #:antialias? antialias?))
+                      (apply bytes-append
+                             (for/list ([k (in-range c)])
+                               (tensor->bytes
+                                (resize (narrow img 0 k 1) '(1 1) #:antialias? antialias?))))
+                      (format "~a antialias ~a" mode antialias?)))))
 
   (test-case "baseline, progressive and grayscale JPEGs decode"
     (for ([name (in-list '("smooth.jpg" "smooth-444.jpg"

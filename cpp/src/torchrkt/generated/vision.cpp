@@ -10,6 +10,27 @@
 
 extern "C" {
 
+tr_tensor* tr_gen__upsample_bilinear2d_aa(const tr_tensor* self,
+                                          const int64_t* output_size,
+                                          int64_t output_size_len,
+                                          bool align_corners, double scales_h,
+                                          bool scales_h_has, double scales_w,
+                                          bool scales_w_has) {
+  if (!self || !output_size || output_size_len < 0) {
+    return torchrkt::null_arg("tr_gen__upsample_bilinear2d_aa");
+  }
+  return torchrkt::alloc_result("tr_gen__upsample_bilinear2d_aa", [&] {
+    return at::_upsample_bilinear2d_aa(
+        self->value,
+        at::IntArrayRef(output_size, static_cast<size_t>(output_size_len)),
+        align_corners,
+        scales_h_has ? c10::optional<double>(scales_h)
+                     : c10::optional<double>(),
+        scales_w_has ? c10::optional<double>(scales_w)
+                     : c10::optional<double>());
+  });
+}
+
 tr_tensor* tr_gen_affine_grid_generator(const tr_tensor* theta,
                                         const int64_t* size, int64_t size_len,
                                         bool align_corners) {
@@ -57,6 +78,27 @@ tr_tensor* tr_gen_upsample_bicubic2d(const tr_tensor* self,
   }
   return torchrkt::alloc_result("tr_gen_upsample_bicubic2d", [&] {
     return at::upsample_bicubic2d(
+        self->value,
+        at::IntArrayRef(output_size, static_cast<size_t>(output_size_len)),
+        align_corners,
+        scales_h_has ? c10::optional<double>(scales_h)
+                     : c10::optional<double>(),
+        scales_w_has ? c10::optional<double>(scales_w)
+                     : c10::optional<double>());
+  });
+}
+
+tr_tensor* tr_gen_upsample_bilinear2d(const tr_tensor* self,
+                                      const int64_t* output_size,
+                                      int64_t output_size_len,
+                                      bool align_corners, double scales_h,
+                                      bool scales_h_has, double scales_w,
+                                      bool scales_w_has) {
+  if (!self || !output_size || output_size_len < 0) {
+    return torchrkt::null_arg("tr_gen_upsample_bilinear2d");
+  }
+  return torchrkt::alloc_result("tr_gen_upsample_bilinear2d", [&] {
+    return at::upsample_bilinear2d(
         self->value,
         at::IntArrayRef(output_size, static_cast<size_t>(output_size_len)),
         align_corners,

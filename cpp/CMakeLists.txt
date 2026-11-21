@@ -106,6 +106,7 @@ if(BUILD_TESTING)
   add_library(torchrkt_c_api_compile_test OBJECT
     tests/torchrkt/c_api_compile_global_test.c
     tests/torchrkt/c_api_compile_test.c
+    tests/torchrkt/c_api_compile_tranche13_test.c
   )
   target_include_directories(torchrkt_c_api_compile_test
     PRIVATE
@@ -136,6 +137,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche10_test.cpp
     tests/torchrkt/generated_tranche11_test.cpp
     tests/torchrkt/generated_tranche12_test.cpp
+    tests/torchrkt/generated_tranche13_test.cpp
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp

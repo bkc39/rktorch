@@ -11,6 +11,7 @@ void torchrkt_c_api_compile_global_check(void) {
   const char* (*last_error)(void) = tr_last_error;
   int (*last_error_kind)(void) = tr_last_error_kind;
   int (*manual_seed)(uint64_t) = tr_manual_seed;
+  const char* (*cpu_capability)(void) = tr_cpu_capability;
   int (*set_deterministic_algorithms)(int, int) =
       tr_set_deterministic_algorithms;
   int (*get_deterministic_algorithms)(int*) = tr_get_deterministic_algorithms;
@@ -32,6 +33,7 @@ void torchrkt_c_api_compile_global_check(void) {
   (void)last_error;
   (void)last_error_kind;
   (void)manual_seed;
+  (void)cpu_capability;
   (void)set_deterministic_algorithms;
   (void)get_deterministic_algorithms;
   (void)get_deterministic_algorithms_warn_only;

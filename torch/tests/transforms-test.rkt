@@ -28,6 +28,10 @@
         (if (same? (select mixed 0 i) (select big 0 i)) 1 0)))
     (check-true (< 50 kept 150) "about half of 200 images stay"))
 
+  (define (calls thunk)
+    (thunk)
+    (op-calls-of thunk))
+
   (define (draws-after n transform)
     (define g (make-generator 5))
     (transform g)
@@ -45,9 +49,6 @@
                   (format "~a images at p 0" n))))
 
   (test-case "random-horizontal-flip: the input on tails, one flip when all are heads"
-    (define (calls thunk)
-      (thunk)
-      (op-calls-of thunk))
     (for ([n (in-list '(1 4))])
       (define x (randn n 3 8 8))
       (define g (make-generator 2))
@@ -90,9 +91,41 @@
     (define g (make-generator 3))
     (define a (random-crop x #:padding 4 #:generator g))
     (define b (random-crop x #:padding 4 #:generator g))
-    (check-false (same? a b) "the generator stream advances per batch")
-    (check-exn exn:fail:contract?
-               (lambda () (random-crop (randn 3 4 4) #:padding 1))))
+    (check-false (same? a b) "the generator stream advances per batch"))
+
+  (test-case "a single [C H W] image: as a batch of one, keeping its rank"
+    (for ([d (in-list '(uint8 float32))])
+      (define x (~> (arange 60) (reshape 3 4 5) (to-dtype d)))
+      (define one (unsqueeze x 0))
+      (for ([seed (in-list '(0 1 2 3))])
+        (define flipped (random-horizontal-flip x #:generator (make-generator seed)))
+        (check-equal? (tensor-shape flipped) '(3 4 5))
+        (check-true (same? flipped
+                           (select (random-horizontal-flip one #:generator (make-generator seed))
+                                   0 0))
+                    (format "flip ~a seed ~a" d seed))
+        (define cropped (random-crop x #:padding 2 #:generator (make-generator seed)))
+        (check-equal? (tensor-shape cropped) '(3 4 5))
+        (check-true (same? cropped
+                           (select (random-crop one #:padding 2 #:generator (make-generator seed))
+                                   0 0))
+                    (format "crop ~a seed ~a" d seed)))
+      (check-true (same? (random-horizontal-flip x #:p 1) (flip x 2)))
+      (check-eq? (random-horizontal-flip x #:p 0) x)
+      (check-eq? (random-crop x #:padding 0) x)
+      (check-true (draws-after 1 (lambda (g) (random-horizontal-flip x #:generator g)))))
+    (for ([bad (list (randn 4 4) (randn 1 1 3 4 4))])
+      (check-exn exn:fail:contract? (lambda () (random-horizontal-flip bad)))
+      (check-exn exn:fail:contract? (lambda () (random-crop bad #:padding 1))))
+    (check-exn exn:fail:contract? (lambda () (random-crop (zeros 3 0 4) #:padding 1))))
+
+  (test-case "a single [C H W] image costs what a batch of one does"
+    (define x (randn 3 8 8))
+    (define one (unsqueeze x 0))
+    (check-equal? (calls (lambda () (random-horizontal-flip x #:p 1)))
+                  (calls (lambda () (random-horizontal-flip one #:p 1))))
+    (check-equal? (calls (lambda () (random-crop x #:padding 4 #:generator (make-generator 1))))
+                  (calls (lambda () (random-crop one #:padding 4 #:generator (make-generator 1))))))
 
   (test-case "an empty batch passes through both transforms"
     (define x (zeros 0 3 4 4))
@@ -119,8 +152,8 @@
 
   (test-case "resize: the same size answers the image"
     (define x (randn 3 4 6))
-    (check-true (same? (resize x '(4 6)) x))
-    (check-true (same? (resize x 4 #:antialias? #f) x)))
+    (check-eq? (resize x '(4 6)) x)
+    (check-eq? (resize x 4 #:antialias? #f) x))
 
   (test-case "resize: the two filters by hand"
     (define row (reshape (arange 4.0) 1 1 4))
@@ -137,13 +170,12 @@
                           '(0.0 0.25 0.75 1.0))
                   "upsampling clamps at the edges")))
 
-  (test-case "resize: float64 and the half dtypes keep their dtype"
+  (test-case "resize: uint8, float64 and the half dtypes keep their dtype"
     (for ([source-dtype (in-list '(float64 float16 bfloat16))])
       (define out (~> (rand 3 8 8) (to-dtype source-dtype) (resize 4)))
       (check-equal? (dtype out) source-dtype)
       (check-equal? (tensor-shape out) '(3 4 4)))
-    (check-exn exn:fail:contract?
-               (lambda () (resize (to-dtype (rand 3 8 8) 'uint8) 4)))
+    (check-equal? (dtype (resize (to-dtype (rand 3 8 8) 'uint8) 4)) 'uint8)
     (check-exn exn:fail:contract? (lambda () (resize (rand 8 8) 4))))
 
   (test-case "center-crop: the offset rounds half to even, as Python's round"
@@ -239,5 +271,4 @@
                (lambda () (random-resized-crop x 4 #:scale '(0 1))))
     (check-exn exn:fail:contract?
                (lambda () (random-resized-crop x 4 #:ratio '(2 1))))
-    (check-exn exn:fail:contract?
-               (lambda () (random-resized-crop (to-dtype x 'uint8) 4)))))
+    (check-equal? (dtype (random-resized-crop (to-dtype x 'uint8) 4)) 'uint8)))

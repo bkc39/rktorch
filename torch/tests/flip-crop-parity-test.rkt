@@ -28,6 +28,17 @@
           (one (select images 0 i)))
         (stack 0)))
 
+  (define (per-sample/chw ops images seed)
+    (define generator (make-generator seed))
+    (define steps (for/list ([op (in-list ops)]) (step op generator)))
+    (define (one image)
+      (define out (for/fold ([x image]) ([f (in-list steps)]) (f x)))
+      (check-equal? (tensor-shape out) (tensor-shape image) "a [C H W] image stays one")
+      out)
+    (~> (for/list ([i (in-range (car (tensor-shape images)))])
+          (one (select images 0 i)))
+        (stack 0)))
+
   (define (batched ops images seed)
     (match-define (list op) ops)
     ((step op (make-generator seed)) images))
@@ -40,6 +51,8 @@
     (define seed (hash-ref j 'seed))
     (check-equal? (tensor->list (per-sample ops images seed)) want
                   (format "~a, image by image" (hash-ref j 'name)))
+    (check-equal? (tensor->list (per-sample/chw ops images seed)) want
+                  (format "~a, each image as [C H W]" (hash-ref j 'name)))
     (when (= 1 (length ops))
       (check-equal? (tensor->list (batched ops images seed)) want
                     (format "~a, as one batch" (hash-ref j 'name)))))

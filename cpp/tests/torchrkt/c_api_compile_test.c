@@ -1,5 +1,6 @@
 /* Compile-only: pins C linkage for every public entry point; the global.h
-   family is pinned in c_api_compile_global_test.c. */
+   family is pinned in c_api_compile_global_test.c, generated tranche 13 in
+   c_api_compile_tranche13_test.c. */
 #include <stdbool.h>
 #include <stdint.h>
 

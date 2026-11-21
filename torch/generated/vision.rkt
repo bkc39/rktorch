@@ -9,7 +9,9 @@
 (provide affine-grid-generator
          constant-pad-nd
          grid-sampler-2d
-         upsample-bicubic2d)
+         upsample-bicubic2d
+         upsample-bilinear2d
+         upsample-bilinear2d-aa)
 
 (define-generated-op affine-grid-generator tr_gen_affine_grid_generator
   ([theta tensor] [size int-array] [align-corners bool]))
@@ -22,5 +24,13 @@
    [align-corners bool]))
 
 (define-generated-op upsample-bicubic2d tr_gen_upsample_bicubic2d
+  ([self tensor] [output-size int-array] [align-corners bool] [scales-h optional-double]
+   [scales-w optional-double]))
+
+(define-generated-op upsample-bilinear2d tr_gen_upsample_bilinear2d
+  ([self tensor] [output-size int-array] [align-corners bool] [scales-h optional-double]
+   [scales-w optional-double]))
+
+(define-generated-op upsample-bilinear2d-aa tr_gen__upsample_bilinear2d_aa
   ([self tensor] [output-size int-array] [align-corners bool] [scales-h optional-double]
    [scales-w optional-double]))

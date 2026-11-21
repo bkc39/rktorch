@@ -101,6 +101,14 @@ tr_tensor* tr_gen_minimum(const tr_tensor* self, const tr_tensor* other) {
       "tr_gen_minimum", [&] { return at::minimum(self->value, other->value); });
 }
 
+tr_tensor* tr_gen_round(const tr_tensor* self) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_round");
+  }
+  return torchrkt::alloc_result("tr_gen_round",
+                                [&] { return at::round(self->value); });
+}
+
 tr_tensor* tr_gen_sin(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_sin");

@@ -11,10 +11,13 @@ from unittest import mock
 from common import GcClock, meta
 from loaders import WorkerThreads, gc_count, loader_cell, measured, spread_subset, train_cell
 from op_cost import sample, stack_inputs, thread_loop
-from pipelines import peak_rss_mb
+from pipelines import PIPELINES, JpegCycle, jpeg_files, peak_rss_mb
 from threads import MIXES, PeakSampler, os_thread_count, peak_of, scaling_run
 
 import torch
+
+HYMENOPTERA_FIXTURE = os.path.join(os.path.dirname(__file__), "..", "..", "..",
+                                   "torch", "vision", "fixtures", "hymenoptera")
 
 
 class ThreadLoop(unittest.TestCase):
@@ -239,6 +242,17 @@ class Meta(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             m = meta(torch.device("cpu"))
         self.assertEqual((m["omp_num_threads"], m["mkl_num_threads"]), (None, None))
+
+
+class JpegStages(unittest.TestCase):
+    def test_decode_alone_yields_a_pixel_and_transforms_alone_an_image(self):
+        files = jpeg_files(HYMENOPTERA_FIXTURE)
+        shapes = [tuple(JpegCycle(8, stage, files)[5][0].shape)
+                  for stage in ("both", "decode", "transforms")]
+        self.assertEqual(shapes, [(3, 224, 224), (), (3, 224, 224)])
+
+    def test_the_stages_run_by_the_racket_names(self):
+        self.assertLessEqual({"jpeg", "jpeg-decode", "jpeg-transforms"}, set(PIPELINES))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import random
 import resource
 import sys
 import time
+from functools import partial
 
 import numpy as np
 from cache_dirs import cache_dir
@@ -29,13 +30,17 @@ CIFAR_MEAN, CIFAR_STD = [0.4914, 0.4822, 0.4465], [0.2470, 0.2435, 0.2616]
 WINDOW = 128
 
 
-def jpeg_files():
-    classes = sorted(c for c in os.listdir(HYMENOPTERA)
-                     if os.path.isdir(os.path.join(HYMENOPTERA, c)))
-    return [(os.path.join(HYMENOPTERA, c, f), label)
+def jpeg_files(root=HYMENOPTERA):
+    classes = sorted(c for c in os.listdir(root)
+                     if os.path.isdir(os.path.join(root, c)))
+    return [(os.path.join(root, c, f), label)
             for label, c in enumerate(classes)
-            for f in sorted(os.listdir(os.path.join(HYMENOPTERA, c)))
+            for f in sorted(os.listdir(os.path.join(root, c)))
             if f.lower().endswith((".jpg", ".jpeg", ".png"))]
+
+
+def decode_rgb(path):
+    return decode_jpeg(read_file(path), mode=ImageReadMode.RGB)
 
 
 def jpeg_augment():
@@ -71,19 +76,31 @@ def text_window(ids, start, mask_id):
 
 
 class JpegCycle(Dataset):
-    def __init__(self, n):
-        self.files = jpeg_files()
-        self.labels = torch.tensor([label for _, label in self.files])
+    """stage "both" decodes and augments; "decode" returns one pixel of the
+    decoded image; "transforms" augments images decoded once, on first use in
+    each process, since a forkserver worker gets the dataset pickled."""
+
+    def __init__(self, n, stage="both", files=None):
+        files = jpeg_files() if files is None else files
+        self.paths = [path for path, _ in files]
+        self.labels = torch.tensor([label for _, label in files])
         self.augment = jpeg_augment()
+        self.stage = stage
+        self.images = None
         self.n = n
 
     def __len__(self):
         return self.n
 
     def __getitem__(self, i):
-        k = i % len(self.files)
-        image = decode_jpeg(read_file(self.files[k][0]), mode=ImageReadMode.RGB)
-        return self.augment(image), self.labels[k]
+        k = i % len(self.paths)
+        if self.stage == "decode":
+            return decode_rgb(self.paths[k])[0, 0, 0], self.labels[k]
+        if self.stage == "transforms":
+            if self.images is None:
+                self.images = [decode_rgb(path) for path in self.paths]
+            return self.augment(self.images[k]), self.labels[k]
+        return self.augment(decode_rgb(self.paths[k])), self.labels[k]
 
 
 class CifarCycle(Dataset):
@@ -115,6 +132,8 @@ class MaskedText(Dataset):
 
 
 PIPELINES = {"jpeg": (JpegCycle, 2048, 32),
+             "jpeg-decode": (partial(JpegCycle, stage="decode"), 2048, 32),
+             "jpeg-transforms": (partial(JpegCycle, stage="transforms"), 2048, 32),
              "cifar": (CifarCycle, 8192, 128),
              "text": (MaskedText, 8192, 64)}
 
