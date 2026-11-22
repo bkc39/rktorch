@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list filter-not)
-         (only-in racket/match match match* match-define)
+(require (only-in racket/match match match-define)
          (only-in racket/string string-join)
          (only-in "../../nn/grad-scaler.rkt" load-grad-scaler-state!)
          (only-in "../../nn/optim-state.rkt" load-optimizer-state!)
@@ -69,18 +68,20 @@
   (and (regexp-match? #rx"^state_dict[.]" name)
        (substring name (string-length "state_dict."))))
 
+(define (warn-orphan-callbacks! r states)
+  (match (sort (remove* (map callback-state-key (run-callbacks r)) (hash-keys states)) string<?)
+    ['() (void)]
+    [orphans
+     (warn-train! (format (string-append "~a: the checkpoint holds state for callbacks this run"
+                                         " does not have, which is ignored: ~s")
+                          (run-entry r) orphans))]))
+
 (define (restore-callbacks! r tree)
   (match (hash-ref tree "callbacks" #f)
     [#f (void)]
     [states
      (define cbs (run-callbacks r))
-     (define keys (map callback-state-key cbs))
-     (match (sort (filter-not (lambda (k) (member k keys)) (hash-keys states)) string<?)
-       ['() (void)]
-       [orphans
-        (warn-train! (format (string-append "~a: the checkpoint holds state for callbacks this run"
-                                            " does not have, which is ignored: ~s")
-                             (run-entry r) orphans))])
+     (warn-orphan-callbacks! r states)
      (call-callbacks r 'on-load-checkpoint cbs tree)
      (for ([cb (in-list cbs)])
        (define key (callback-state-key cb))
@@ -133,9 +134,10 @@
 
 (define (restore-training-state! r ckpt max-epochs)
   (match-define (source path tree) ckpt)
-  (match* ((run-grad-scaler r) (hash-ref tree "MixedPrecision" #f))
-    [((? values scaler) (? values state)) (load-grad-scaler-state! scaler state)]
-    [(_ _) (void)])
+  (define scaler (run-grad-scaler r))
+  (define scaler-state (hash-ref tree "MixedPrecision" #f))
+  (when (and scaler scaler-state)
+    (load-grad-scaler-state! scaler scaler-state))
   (match-define (hash-table ("phase" phase) ("epoch" saved-epoch)
                             ("batches_that_stepped" stepped) ("eval_batches" evals))
     (fit-loop tree))
