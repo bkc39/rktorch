@@ -2,7 +2,7 @@
 
 (module+ test
   (require rackunit
-           (only-in "../main.rkt" backward! make-generator randn to zeros)
+           (only-in "../main.rkt" backward! dtype make-generator randn to zeros)
            (only-in "../nn.rkt"
                     Linear adam adamw layer-copy load-optimizer-state! mse-loss
                     optimizer-state-dict parameters rmsprop sgd step!
@@ -101,6 +101,19 @@
     (check-equal? (length (hash-ref saved "param_groups")) 2)
     (check-equal? (map (lambda (grp) (hash-ref grp "weight_decay")) (hash-ref saved "param_groups"))
                   '(0.1 0.0)))
+
+  (test-case "T3-B16: a model moved after its optimizer was built keeps its names"
+    (define net (fresh-net))
+    (define opt (adam (parameters net) #:lr 0.01))
+    (steps! opt net 1)
+    (to net 'float64)
+    (zero-grads! opt)
+    (backward! (mse-loss (net (to x 'float64)) (to y 'float64)))
+    (step! opt)
+    (define saved (optimizer-state-dict opt net))
+    (check-equal? (sort (hash-keys (hash-ref saved "state")) string<?) '("bias" "weight"))
+    (check-equal? (dtype (hash-ref (hash-ref (hash-ref saved "state") "weight") "exp_avg"))
+                  'float64))
 
   (define (adam-after-steps net)
     (define opt (adam (parameters net) #:lr 0.01))

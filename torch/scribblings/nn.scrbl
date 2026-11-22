@@ -1185,17 +1185,42 @@ parameter names rather than positions, so a reordered model fails loudly. The
 state tensors are the optimizer's own, as in torch, and @racket["step"] is an
 integer in every mode, so a state moves between @racket['loop], @racket['foreach]
 and @racket['fused]. Loading checks everything first and replaces each group's
-hyperparameters; floating tensors go to their parameter's device and dtype, as
-torch does.}
+hyperparameters; floating tensors are copied to their parameter's device and
+dtype, as torch casts them, so the loaded state shares no tensor with
+@racket[state].
+
+@torch-examples[
+(manual-seed! 0)
+(define tiny (Linear 3 1))
+(define tiny-opt (adam (parameters tiny) #:lr 0.01))
+(zero-grads! tiny-opt)
+(backward! (sum (tiny (ones 2 3))))
+(step! tiny-opt)
+(define saved (optimizer-state-dict tiny-opt tiny))
+(hash-ref (hash-ref saved "state") "bias")
+(hash-ref (car (hash-ref saved "param_groups")) "betas")
+(define fused-twin (adam (parameters tiny) #:lr 0.5 #:fused? #t))
+(load-optimizer-state! fused-twin tiny saved)
+(learning-rate fused-twin)
+]
+}
 
 @deftogether[(@defproc[(scheduler-state-dict [s scheduler?]) scheduler-state/c]
               @defproc[(load-scheduler-state! [s scheduler?] [state scheduler-state/c]) void?]
               @defthing[scheduler-state/c flat-contract?])]{
 @tt{LRScheduler.state_dict}'s progress: @tt{last_epoch}, @tt{base_lrs} and
-@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts and each inner
-scheduler's state for chained and sequential ones. The constructor's arguments
-are not saved. Loading leaves the optimizer's rates alone, as torch does; load
-the optimizer's state first.}
+@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts. A chained or
+sequential scheduler keeps @tt{last_epoch}, @tt{_last_lr} and each inner
+scheduler's state under @tt{_schedulers}, and no @tt{base_lrs}, as torch's
+do. The constructor's arguments are not saved. Loading leaves the optimizer's
+rates alone, as torch does; load the optimizer's state first.
+
+@torch-examples[
+(define halving (step-lr (sgd (parameters (Linear 2 1)) #:lr 0.1) #:step-size 2 #:gamma 0.5))
+(for ([_ (in-range 3)]) (step! halving))
+(scheduler-state-dict halving)
+]
+}
 
 @deftogether[(@defproc[(grad-scaler-state-dict [s grad-scaler?]) grad-scaler-state/c]
               @defproc[(load-grad-scaler-state! [s grad-scaler?] [state grad-scaler-state/c]) void?]
@@ -1203,7 +1228,13 @@ the optimizer's state first.}
 @tt{GradScaler.state_dict}: @tt{scale}, @tt{growth_factor}, @tt{backoff_factor},
 @tt{growth_interval} and @tt{_growth_tracker}, empty for a disabled scaler.
 Loading into a disabled scaler does nothing; loading an empty state into an
-enabled one raises.}
+enabled one raises.
+
+@torch-examples[
+(grad-scaler-state-dict (grad-scaler #:device 'cpu #:init-scale 1024.0))
+(grad-scaler-state-dict (grad-scaler #:device 'cpu #:enabled? #f))
+]
+}
 
 @deftogether[(@defproc[(ema-n-averaged [e ema?]) exact-nonnegative-integer?]
               @defproc[(set-ema-n-averaged! [e ema?] [n exact-nonnegative-integer?]) void?])]{
