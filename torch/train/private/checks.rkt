@@ -96,7 +96,7 @@
 (define (captured-arguments shapes vals)
   (init-capture shapes
                 (for/list ([v (in-list vals)])
-                  (if (checkpoint-value? v) v (void)))))
+                  (when (checkpoint-value? v) v))))
 
 (define (formal-name shape)
   (match shape
