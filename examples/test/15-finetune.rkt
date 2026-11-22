@@ -30,7 +30,7 @@
            (only-in racket/math nan?)
            rackunit
            torch
-           torch/nn
+           (except-in torch/nn accuracy)
            torch/scribblings/examples/15-finetune
            (only-in torch/vision/image-folder image-folder))
   ;; Offline and deterministic: random weights, the four fixture photos as

@@ -1,0 +1,350 @@
+#lang racket/base
+
+(module+ test
+  (require (only-in racket/dict in-dict)
+           (only-in racket/flonum flexp flsingle)
+           (only-in racket/list index-of last range shuffle take)
+           (only-in racket/match match-define)
+           (only-in racket/math nan?)
+           rackunit
+           (only-in threading ~>)
+           (only-in "../main.rkt"
+                    * + argmax backward! cuda-available? cuda-device device dtype grad has-grad?
+                    index-select item log-softmax make-generator mps-available? mps-device narrow
+                    native-memory-use ne randn randperm reclaim-native-memory! requires-grad!
+                    requires-grad? reshape shape sum tensor tensor->list to to-dtype zeros)
+           (only-in "../nn.rkt"
+                    accuracy accuracy-metric confusion-matrix confusion-matrix-metric
+                    cross-entropy metric-compute metric-reset! metric-update! metric? nll-loss
+                    perplexity perplexity-metric)
+           (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/gradcheck.rkt" gradcheck)
+           (only-in "private/op-calls.rkt" op-calls-of)
+           (only-in "private/within.rkt" bounded-test))
+
+  (define blames-this-test? (blames-caller? "nn-metrics-test"))
+
+  (define accelerators
+    (append (if (cuda-available?) (list (cuda-device)) '())
+            (if (mps-available?) (list (mps-device)) '())))
+
+  (define (call-seeded seed thunk)
+    (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
+      (random-seed seed)
+      (thunk)))
+
+  (define (fixture n c seed)
+    (call-seeded seed
+                 (lambda ()
+                   (values (for/list ([_ (in-range n)])
+                             (map exact->inexact (shuffle (range c))))
+                           (for/list ([_ (in-range n)]) (random c))))))
+
+  (define (logits-of rows c [on 'cpu])
+    (if (null? rows) (zeros 0 c #:device on) (tensor rows #:device on)))
+
+  (define (labels-of ys [on 'cpu])
+    (if (null? ys) (zeros 0 #:dtype 'int64 #:device on) (tensor ys #:dtype 'int64 #:device on)))
+
+  (define (rank-hit? row y k)
+    (define score (list-ref row y))
+    (< (for/sum ([v (in-list row)]) (if (> v score) 1 0)) k))
+
+  (define (hits rows ys k)
+    (for/sum ([row (in-list rows)] [y (in-list ys)]) (if (rank-hit? row y k) 1 0)))
+
+  (define (top-1 row)
+    (index-of row (apply max row)))
+
+  (define (single x)
+    (flsingle (exact->inexact x)))
+
+  (define (acc rows ys k [ignore #f])
+    (item (accuracy (logits-of rows (length (car rows))) (labels-of ys)
+                    #:top-k k #:ignore-index ignore)))
+
+  (bounded-test "M1: accuracy is the float32 share of rows whose label is in the top k"
+    (for* ([n (in-list '(1 7 64))] [c (in-list '(2 5 10))] [k (in-range 1 (add1 c))])
+      (define-values (rows ys) (fixture n c (+ n (* 100 c))))
+      (define result (accuracy (logits-of rows c) (labels-of ys) #:top-k k))
+      (check-equal? (item result) (single (/ (hits rows ys k) n)) (format "n ~a c ~a k ~a" n c k))
+      (check-equal? (shape result) '())
+      (check-equal? (dtype result) 'float32)
+      (check-equal? (device result) (device (logits-of rows c)))))
+
+  (bounded-test "M2: top-k at the class count is 1, and accuracy never falls as k grows"
+    (for ([c (in-list '(2 5 10))])
+      (define-values (rows ys) (fixture 64 c c))
+      (check-equal? (acc rows ys c) 1.0)
+      (for ([k (in-range 1 c)])
+        (check-true (<= (acc rows ys k) (acc rows ys (add1 k))) (format "c ~a k ~a" c k)))))
+
+  (bounded-test "M3: an all-equal row predicts class 0, and class indices match their logits"
+    (define ys '(0 1 2 0 0 2))
+    (check-equal? (item (accuracy (zeros 6 3) (labels-of ys))) (single 1/2))
+    (define-values (rows ys*) (fixture 64 5 3))
+    (define l (logits-of rows 5))
+    (check-equal? (item (accuracy (argmax l 1) (labels-of ys*))) (item (accuracy l (labels-of ys*)))))
+
+  (bounded-test "M4: accuracy is invariant under a row permutation and the map 2x + 3"
+    (define-values (rows ys) (fixture 64 10 4))
+    (define l (logits-of rows 10))
+    (define y (labels-of ys))
+    (define order (randperm 64))
+    (for ([k (in-list '(1 3))])
+      (define want (item (accuracy l y #:top-k k)))
+      (check-equal? (item (accuracy (index-select l 0 order) (index-select y 0 order) #:top-k k)) want)
+      (check-equal? (item (accuracy (+ (* l 2.0) 3.0) y #:top-k k)) want)))
+
+  (define (kept-rows rows ys ignore)
+    (for/lists (rs ks) ([r (in-list rows)] [y (in-list ys)] #:unless (= y ignore))
+      (values r y)))
+
+  (bounded-test "M5: ignored rows leave the numerator and the denominator"
+    (define-values (rows ys) (fixture 64 5 5))
+    (for* ([ignore (in-list '(1 -100))] [k (in-list '(1 2))])
+      (define marked (for/list ([y (in-list ys)] [i (in-naturals)])
+                       (if (and (= ignore -100) (zero? (modulo i 3))) -100 y)))
+      (define-values (rs ks) (kept-rows rows marked ignore))
+      (check-equal? (acc rows marked k ignore) (acc rs ks k) (format "ignore ~a k ~a" ignore k)))
+    (check-true (nan? (acc rows (map (lambda (_) 3) ys) 1 3)))
+    (check-true (nan? (item (accuracy (zeros 0 5) (labels-of '()))))))
+
+  (define (confusion-of rows ys c [ignore #f])
+    (tensor->list (confusion-matrix (logits-of rows c) (labels-of ys) #:classes c #:ignore-index ignore)))
+
+  (bounded-test "M6: the confusion matrix counts true rows against predicted columns"
+    (define c 5)
+    (define-values (rows ys*) (fixture 64 c 6))
+    (define ys (for/list ([y (in-list ys*)] [i (in-naturals)]) (if (zero? (modulo i 7)) -1 y)))
+    (define preds (map top-1 rows))
+    (define cm (confusion-of rows ys c -1))
+    (define (entry t p) (list-ref cm (+ (* t c) p)))
+    (define kept (for/list ([y (in-list ys)] [p (in-list preds)] #:unless (= y -1)) (cons y p)))
+    (for* ([t (in-range c)] [p (in-range c)])
+      (check-equal? (entry t p) (for/sum ([tp (in-list kept)]) (if (equal? tp (cons t p)) 1 0))))
+    (check-equal? (apply + cm) (length kept))
+    (for ([i (in-range c)])
+      (check-equal? (for/sum ([p (in-range c)]) (entry i p))
+                    (for/sum ([tp (in-list kept)]) (if (= (car tp) i) 1 0)))
+      (check-equal? (for/sum ([t (in-range c)]) (entry t i))
+                    (for/sum ([tp (in-list kept)]) (if (= (cdr tp) i) 1 0))))
+    (check-equal? (single (/ (for/sum ([i (in-range c)]) (entry i i)) (apply + cm)))
+                  (acc rows ys 1 -1))
+    (check-equal? (~> (confusion-matrix (argmax (logits-of rows c) 1) (labels-of ys)
+                                        #:classes c #:ignore-index -1)
+                      tensor->list)
+                  cm)
+    (check-equal? (shape (confusion-matrix (logits-of rows c) (labels-of ys*) #:classes c)) '(5 5))
+    (check-equal? (dtype (confusion-matrix (logits-of rows c) (labels-of ys*) #:classes c)) 'int64))
+
+  (bounded-test "M7: perplexity of reals is a flonum exponential"
+    (check-equal? (perplexity 23.0 #:tokens 10) (flexp (/ 23.0 10)))
+    (check-equal? (perplexity 2.5) (flexp 2.5))
+    (check-equal? (perplexity 0) 1.0)
+    (check-true (flonum? (perplexity 7 #:tokens 2))))
+
+  (define (close? a b rel)
+    (<= (abs (- a b)) (* rel (abs b))))
+
+  (bounded-test "M8: perplexity of uniform logits is the vocabulary size"
+    (for ([v (in-list '(2 10 50))])
+      (define y (labels-of (for/list ([i (in-range 8)]) (modulo i v))))
+      (define ce (cross-entropy (zeros 8 v) y))
+      (check-true (close? (item (perplexity ce)) v 1e-6) (format "v ~a" v))
+      (check-true (close? (item (perplexity (* ce 8) #:tokens 8)) (item (perplexity ce)) 1e-6))
+      (check-equal? (item (perplexity (* ce 8) #:tokens (tensor 8 #:dtype 'int64)))
+                    (item (perplexity (* ce 8) #:tokens 8)))
+      (check-equal? (shape (perplexity ce)) '())
+      (check-equal? (dtype (perplexity ce)) 'float32)))
+
+  (bounded-test "M9: the gradient of perplexity in its NLL is perplexity over the tokens"
+    (check-true (gradcheck (lambda (nll) (perplexity nll #:tokens 5)) (list (tensor 3.0)) #:eps 1e-3))
+    (define nll (requires-grad! (tensor 3.0 #:dtype 'float64)))
+    (define ppl (perplexity nll #:tokens 5))
+    (backward! ppl)
+    (check-true (close? (item (grad nll)) (/ (item ppl) 5) 1e-6)))
+
+  (define (cuts n seed)
+    (call-seeded seed
+                 (lambda ()
+                   (define b (min n (add1 (random 5))))
+                   (append '(0) (sort (take (shuffle (range 1 n)) (sub1 b)) <) (list n)))))
+
+  (define (streamed m p y bounds)
+    (for ([from (in-list bounds)] [to* (in-list (cdr bounds))])
+      (metric-update! m (narrow p 0 from (- to* from)) (narrow y 0 from (- to* from))))
+    (metric-compute m))
+
+  (define (sequence-fixture b t v seed)
+    (call-seeded seed
+                 (lambda ()
+                   (values (randn b t v #:generator (make-generator seed))
+                           (tensor (for/list ([_ (in-range b)])
+                                     (for/list ([_ (in-range t)]) (random v)))
+                                   #:dtype 'int64)))))
+
+  (define (perplexity-of logits targets ignore)
+    (define flat-targets (reshape targets -1))
+    (define nll (nll-loss (log-softmax (reshape logits -1 (last (shape logits))) -1) flat-targets
+                          #:reduction 'sum #:ignore-index (or ignore -100)))
+    (perplexity nll #:tokens (~> (ne flat-targets (or ignore -100)) (to-dtype 'int64) sum)))
+
+  (bounded-test "M10: a metric over batches equals its functional form over their concatenation"
+    (for ([seed (in-range 6)])
+      (define-values (rows ys*) (fixture 64 5 (+ 10 seed)))
+      (define ys (for/list ([y (in-list ys*)] [i (in-naturals)]) (if (= 2 (modulo i 5)) -100 y)))
+      (define l (logits-of rows 5))
+      (define y (labels-of ys))
+      (define bounds (cuts 64 seed))
+      (for ([k (in-list '(1 3))])
+        (check-equal? (item (streamed (accuracy-metric #:top-k k #:ignore-index -100) l y bounds))
+                      (item (accuracy l y #:top-k k #:ignore-index -100))
+                      (format "seed ~a k ~a" seed k)))
+      (check-equal? (tensor->list (streamed (confusion-matrix-metric #:classes 5 #:ignore-index -100)
+                                            l y bounds))
+                    (tensor->list (confusion-matrix l y #:classes 5 #:ignore-index -100)))
+      (define-values (seq tgt) (sequence-fixture 6 7 11 seed))
+      (define ppl (perplexity-metric #:ignore-index 3))
+      (for ([from (in-list bounds)] [to* (in-list (cdr bounds))] #:when (< from 6))
+        (define len (- (min 6 to*) from))
+        (metric-update! ppl (narrow seq 0 from len) (narrow tgt 0 from len)))
+      (check-true (close? (item (metric-compute ppl)) (item (perplexity-of seq tgt 3)) 1e-6))
+      (define flat (perplexity-metric))
+      (metric-update! flat (reshape seq -1 11) (reshape tgt -1))
+      (check-true (close? (item (metric-compute flat)) (item (perplexity-of seq tgt #f)) 1e-6))))
+
+  (bounded-test "M11: a reset metric is fresh, and a computed matrix is not aliased"
+    (define-values (rows ys) (fixture 32 4 11))
+    (define l (logits-of rows 4))
+    (define y (labels-of ys))
+    (define m (confusion-matrix-metric #:classes 4))
+    (metric-update! m l y)
+    (define before (metric-compute m))
+    (define seen (tensor->list before))
+    (metric-update! m l y)
+    (check-equal? (tensor->list before) seen)
+    (metric-reset! m)
+    (check-exn blames-this-test? (lambda () (metric-compute m)))
+    (metric-update! m (narrow l 0 0 8) (narrow y 0 0 8))
+    (check-equal? (tensor->list (metric-compute m))
+                  (tensor->list (confusion-matrix (narrow l 0 0 8) (narrow y 0 0 8) #:classes 4)))
+    (define a (accuracy-metric))
+    (metric-update! a l y)
+    (metric-reset! a)
+    (metric-update! a (narrow l 0 0 8) (narrow y 0 0 8))
+    (check-equal? (item (metric-compute a)) (item (accuracy (narrow l 0 0 8) (narrow y 0 0 8)))))
+
+  (bounded-test "M12: updates build no graph"
+    (define-values (rows ys) (fixture 16 4 12))
+    (define l (requires-grad! (logits-of rows 4)))
+    (define y (labels-of ys))
+    (define-values (seq tgt) (sequence-fixture 2 3 4 12))
+    (define s (requires-grad! seq))
+    (for ([m (in-list (list (accuracy-metric) (confusion-matrix-metric #:classes 4)))])
+      (metric-update! m l y)
+      (check-false (requires-grad? (metric-compute m))))
+    (define ppl (perplexity-metric))
+    (metric-update! ppl s tgt)
+    (check-false (requires-grad? (metric-compute ppl)))
+    (check-false (has-grad? l))
+    (check-false (has-grad? s)))
+
+  (define (bytes-on on)
+    (for/sum ([(place bytes) (in-dict (native-memory-use))] #:when (equal? place on)) bytes))
+
+  (define (metric-cases validate?)
+    (list (list (lambda () (accuracy-metric #:top-k 2 #:validate-args? validate?)) 'class 16)
+          (list (lambda () (confusion-matrix-metric #:classes 5 #:validate-args? validate?)) 'class
+                (* 8 25))
+          (list (lambda () (perplexity-metric #:validate-args? validate?)) 'sequence 8)))
+
+  (define (inputs kind n)
+    (define-values (rows ys) (fixture n 5 n))
+    (if (eq? kind 'class)
+        (values (logits-of rows 5) (labels-of ys))
+        (values (randn n 5) (labels-of ys))))
+
+  (bounded-test "M13: an update's native calls do not grow with the batch, nor its memory with updates"
+    (for* ([validate? (in-list '(#t #f))] [c (in-list (metric-cases validate?))])
+      (match-define (list make kind state-bytes) c)
+      (define (calls n)
+        (define m (make))
+        (define-values (p y) (inputs kind n))
+        (metric-update! m p y)
+        (op-calls-of (lambda () (metric-update! m p y))))
+      (check-equal? (calls 8) (calls 4096) (format "~a validate ~a" kind validate?))
+      (define m (make))
+      (define-values (p y) (inputs kind 64))
+      (reclaim-native-memory!)
+      (define before (bytes-on (device p)))
+      (for ([_ (in-range 100)]) (metric-update! m p y))
+      (reclaim-native-memory!)
+      (check-equal? (- (bytes-on (device p)) before) state-bytes (format "~a ~a" kind (shape y)))
+      (check-true (metric? m))))
+
+  (bounded-test "M14: malformed arguments blame the caller"
+    (define l (zeros 4 3))
+    (define y (labels-of '(0 1 2 0)))
+    (for ([thunk (in-list
+                  (list (lambda () (accuracy (zeros 4) y))
+                        (lambda () (accuracy (zeros 4 3 2) y))
+                        (lambda () (accuracy l (zeros 4 1 #:dtype 'int64)))
+                        (lambda () (accuracy l (labels-of '(0 1 2 0 1))))
+                        (lambda () (accuracy l (zeros 4)))
+                        (lambda () (accuracy (labels-of '(0 1 2 0)) y #:top-k 2))
+                        (lambda () (accuracy l y #:top-k 0))
+                        (lambda () (accuracy l y #:top-k 4))
+                        (lambda () (accuracy l (labels-of '(0 1 3 0))))
+                        (lambda () (accuracy l (labels-of '(0 -1 2 0))))
+                        (lambda () (confusion-matrix l y #:classes 0))
+                        (lambda () (confusion-matrix l y #:classes 4))
+                        (lambda () (confusion-matrix (labels-of '(0 5 1 1)) y #:classes 3))
+                        (lambda () (perplexity 1.0 #:tokens 0))
+                        (lambda () (perplexity 1.0 #:tokens (tensor 3 #:dtype 'int64)))
+                        (lambda () (accuracy-metric #:top-k 0))
+                        (lambda () (confusion-matrix-metric #:classes 0))
+                        (lambda () (metric-update! (accuracy-metric) (zeros 4) y))
+                        (lambda () (metric-update! (accuracy-metric) l (zeros 4 1 #:dtype 'int64)))
+                        (lambda () (metric-update! (confusion-matrix-metric #:classes 4) l y))
+                        (lambda () (metric-update! (perplexity-metric) (zeros 4 3) (zeros 4 2 #:dtype 'int64)))
+                        (lambda () (metric-update! (perplexity-metric) (zeros 4) y))
+                        (lambda () (metric-update! (accuracy-metric) l (labels-of '(0 1 7 0))))
+                        (lambda () (metric-compute (accuracy-metric)))))]
+          [i (in-naturals)])
+      (check-exn blames-this-test? thunk (format "case ~a" i)))
+    (check-not-exn (lambda () (accuracy l (labels-of '(0 1 9 0)) #:validate-args? #f #:ignore-index 9)))
+    (for ([on (in-list accelerators)])
+      (check-exn blames-this-test? (lambda () (accuracy (to l on) y)))
+      (check-exn blames-this-test? (lambda () (confusion-matrix (to l on) y #:classes 3)))
+      (define m (accuracy-metric))
+      (metric-update! m l y)
+      (check-exn blames-this-test? (lambda () (metric-update! m (to l on) (to y on))))))
+
+  (define (figures on)
+    (define-values (rows ys*) (fixture 64 5 21))
+    (define ys (for/list ([y (in-list ys*)] [i (in-naturals)]) (if (= 1 (modulo i 4)) -100 y)))
+    (define l (logits-of rows 5 on))
+    (define y (labels-of ys on))
+    (define-values (seq tgt) (sequence-fixture 3 5 9 21))
+    (define ppl (perplexity-metric))
+    (metric-update! ppl (to seq on) (to tgt on))
+    (define a (accuracy-metric #:top-k 2 #:ignore-index -100))
+    (metric-update! a l y)
+    (define cm (confusion-matrix-metric #:classes 5 #:ignore-index -100))
+    (metric-update! cm l y)
+    (values (list (item (accuracy l y #:ignore-index -100))
+                  (item (accuracy l y #:top-k 3 #:ignore-index -100))
+                  (item (metric-compute a))
+                  (tensor->list (to (confusion-matrix l y #:classes 5 #:ignore-index -100) 'cpu))
+                  (tensor->list (to (metric-compute cm) 'cpu)))
+            (device (metric-compute a))
+            (item (metric-compute ppl))))
+
+  (bounded-test "M15: accelerators give the CPU's counts and perplexity"
+    (define-values (cpu-counts _cpu cpu-ppl) (figures 'cpu))
+    (for ([on (in-list accelerators)])
+      (define-values (counts there ppl) (figures on))
+      (check-equal? counts cpu-counts (format "~a" on))
+      (check-equal? there (device (zeros 1 #:device on)))
+      (check-true (close? ppl cpu-ppl 1e-6) (format "~a" on)))))

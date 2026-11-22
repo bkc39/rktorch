@@ -6,6 +6,7 @@
          "train/logging.rkt"
          "train/loop.rkt"
          "train/optimization.rkt"
+         "train/probe.rkt"
          "train/run.rkt"
          "train/schedules.rkt"
          "train/trainer.rkt")
@@ -14,6 +15,7 @@
                        "train/logging.rkt"
                        "train/loop.rkt"
                        "train/optimization.rkt"
+                       "train/probe.rkt"
                        "train/run.rkt"
                        "train/schedules.rkt"
                        "train/trainer.rkt"))

@@ -36,6 +36,7 @@
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
+         "nn/metrics.rkt"
          "nn/mode.rkt"
          (only-in "nn/optim.rkt"
                   adam adam? adamw adamw? gen:optimizer learning-rate lr-optimizer/c
@@ -224,6 +225,17 @@
          huber-loss
          l1-loss
          nll-loss)
+
+(provide accuracy
+         confusion-matrix
+         perplexity
+         accuracy-metric
+         confusion-matrix-metric
+         perplexity-metric
+         metric?
+         metric-update!
+         metric-compute
+         metric-reset!)
 
 (provide state-dict
          save-state!
