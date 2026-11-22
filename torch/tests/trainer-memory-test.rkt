@@ -75,9 +75,9 @@
     (define-optimizers (sgd (parameters net) #:lr 0.01))
     (define-training-step (x y) (mse-loss (net x) y)))
 
-  (test-case "a trainer keeps no init argument that is not readable"
+  (test-case "a trainer keeps no init argument a checkpoint cannot hold"
     (define held (make-weak-box (zeros 1000 1000)))
-    (define tr (Holding (weak-box-value held) "kept"))
+    (define tr (Holding (vector (weak-box-value held)) "kept"))
     (collect!)
     (check-false (weak-box-value held))
     (define l (collecting-logger))

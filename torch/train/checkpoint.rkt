@@ -13,7 +13,7 @@
          (only-in "optimization.rkt" set-hparam! trainer-hparams)
          (only-in "private/book.rkt" book-metrics)
          (only-in "private/checks.rkt"
-                  captured-arguments-shapes captured-arguments-values formal-name)
+                  formal-name init-capture-shapes init-capture-values)
          (only-in "private/dispatch.rkt" call-callback call-hooks call-trainer trainer-device)
          (only-in "private/format.rkt" read-checkpoint-file write-checkpoint!)
          (only-in "private/restore.rkt" rng-bundle)
@@ -64,10 +64,10 @@
 
 (define (init-entries tr)
   (define captured ((trainer-hook tr 'init-arguments) tr))
-  (define shapes (captured-arguments-shapes captured))
+  (define shapes (init-capture-shapes captured))
   (define-values (kept dropped)
     (partition (lambda (e) (checkpoint-value? (cdr e)))
-               (map cons shapes (captured-arguments-values captured))))
+               (map cons shapes (init-capture-values captured))))
   (define (id-of shape) (symbol->string (formal-name shape)))
   (hash "hyper_parameters" (for/hash ([e (in-list kept)]) (values (id-of (car e)) (cdr e)))
         "init_formals" (map formal-entry shapes)

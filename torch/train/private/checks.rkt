@@ -12,12 +12,15 @@
          (only-in "../run.rkt" state-key/c)
          (only-in "types.rkt"
                   callback? make-scheduler-config scheduler-config-scheduler
-                  scheduler-config?))
+                  scheduler-config?)
+         (only-in "value.rkt" checkpoint-value?))
 
-(provide (struct-out captured-arguments)
+(provide captured-arguments
          checked-hparam
          checked-hparams!
          formal-name
+         init-capture-shapes
+         init-capture-values
          readable-arguments)
 
 (define (optimizer-only? v)
@@ -87,7 +90,13 @@
   (or (real? v) (string? v) (symbol? v) (boolean? v)
       (and (list? v) (andmap readable? v))))
 
-(struct captured-arguments (shapes values))
+(struct init-capture (shapes values))
+
+;; a value no checkpoint can hold is not kept, so the trainer does not pin it
+(define (captured-arguments shapes vals)
+  (init-capture shapes
+                (for/list ([v (in-list vals)])
+                  (if (checkpoint-value? v) v (void)))))
 
 (define (formal-name shape)
   (match shape
@@ -95,8 +104,8 @@
     [(list 'keyword _ name) name]))
 
 (define (readable-arguments captured)
-  (for/hasheq ([shape (in-list (captured-arguments-shapes captured))]
-               [v (in-list (captured-arguments-values captured))]
+  (for/hasheq ([shape (in-list (init-capture-shapes captured))]
+               [v (in-list (init-capture-values captured))]
                #:when (readable? v))
     (values (formal-name shape) v)))
 
