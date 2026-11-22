@@ -5,8 +5,8 @@
                   flat-named-contract listof non-empty-listof not/c real-in unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
-         (only-in racket/list count)
-         (only-in racket/match match match-define struct*)
+         (only-in racket/list append-map count)
+         (only-in racket/match match match-define match-lambda struct*)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optim-groups.rkt"
@@ -373,7 +373,9 @@
   (define (problem what) (list (cons where what)))
   (define (count-problems key)
     (define n (length (hash-ref state key)))
-    (if (= n groups) '() (problem (format "~a has ~a rates, the optimizer ~a groups" key n groups))))
+    (if (= n groups)
+        '()
+        (problem (format "~a has ~a rates, the optimizer ~a groups" key n groups))))
   (define subs (inner-schedulers rule))
   (define saved-subs (hash-ref state "_schedulers" #f))
   (append
@@ -412,4 +414,4 @@
     ['() (restore! s state)]
     [problems
      (apply raise-arguments-error 'load-scheduler-state! "the state does not fit the scheduler"
-            (for*/list ([pr (in-list problems)] [x (in-list (list (car pr) (cdr pr)))]) x))]))
+            (append-map (match-lambda [(cons label why) (list label why)]) problems))]))

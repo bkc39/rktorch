@@ -52,4 +52,27 @@
       (load-optimizer-state! rebuilt-opt net opt-state)
       (load-scheduler-state! rebuilt state)
       (check-equal? (scheduler-state-dict rebuilt) state (format "~a after ~a: the state" name k))
-      (check-equal? (rates rebuilt 6) (rates s 6) (format "~a after ~a: the rates" name k)))))
+      (check-equal? (rates rebuilt 6) (rates s 6) (format "~a after ~a: the rates" name k))))
+
+  (test-case "T3-L12: a state that does not fit the scheduler raises, leaving it as it was"
+    (define (fresh make) (make (sgd (parameters (Linear 2 1)) #:lr 0.1)))
+    (define (step-of o) (step-lr o #:step-size 2))
+    (define (restarts-of o) (cosine-annealing-warm-restarts o #:t-0 2))
+    (define (chain-of o) (chained-scheduler (list (step-of o) (exponential-lr o #:gamma 0.9))))
+    (define (check-refused label make state rx)
+      (define s (fresh make))
+      (define before (scheduler-state-dict s))
+      (check-exn rx (lambda () (load-scheduler-state! s state)) label)
+      (check-equal? (scheduler-state-dict s) before (format "~a: unchanged" label)))
+    (define plain (scheduler-state-dict (fresh step-of)))
+    (check-refused "two rates for one group" step-of (hash-set plain "_last_lr" '(0.1 0.1))
+                   #rx"_last_lr")
+    (check-refused "warm restarts without T_cur" restarts-of plain #rx"T_cur")
+    (check-refused "T_cur on a step schedule" step-of (scheduler-state-dict (fresh restarts-of))
+                   #rx"T_cur")
+    (check-refused "a leaf state into a chain" chain-of plain #rx"schedules")
+    (define chained (scheduler-state-dict (fresh chain-of)))
+    (check-refused "an inner state that does not fit" chain-of
+                   (hash-update chained "_schedulers"
+                                (lambda (subs) (list (car subs) (hash-set plain "base_lrs" '()))))
+                   #rx"_schedulers\\[1\\].*base_lrs")))

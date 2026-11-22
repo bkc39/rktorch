@@ -2,8 +2,8 @@
 
 (require (only-in racket/contract/base ->i contract? flat-named-contract)
          (only-in racket/dict in-dict)
-         (only-in racket/list remove-duplicates)
-         (only-in racket/match match match*)
+         (only-in racket/list append-map remove-duplicates)
+         (only-in racket/match match match* match-lambda)
          (only-in racket/set list->set set=?)
          (only-in "../foreign.rkt"
                   copy! device dtype full item tensor-shape tensor? with-no-grad zeros-like)
@@ -105,7 +105,8 @@
       [_ (hash-set out (symbol->string k) v)])))
 
 (define (rktorch-settings group)
-  (for/fold ([h (hasheq)]) ([(k v) (in-hash group)] #:unless (member k '("params" "initial_lr")))
+  (for/fold ([h (hasheq)])
+            ([(k v) (in-hash group)] #:unless (member k '("params" "initial_lr")))
     (match* (k v)
       [("nesterov" _) (hash-set h 'nesterov? v)]
       [("weight_decay" _) (hash-set h 'weight-decay v)]
@@ -195,7 +196,9 @@
       (for/list ([key (in-list '("lr" "momentum" "weight_decay" "alpha" "initial_lr"))]
                  #:when (negative? (hash-ref h key 0)))
         (bad key "is negative"))
-      (if (and (eq? kind 'rmsprop) (negative? (hash-ref h "eps"))) (list (bad "eps" "is negative")) '())
+      (if (and (eq? kind 'rmsprop) (negative? (hash-ref h "eps")))
+          (list (bad "eps" "is negative"))
+          '())
       (if (and (hash-ref h "nesterov" #f) (not (positive? (hash-ref h "momentum"))))
           (list (bad "nesterov" "needs a momentum"))
           '()))]))
@@ -247,7 +250,7 @@
      (append (group-problems kind groups saved-groups names)
              (state-problems kind groups saved-groups (hash-ref saved "state") names))]))
 
-(define (placed-slot fused? p slot v)
+(define (placed-slot fused? p v)
   (match v
     [(? tensor?)
      (define fresh (zeros-like p))
@@ -265,7 +268,7 @@
            [(table torch-name) (in-dict slot-tables)]
            [v (in-value (hash-ref slots torch-name #f))]
            #:when v)
-      (hash-set! (hash-ref! state table make-hasheq) p (placed-slot fused? p table v)))))
+      (hash-set! (hash-ref! state table make-hasheq) p (placed-slot fused? p v)))))
 
 (define/contract-out (load-optimizer-state! opt model state) ;; noqa
   (->i ([opt optimizer?] [model layer?] [state optimizer-state/c])
@@ -279,7 +282,7 @@
   (define problems (load-problems kind groups state (parameter-names model)))
   (unless (null? problems)
     (apply raise-arguments-error 'load-optimizer-state! "the state does not fit the optimizer"
-           (for*/list ([pr (in-list problems)] [x (in-list (list (car pr) (cdr pr)))]) x)))
+           (append-map (match-lambda [(cons label why) (list label why)]) problems)))
   (define saved-groups (hash-ref state "param_groups"))
   (store-load! st (map rktorch-settings saved-groups)
                (for/list ([h (in-list saved-groups)])

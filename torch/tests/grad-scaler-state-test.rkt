@@ -36,7 +36,7 @@
     (define twin-opt (sgd (list q) #:lr 0.1))
     (check-equal? (scaled-steps! twin twin-opt q 6 4) (scaled-steps! s opt p 6 4)))
 
-  (test-case "T3-L13: loading into a scaler that has already scaled overwrites its scale and tracker"
+  (test-case "T3-L13: loading into a scaler that has scaled overwrites its scale and tracker"
     (define p (Parameter (tensor '(1.0 -1.0))))
     (define opt (sgd (list p) #:lr 0.1))
     (define s (scaler))

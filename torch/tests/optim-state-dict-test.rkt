@@ -158,8 +158,46 @@
   (test-case "T3-L10: a floating slot takes its parameter's dtype, as torch's load does"
     (define net (fresh-net))
     (define-values (opt saved) (adam-after-steps net))
-    (load-optimizer-state! opt net (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'float64))))
+    (load-optimizer-state! opt net
+                           (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'float64))))
     (check-equal? (comparable (optimizer-state-dict opt net)) (comparable saved)))
+
+  (test-case "T3-L11: hyperparameters and slots that do not fit the optimizer raise"
+    (define net (fresh-net))
+    (define-values (opt saved) (adam-after-steps net))
+    (check-refused "a key another optimizer has" opt net
+                   (update-group saved (lambda (grp) (hash-set grp "alpha" 0.9)))
+                   #rx"alpha")
+    (check-refused "a negative rate" opt net
+                   (update-group saved (lambda (grp) (hash-set grp "lr" -1.0)))
+                   #rx"lr.*negative")
+    (check-refused "a duplicated name" opt net
+                   (update-group saved
+                                 (lambda (grp) (hash-set grp "params" '("weight" "bias" "bias"))))
+                   #rx"duplicated")
+    (check-refused "a slot the optimizer does not keep" opt net
+                   (hash-update saved "state"
+                                (lambda (st)
+                                  (hash-update st "weight" (lambda (sl) (hash-remove sl "exp_avg")))))
+                   #rx"weight")
+    (check-refused "a state for a parameter outside the optimizer" opt net
+                   (hash-update saved "state" (lambda (st) (hash-set st "ghost" (hash))))
+                   #rx"ghost"))
+
+  (test-case "T3-L11: an sgd or rmsprop group's own constraints"
+    (define net (fresh-net))
+    (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
+    (steps! opt net 1)
+    (define saved (optimizer-state-dict opt net))
+    (check-refused "nesterov without momentum" opt net
+                   (update-group saved (lambda (grp) (hash-set* grp "nesterov" #t "momentum" 0.0)))
+                   #rx"nesterov")
+    (define r (rmsprop (parameters net) #:lr 0.1))
+    (steps! r net 1)
+    (check-refused "a negative eps" r net
+                   (update-group (optimizer-state-dict r net)
+                                 (lambda (grp) (hash-set grp "eps" -1.0)))
+                   #rx"eps"))
 
   (test-case "T3-L11: a malformed state, or a parameter outside the model, blames the caller"
     (define net (fresh-net))
