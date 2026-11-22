@@ -15,7 +15,9 @@ the host.
 @defproc[(accuracy [predictions tensor?]
                    [labels tensor?]
                    [#:top-k top-k exact-positive-integer? 1]
-                   [#:ignore-index ignore-index (or/c #f exact-integer?) #f]
+                   [#:ignore-index ignore-index
+                    (or/c #f (integer-in (- (expt 2 63)) (sub1 (expt 2 63))))
+                    #f]
                    [#:validate-args? validate-args? boolean? #t])
          tensor?]{
 The fraction of rows whose label is among the @racket[top-k] largest
@@ -40,7 +42,9 @@ checks every label is in range by reading their extremes to the host; pass
 @defproc[(confusion-matrix [predictions tensor?]
                            [labels tensor?]
                            [#:classes classes exact-positive-integer?]
-                           [#:ignore-index ignore-index (or/c #f exact-integer?) #f]
+                           [#:ignore-index ignore-index
+                            (or/c #f (integer-in (- (expt 2 63)) (sub1 (expt 2 63))))
+                            #f]
                            [#:validate-args? validate-args? boolean? #t])
          tensor?]{
 The @racket['int64] @tt{[classes, classes]} matrix whose entry
@@ -74,16 +78,22 @@ the answer is a scalar of @racket[nll]'s dtype on its device, as
 
 @deftogether[(@defproc[(accuracy-metric
                         [#:top-k top-k exact-positive-integer? 1]
-                        [#:ignore-index ignore-index (or/c #f exact-integer?) #f]
+                        [#:ignore-index ignore-index
+                         (or/c #f (integer-in (- (expt 2 63)) (sub1 (expt 2 63))))
+                         #f]
                         [#:validate-args? validate-args? boolean? #t])
                        metric?]
               @defproc[(confusion-matrix-metric
                         [#:classes classes exact-positive-integer?]
-                        [#:ignore-index ignore-index (or/c #f exact-integer?) #f]
+                        [#:ignore-index ignore-index
+                         (or/c #f (integer-in (- (expt 2 63)) (sub1 (expt 2 63))))
+                         #f]
                         [#:validate-args? validate-args? boolean? #t])
                        metric?]
               @defproc[(perplexity-metric
-                        [#:ignore-index ignore-index (or/c #f exact-integer?) #f]
+                        [#:ignore-index ignore-index
+                         (or/c #f (integer-in (- (expt 2 63)) (sub1 (expt 2 63))))
+                         #f]
                         [#:validate-args? validate-args? boolean? #t])
                        metric?])]{
 Accumulators for @racket[metric-update!]; their keywords mean what they
@@ -91,7 +101,9 @@ mean for @racket[accuracy] and @racket[confusion-matrix].
 @racket[perplexity-metric] takes logits @tt{[N, V]} or
 @tt{[B, T, V]} with targets @tt{[N]} or @tt{[B, T]}, and adds
 their summed negative log-likelihood and token count. The counts live on
-the device of the first update.
+the device of the first update. Its @racket[metric-compute] is a
+@racket['float32] scalar whatever the logits' dtype, where
+@racket[perplexity] keeps its NLL's.
 }
 
 @defproc[(metric-update! [m metric?] [predictions tensor?] [targets tensor?]) void?]{

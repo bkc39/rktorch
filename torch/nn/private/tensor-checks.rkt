@@ -2,7 +2,7 @@
 
 (require (only-in racket/match match-define)
          (only-in "../../foreign.rkt"
-                  device dtype eq max min numel shape stack tensor->list tensor? where))
+                  device dtype eq full max min numel shape stack tensor->list tensor? where))
 
 (provide in-range?
          rank-of
@@ -27,8 +27,11 @@
 (define (same-device? a b)
   (equal? (device a) (device b)))
 
+(define (zero-like t)
+  (full 0 #:dtype (dtype t) #:device (device t)))
+
 (define (in-range? t bound [ignore-index #f])
   (or (zero? (numel t))
-      (let ([kept (if ignore-index (where (eq t ignore-index) 0 t) t)])
+      (let ([kept (if ignore-index (where (eq t ignore-index) (zero-like t) t) t)])
         (match-define (list lo hi) (tensor->list (stack (list (min kept) (max kept)))))
         (and (<= 0 lo) (< hi bound)))))

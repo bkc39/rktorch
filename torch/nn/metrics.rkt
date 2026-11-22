@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i any/c contract-out flat-contract-predicate flat-named-contract
-                  or/c)
+                  integer-in or/c)
          (only-in racket/flonum fl/ flexp)
          (only-in racket/generic define-generics)
          (only-in racket/list drop-right last)
@@ -40,7 +40,9 @@
 
 (define labels/c (flat-named-contract 'labels (flat-contract-predicate class-indices/c)))
 
-(define ignore-index/c (or/c #f exact-integer?))
+(define int64-min (- (expt 2 63)))
+
+(define ignore-index/c (or/c #f (integer-in int64-min (sub1 (expt 2 63)))))
 
 (define float32-scalar/c
   (flat-named-contract 'float32-scalar (lambda (v) (tensor-of? v '(0) float32?))))
@@ -131,7 +133,8 @@
 (define sum-reduction 2)
 
 (define (perplexity-counts logits targets ignore-index)
-  (define ignored (or ignore-index -100))
+  ;; no target in [0, V) is int64-min, so #f ignores none
+  (define ignored (or ignore-index int64-min))
   (define flat-targets (reshape targets -1))
   (define nll
     (~> (reshape logits -1 (last (shape logits)))

@@ -74,7 +74,8 @@
     #f))
 
 (define (in-tensor-constructor?)
-  (and (assq 'tensor (continuation-mark-set->context (current-continuation-marks))) #t))
+  (for/or ([frame (in-list (continuation-mark-set->context (current-continuation-marks)))])
+    (and (memq (car frame) '(tensor bytes->tensor)) #t)))
 
 (define (tensor-crossings-of thunk)
   (define n 0)

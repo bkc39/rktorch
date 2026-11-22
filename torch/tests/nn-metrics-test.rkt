@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/dict in-dict)
+  (require (only-in racket/contract/combinator exn:fail:contract:blame?)
+           (only-in racket/dict in-dict)
            (only-in racket/flonum flexp flsingle)
            (only-in racket/list count drop index-of last range shuffle take)
            (only-in racket/match match-define match-lambda)
@@ -10,7 +11,8 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + argmax backward! cuda-available? cuda-device device dtype grad has-grad?
+                    * + argmax backward! bytes->tensor cuda-available? cuda-device device dtype eq
+                    grad has-grad?
                     index-select item log-softmax make-generator mps-available? mps-device narrow
                     native-memory-use ne randn randperm reclaim-native-memory! requires-grad!
                     requires-grad? reshape shape sum tensor tensor->list to to-dtype zeros)
@@ -109,7 +111,11 @@
       (define-values (rs ks) (kept-rows rows marked ignore))
       (check-equal? (acc rows marked 5 k ignore) (acc rs ks 5 k) (format "ignore ~a k ~a" ignore k)))
     (check-true (nan? (acc rows (map (lambda (_) 3) ys) 5 1 3)))
-    (check-true (nan? (item (accuracy (zeros 0 5) (labels-of '()))))))
+    (check-true (nan? (item (accuracy (zeros 0 5) (labels-of '())))))
+    (define unvalidated (perplexity-metric #:validate-args? #f))
+    (check-exn (lambda (e) (and (exn:fail? e) (not (exn:fail:contract:blame? e))))
+               (lambda () (metric-update! unvalidated (zeros 4 10) (labels-of '(0 1 -100 -100))))
+               "no ignore index: -100 reaches the NLL as a class"))
 
   (define (confusion-of rows ys c [ignore #f])
     (tensor->list (confusion-matrix (logits-of rows c) (labels-of ys) #:classes c #:ignore-index ignore)))
@@ -159,7 +165,13 @@
       (check-equal? (item (perplexity (* ce 8) #:tokens (tensor 8 #:dtype 'int64)))
                     (item (perplexity (* ce 8) #:tokens 8)))
       (check-equal? (shape (perplexity ce)) '())
-      (check-equal? (dtype (perplexity ce)) 'float32)))
+      (check-equal? (dtype (perplexity ce)) 'float32))
+    (define targets (labels-of '(0 1 2 3)))
+    (define wide (perplexity-metric))
+    (metric-update! wide (zeros 4 10 #:dtype 'float64) targets)
+    (check-equal? (dtype (metric-compute wide)) 'float32)
+    (check-equal? (dtype (perplexity (cross-entropy (zeros 4 10 #:dtype 'float64) targets)))
+                  'float64))
 
   (bounded-test "M9: the gradient of perplexity in its NLL is perplexity over the tokens"
     (check-true (gradcheck (lambda (nll) (perplexity nll #:tokens 5))
@@ -264,12 +276,15 @@
 
   (define (metric-cases validate?)
     (list (list (lambda () (accuracy-metric #:top-k 2 #:ignore-index -100 #:validate-args? validate?))
-                'class 16)
+                'class 16 -100)
           (list (lambda ()
                   (confusion-matrix-metric #:classes 5 #:ignore-index -100 #:validate-args? validate?))
                 'class
-                (* 8 25))
-          (list (lambda () (perplexity-metric #:validate-args? validate?)) 'sequence 8)))
+                (* 8 25)
+                -100)
+          (list (lambda () (perplexity-metric #:validate-args? validate?)) 'sequence 8 #f)
+          (list (lambda () (perplexity-metric #:ignore-index -100 #:validate-args? validate?))
+                'sequence 8 -100)))
 
   (define (inputs kind n)
     (define-values (rows ys) (fixture n 5 n))
@@ -277,23 +292,30 @@
         (values (logits-of rows 5) (labels-of ys))
         (values (randn n 5) (labels-of ys))))
 
+  (define (host-built make kind checked-ignore)
+    (define m (make))
+    (define-values (p y) (inputs kind 8))
+    (define facade-eq
+      (if checked-ignore (tensor-crossings-of (lambda () (eq y checked-ignore))) 0))
+    (- (tensor-crossings-of (lambda ()
+                              (metric-update! m p y)
+                              (metric-update! m p y)))
+       (* 2 facade-eq)))
+
   (bounded-test "M13: an update builds no host tensor, and its calls and memory do not grow"
+    (check-true (positive? (tensor-crossings-of (lambda () (tensor '(1))))))
+    (check-true (positive? (tensor-crossings-of (lambda () (bytes->tensor (make-bytes 8) 'int64 '(1))))))
     (for* ([validate? (in-list '(#t #f))] [c (in-list (metric-cases validate?))])
-      (match-define (list make kind state-bytes) c)
+      (match-define (list make kind state-bytes ignore) c)
       (define (calls n)
         (define m (make))
         (define-values (p y) (inputs kind n))
         (metric-update! m p y)
         (op-calls-of (lambda () (metric-update! m p y))))
       (check-equal? (calls 8) (calls 4096) (format "~a validate ~a" kind validate?))
-      (unless validate?
-        (define fresh (make))
-        (define-values (p y) (inputs kind 8))
-        (check-equal? (tensor-crossings-of (lambda ()
-                                             (metric-update! fresh p y)
-                                             (metric-update! fresh p y)))
-                      0
-                      (format "~a: an update builds no tensor from host data" kind)))
+      (check-equal? (host-built make kind (and validate? ignore)) 0
+                    (format "~a validate ~a: host data builds only the facade's eq (#594)"
+                            kind validate?))
       (define m (make))
       (define-values (p y) (inputs kind 64))
       (reclaim-native-memory!)
@@ -332,7 +354,12 @@
                         (lambda () (metric-update! (accuracy-metric) l (labels-of '(0 1 7 0))))
                         (lambda () (metric-update! (perplexity-metric) l (labels-of '(0 1 3 0))))
                         (lambda () (confusion-matrix l (labels-of '(0 1 3 0)) #:classes 3))
-                        (lambda () (metric-compute (accuracy-metric)))))]
+                        (lambda () (metric-compute (accuracy-metric)))
+                        (lambda () (accuracy l y #:ignore-index (expt 2 63)))
+                        (lambda () (confusion-matrix l y #:classes 3 #:ignore-index (- -1 (expt 2 63))))
+                        (lambda () (accuracy-metric #:ignore-index (expt 2 63)))
+                        (lambda () (perplexity-metric #:ignore-index (- -1 (expt 2 63))))
+                        (lambda () (nll-loss l y #:ignore-index #f))))]
           [i (in-naturals)])
       (check-exn blames-this-test? thunk (format "case ~a" i)))
     (check-not-exn (lambda () (accuracy l (labels-of '(0 1 9 0)) #:validate-args? #f #:ignore-index 9)))
