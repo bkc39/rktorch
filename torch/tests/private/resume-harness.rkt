@@ -1,14 +1,12 @@
 #lang racket/base
 
 (require (only-in racket/list append* last)
-         (only-in racket/match match)
-         (only-in racket/path file-name-from-path)
+                  (only-in racket/path file-name-from-path)
          rackunit
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
          (only-in "../../main.rkt"
-                  * + arange copy! dtype generator-state make-generator manual-seed! ones
-                  randn rng-state tensor->bytes tensor->list tensor-shape tensor? to-device
-                  with-no-grad zeros)
+                  * + arange copy! generator-state make-generator manual-seed! ones randn rng-state
+                  tensor->list with-no-grad zeros)
          (only-in "../../nn.rkt"
                   Dropout Linear Sequential adamw cosine-annealing-lr ema ema-n-averaged
                   ema-update! grad-scaler-state-dict linear-lr mse-loss named-parameters
@@ -17,6 +15,7 @@
          (only-in "../../private/util.rkt" with-temporary-directory)
          "../../train.rkt"
          (only-in "../../train/private/types.rkt" callback-hook)
+         (only-in "comparable.rkt" comparable host-bytes)
          (only-in "trainer-kit.rkt"
                   apply-keywords collecting-hparams collecting-logger collecting-steps))
 
@@ -103,16 +102,6 @@
 
 (define (every-epoch-saver dir)
   (model-checkpoint #:dirpath dir #:filename "split-{epoch}-{step}" #:save-top-k -1))
-
-(define (host-bytes t)
-  (list (dtype t) (tensor-shape t) (tensor->bytes (to-device t 'cpu))))
-
-(define (comparable v)
-  (match v
-    [(? tensor?) (host-bytes v)]
-    [(? hash?) (for/hash ([(k x) (in-hash v)]) (values (comparable k) (comparable x)))]
-    [(cons a d) (cons (comparable a) (comparable d))]
-    [_ v]))
 
 (define (monitor-checkpoint w)
   (for/first ([cb (in-list (world-callbacks w))] #:when (model-checkpoint? cb)) cb))
