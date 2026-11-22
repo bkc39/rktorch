@@ -297,12 +297,13 @@
       (raise-arguments-error
        'load-grad-scaler-state!
        "the state is empty, possibly because it was saved from a disabled grad-scaler"))
-    (define scale (hash-ref state "scale"))
-    (define tracker (hash-ref state "_growth_tracker"))
+    (match-define (hash* ["scale" scale] ["growth_factor" growth] ["backoff_factor" backoff]
+                         ["growth_interval" interval] ["_growth_tracker" tracker])
+      state)
     (set-grad-scaler-init! s scale)
-    (set-grad-scaler-growth! s (hash-ref state "growth_factor"))
-    (set-grad-scaler-backoff! s (hash-ref state "backoff_factor"))
-    (set-grad-scaler-interval! s (hash-ref state "growth_interval"))
+    (set-grad-scaler-growth! s growth)
+    (set-grad-scaler-backoff! s backoff)
+    (set-grad-scaler-interval! s interval)
     (set-grad-scaler-initial-tracker! s tracker)
     (match (grad-scaler-state s)
       [#f (void)]
