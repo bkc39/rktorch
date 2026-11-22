@@ -67,8 +67,7 @@
        (when (hash-has-key? states key)
          (call-callback r cb 'load-state! (list (hash-ref states key)))))]))
 
-(define (restore-modules! r ckpt)
-  (match-define (source path tree) ckpt)
+(define (restore-hparams! r tree)
   (define tr (run-trainer r))
   (define fields (trainer-hparams tr))
   (for ([(name v) (in-hash (hash-ref tree "trainer_hparams"))])
@@ -76,10 +75,22 @@
     (if (hash-has-key? fields field)
         (set-hparam! tr field v)
         (warn-train! (format (string-append "~a: the checkpoint's hyperparameter ~a is not a"
-                                            " define-hparams field of this trainer, so it is ignored")
-                             (run-entry r) field))))
-  (call-trainer r 'on-load-checkpoint tree)
-  (load-state! tr path #:rename model-entry)
+                                            " define-hparams field of this trainer, so it is"
+                                            " ignored")
+                             (run-entry r) field)))))
+
+(define (restore-modules! r ckpt)
+  (match-define (source path tree) ckpt)
+  (define tr (run-trainer r))
+  (define before (trainer-hparams tr))
+  (with-handlers ([(lambda (_) #t)
+                   (lambda (e)
+                     (for ([(field v) (in-hash before)])
+                       (set-hparam! tr field v))
+                     (raise e))])
+    (restore-hparams! r tree)
+    (call-trainer r 'on-load-checkpoint tree)
+    (load-state! tr path #:rename model-entry))
   (restore-callbacks! r tree))
 
 (define (only-the-model what)
