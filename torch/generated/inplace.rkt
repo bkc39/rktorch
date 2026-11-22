@@ -11,6 +11,7 @@
          addcmul!
          copy!
          div-scalar!
+         div-tensor!
          fill-scalar!
          index-add!
          index-copy!
@@ -41,6 +42,9 @@
 
 (define-generated-op div-scalar! tr_gen_div__scalar #:inplace
   ([self tensor] [other scalar]))
+
+(define-generated-op div-tensor! tr_gen_div__tensor #:inplace
+  ([self tensor] [other tensor]))
 
 (define-generated-op fill-scalar! tr_gen_fill__scalar #:inplace
   ([self tensor] [value scalar]))

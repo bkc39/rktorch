@@ -366,12 +366,23 @@ contract violation, where torchvision would pad.
 
 @defproc[(normalize [x tensor?]
                     [mean (listof real?)]
-                    [std (listof (and/c real? positive?))])
+                    [std (listof real?)]
+                    [#:inplace? inplace? boolean? #f])
          tensor?]{
-Subtracts @racket[mean] and divides by @racket[std], one value per
-channel of the float image or batch @racket[x]. A @racket['uint8] image is
-a contract violation, as in torchvision; convert it first.
-}
+torchvision's @tt{F.normalize}: subtracts @racket[mean] and divides by
+@racket[std], one value per channel of the float image or batch
+@racket[x], or a single value for every channel. The result is a new
+tensor, or with @racket[inplace?] @racket[x] itself, overwritten. A
+@racket['uint8] image is a contract violation, as in torchvision; convert
+it first. A list of another length, or a zero in @racket[std], raises
+@racket[exn:fail:contract?] naming @racket[normalize], the latter with
+torchvision's message.
+
+@torch-examples[
+(define pixel (tensor '(((0.5)) ((0.5)) ((0.5)))))
+(tensor->list (normalize pixel '(0.5) '(0.25)))
+(tensor->list (normalize pixel imagenet-mean imagenet-std))
+]}
 
 @deftogether[(@defthing[imagenet-mean (listof real?)]
               @defthing[imagenet-std (listof real?)])]{

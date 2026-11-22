@@ -71,6 +71,8 @@
       (resize ,(lambda () (resize (zeros 3 4 4 #:dtype 'int64) 2)))
       (center-crop ,(lambda () (center-crop image 5)))
       (normalize ,(lambda () (normalize 'image '(0.0 0.0 0.0) '(1.0 1.0 1.0))))
+      (normalize ,(lambda () (normalize image "mean" '(1.0))))
+      (normalize ,(lambda () (normalize image '(0.0) '(1.0) #:inplace? 'yes)))
       (imagenet-normalize ,(lambda () (imagenet-normalize (zeros 1 4 4))))
       (convert-image-dtype ,(lambda () (convert-image-dtype (zeros 3 2 2 #:dtype 'int64))))
       (imagenet-preprocess ,(lambda () (imagenet-preprocess "image")))

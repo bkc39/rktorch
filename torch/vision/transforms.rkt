@@ -9,13 +9,14 @@
          (only-in threading ~>)
          (only-in "../foreign.rkt" cpu-generator/c)
          (only-in (submod "../foreign.rkt" unchecked)
-                  add arange clamp cpu-capability device device-type div
-                  draw-seed dtype flip masked-fill! mul narrow ne permute rand
-                  reshape select stack sub tensor tensor->list tensor-shape
-                  tensor? to to-dtype where zeros)
+                  add arange clamp cpu-capability device device-type draw-seed
+                  dtype flip masked-fill! mul narrow ne permute rand reshape
+                  select stack sub sub! tensor tensor->list tensor-shape tensor?
+                  to to-dtype where zeros)
          (only-in "../generated.rkt"
-                  constant-pad-nd index-tensor random-from! round-tensor
-                  upsample-bilinear2d upsample-bilinear2d-aa)
+                  constant-pad-nd div-scalar! div-tensor! index-tensor
+                  random-from! round-tensor upsample-bilinear2d
+                  upsample-bilinear2d-aa)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/contracts.rkt"
                   default-ratio default-scale ratio/c scale/c))
@@ -200,15 +201,6 @@
    'crop-size-within-image
    (lambda (size) (and (image-size? size) (fits? size h w)))))
 
-(define (positive-real? v)
-  (and (real? v) (positive? v)))
-
-(define (channel-values/c x [element? real?])
-  (flat-named-contract
-   'one-value-per-channel
-   (lambda (vs)
-     (and (list? vs) (andmap element? vs) (= (length vs) (channels x))))))
-
 ;; torchvision: an int is the short side's new length and the long side is
 ;; truncated to keep the aspect ratio
 (define (output-size size h w)
@@ -276,20 +268,44 @@
   (define-values (ch cw) (size->hw size))
   (define rank (length (tensor-shape x)))
   ;; Python's round, half to even, as torchvision's center_crop uses it
-  (narrow (narrow x (- rank 2) (round (/ (- h ch) 2)) ch)
-          (- rank 1) (round (/ (- w cw) 2)) cw))
+  (narrow (narrow x (- rank 2) (~> (- h ch) (/ 2) round) ch)
+          (- rank 1) (~> (- w cw) (/ 2) round) cw))
 
-(define/contract-out (normalize x mean std) ;; noqa
-  (->i ([x float-image/c]
-        [mean (x) (channel-values/c x)]
-        [std (x) (channel-values/c x positive-real?)])
-       [result tensor?])
-  (define (per-channel vs)
-    (reshape (tensor (map exact->inexact vs)
-                     #:dtype (dtype x)
-                     #:device (device x))
-             (length vs) 1 1))
-  (div (sub x (per-channel mean)) (per-channel std)))
+(define (per-channel? vs c)
+  (memv (length vs) (list 1 c)))
+
+(define (channel-tensor vs dt dev)
+  (tensor (map (lambda (v) (list (list (exact->inexact v)))) vs)
+          #:dtype dt
+          #:device dev))
+
+(define/contract-out (normalize x mean std #:inplace? [inplace? #f]) ;; noqa
+  (->* [float-image/c (listof real?) (listof real?)]
+       [#:inplace? boolean?]
+       tensor?)
+  (define c (channels x))
+  (cond
+    [(not (per-channel? mean c))
+     (raise-arguments-error 'normalize
+                            "expected one mean per channel, or one for all"
+                            "channels" c "mean" mean)]
+    [(not (per-channel? std c))
+     (raise-arguments-error 'normalize
+                            "expected one std per channel, or one for all"
+                            "channels" c "std" std)]
+    [(memf zero? std)
+     (raise-arguments-error 'normalize
+                            "std evaluated to zero, leading to division by zero"
+                            "std" std)]
+    [else
+     (define dt (dtype x))
+     (define dev (device x))
+     (define m (channel-tensor mean dt dev))
+     (define centred
+       (cond
+         [inplace? (sub! x m) x]
+         [else (sub x m)]))
+     (div-tensor! centred (channel-tensor std dt dev))]))
 
 (define/contract-out imagenet-mean (listof real?) '(0.485 0.456 0.406)) ;; noqa
 (define/contract-out imagenet-std (listof real?) '(0.229 0.224 0.225)) ;; noqa
@@ -311,7 +327,7 @@
   (define from (dtype x))
   (cond
     [(eq? from target-dtype) x]
-    [(eq? from 'uint8) (div (to-dtype x target-dtype) 255)]
+    [(eq? from 'uint8) (div-scalar! (to-dtype x target-dtype) 255.0)]
     ;; convert_image_dtype's scale: 1.0 lands on 255 and nothing past it
     [(eq? target-dtype 'uint8) (to-dtype (mul x (- 256.0 1e-3)) 'uint8)]
     [else (to-dtype x target-dtype)]))

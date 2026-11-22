@@ -183,6 +183,7 @@
                                           (kwarg "enable_gqa" #f))
           'add-tensor '((tensor 3) (tensor 3) (kwarg "alpha" 0.5))
           'div-scalar! '((tensor 3) (double 0.7))
+          'div-tensor! '((tensor 2 3) (tensor 2 1))
           'lerp-scalar! '((tensor 3) (tensor 3) (double 0.1))
           'foreach-add-scalar! '((tensors (3) (2 2)) (double 0.25))
           'foreach-add-list! '((tensors (3) (2 2)) (tensors (3) (2 2))

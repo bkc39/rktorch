@@ -55,6 +55,14 @@ int tr_gen_div__scalar(tr_tensor* self, double other) {
                                [&] { self->value.div_(other); });
 }
 
+int tr_gen_div__tensor(tr_tensor* self, const tr_tensor* other) {
+  if (!self || !other) {
+    return torchrkt::null_arg_status("tr_gen_div__tensor");
+  }
+  return torchrkt::status_call("tr_gen_div__tensor",
+                               [&] { self->value.div_(other->value); });
+}
+
 int tr_gen_fill__scalar(tr_tensor* self, double value) {
   if (!self) {
     return torchrkt::null_arg_status("tr_gen_fill__scalar");
