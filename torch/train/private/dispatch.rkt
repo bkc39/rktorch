@@ -35,6 +35,7 @@
          trainer-device
          transfer
          warn-eval-layers!
+         warn-train!
          with-failure-protocol)
 
 (define-logger rktorch-train)
@@ -158,13 +159,15 @@
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
 
+(define (warn-train! message)
+  (log-rktorch-train-warning message)
+  (eprintf "rktorch-train: ~a\n" message))
+
 (define (warn-eval-layers! r)
   (define n (match (run-trainer r) [(? layer? tr) (eval-layer-count tr)] [_ 0]))
   (when (positive? n)
-    (define message
-      (format "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n))
-    (log-rktorch-train-warning message)
-    (eprintf "rktorch-train: ~a\n" message)))
+    (warn-train!
+     (format "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n))))
 
 (define (logged-attempt what thunk)
   (with-fault-handlers ([exn:fail? (lambda (e)

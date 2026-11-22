@@ -17,7 +17,8 @@
          note-step!
          read-epoch!
          read-groups
-         read-steps!)
+         read-steps!
+         restore-host-metrics!)
 
 (struct logged (logger? both?))
 
@@ -171,3 +172,9 @@
 
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
+
+(define (restore-host-metrics! b metrics)
+  (define host (book-host b))
+  (hash-clear! host)
+  (for ([(k v) (in-hash metrics)])
+    (hash-set! host (string->symbol k) v)))

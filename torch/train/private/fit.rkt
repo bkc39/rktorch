@@ -16,6 +16,7 @@
                   note-batch-size! publish-epoch! publish-steps! set-up! tear-down! transfer
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
+         (only-in "resume.rkt" restore-modules! restore-rng! restore-training-state!)
          (only-in "precision.rkt"
                   backward-pass! call-in-precision check-clippable! configure-precision!
                   count-step! window-step!)
@@ -44,7 +45,7 @@
 
 (struct plan (device train val callbacks loggers max-epochs max-steps accumulate
               val-every val-interval sanity train-count val-count log-every fast?
-              stepping-batches clip precision))
+              stepping-batches clip precision checkpoint))
 
 (define (stepping-batches max-epochs max-steps accumulate train-count)
   (cond
@@ -69,7 +70,8 @@
                   #:log-every log-every
                   #:fast-dev-run fast-dev-run
                   #:clip clip
-                  #:precision precision)
+                  #:precision precision
+                  #:checkpoint checkpoint)
   (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
   (define (unless-fast v fast-v) (if fast fast-v v))
   (define epochs (unless-fast max-epochs 1))
@@ -89,12 +91,16 @@
         (and fast #t)
         (stepping-batches epochs steps accumulate train-count)
         clip
-        precision))
+        precision
+        checkpoint))
 
-(define (start-entry! r who callbacks loggers move-to #:fast? [fast? #f])
+(define (start-entry! r who callbacks loggers move-to
+                      #:fast? [fast? #f] #:checkpoint [checkpoint #f])
   (set-run-loggers! r loggers)
   (install-callbacks! r who callbacks #:fast? fast?)
   (set-up! r who)
+  (when checkpoint
+    (restore-modules! r checkpoint))
   (when move-to
     (for ([layer (in-list (cons (run-trainer r) (run-callbacks r)))]
           #:when (layer? layer))
@@ -234,17 +240,21 @@
   (with-failure-protocol r 'fit
     (set-run-current-stage! r 'train)
     (start-entry! r 'fit (plan-callbacks p) (plan-loggers p) (plan-device p)
-                  #:fast? (plan-fast? p))
+                  #:fast? (plan-fast? p) #:checkpoint (plan-checkpoint p))
     (configure-optimizers! r)
     (check-clippable! r (plan-clip p))
     (log-hyperparameters! r)
     (call-hooks r 'on-fit-start)
+    (when (plan-checkpoint p)
+      (restore-training-state! r (plan-checkpoint p) (plan-max-epochs p)))
     (when (and (plan-val p) (positive? (plan-sanity p)))
       (call-callbacks r 'on-sanity-check-start (run-callbacks r))
       (validate! r p 'sanity-check (min (plan-sanity p) (plan-val-count p)))
       (call-callbacks r 'on-sanity-check-end (run-callbacks r)))
     (warn-eval-layers! r)
     (call-hooks r 'on-train-start)
+    (when (plan-checkpoint p)
+      (restore-rng! r (plan-checkpoint p)))
     (for ([_ (in-naturals)]
           #:break (done? r p))
       (train-epoch! r p))

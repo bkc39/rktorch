@@ -1,11 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/match match)
+(require (only-in racket/match match match*)
          (only-in "../../foreign.rkt" cpu-device device-index device-type)
          (only-in "../../foreign/generator.rkt"
-                  current-generator generator-device generator-state rng-state))
+                  current-generator generator-device generator-state rng-state
+                  set-generator-state! set-rng-state!))
 
-(provide rng-bundle)
+(provide restore-rng-bundle!
+         rng-bundle)
 
 (define (device-form d)
   (match (device-type d)
@@ -24,3 +26,28 @@
   (match (device-type device)
     ['cpu streams]
     [type (hash-set streams (symbol->string type) (rng-state #:device device))]))
+
+(define (restore-current-generator! saved)
+  (match* (saved (current-generator))
+    [(#f _) (void)]
+    [((hash-table ("device" form)) #f)
+     (raise-arguments-error
+      'fit "the checkpoint was saved under a current-generator, and this fit has none"
+      "saved generator's device" form)]
+    [((hash-table ("device" form) ("state" state)) g)
+     (unless (equal? (device-form (generator-device g)) form)
+       (raise-arguments-error 'fit "the checkpoint's current-generator is on another device"
+                              "saved generator's device" form
+                              "current-generator's device" (device-form (generator-device g))))
+     (set-generator-state! g state)]))
+
+(define (restore-rng-bundle! bundle [device (cpu-device)])
+  (restore-current-generator! (hash-ref bundle "current_generator" #f))
+  (set-rng-state! (hash-ref bundle "cpu"))
+  (define type (device-type device))
+  (match (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f))
+    [#f (void)]
+    [state (set-rng-state! state #:device device)])
+  (vector->pseudo-random-generator!
+   (current-pseudo-random-generator)
+   (list->vector (hash-ref bundle "racket"))))
