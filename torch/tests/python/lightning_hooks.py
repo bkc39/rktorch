@@ -9,7 +9,9 @@ trainer.estimated_stepping_batches as configure_optimizers reads it for a
 table of fit options (G2-L11 of the T2 spec, #385), and the fits of G3-L17,
 L19 and L22: a GradientAccumulationScheduler, manual optimization over two
 optimizers, and bf16-mixed precision, and the logged rows of manual fits
-that step two optimizers or none each batch. Writes
+that step two optimizers or none each batch, and the T3 spec's (#386)
+checkpoint scenarios: a fit that saves at every epoch end, fits resumed from
+an epoch-end and a mid-epoch checkpoint, and a test from a checkpoint. Writes
 torch/tests/lightning-hooks.rktd, or the path given as the first argument;
 lightning-hooks-parity-test.rkt regenerates it and compares.
 
@@ -24,11 +26,14 @@ the step log_metrics received and the row's keys, sorted.
 import inspect
 import os
 import sys
+import tempfile
 
 import lightning
 import lightning.pytorch as pl
 import torch
-from lightning.pytorch.callbacks import Callback, GradientAccumulationScheduler
+from lightning.pytorch.callbacks import (
+    Callback, GradientAccumulationScheduler, ModelCheckpoint,
+)
 from lightning.pytorch.core.hooks import CheckpointHooks, DataHooks, ModelHooks
 from lightning.pytorch.loggers.logger import Logger
 from lightning.pytorch.trainer.connectors.logger_connector.fx_validator import (
@@ -173,6 +178,9 @@ class RecorderCallback(Callback):
     def __init__(self, scenario):
         self.scenario = scenario
 
+    def state_dict(self):
+        return {"n": len(self.scenario.events)}
+
 
 class ManualBase(Base):
     """Manual optimization over two SGDs on the same layer. Lightning's
@@ -209,17 +217,17 @@ def loader(n):
     return DataLoader(TensorDataset(xs, xs.sum(1, keepdim=True)), batch_size=2)
 
 
-def trainer(callbacks, logger=False, **kwargs):
+def trainer(callbacks, logger=False, enable_checkpointing=False, **kwargs):
     options = {"max_epochs": 2, "num_sanity_val_steps": 1}
     options.update(kwargs)
-    return pl.Trainer(enable_checkpointing=False, logger=logger,
+    return pl.Trainer(enable_checkpointing=enable_checkpointing, logger=logger,
                       enable_progress_bar=False, enable_model_summary=False,
                       accelerator="cpu", devices=1,
                       callbacks=callbacks, **options)
 
 
 def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None,
-        callbacks=(), module=Recorder):
+        callbacks=(), module=Recorder, ckpt_path=None):
     torch.manual_seed(0)
     scenario = Scenario(**(scenario_kwargs or {}))
     model = module(scenario)
@@ -227,14 +235,41 @@ def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None,
     scenario.trainer = t
     try:
         if entry == "fit":
-            t.fit(model, loader(train), loader(4))
+            t.fit(model, loader(train), loader(4), ckpt_path=ckpt_path)
         elif entry == "test":
-            t.test(model, loader(4), verbose=False)
+            t.test(model, loader(4), verbose=False, ckpt_path=ckpt_path)
         else:
             t.predict(model, loader(4))
     except Failure:
         pass
     return scenario.events
+
+
+CHECKPOINTS = {"root": None}
+
+
+def every_checkpoint(dirpath, **kwargs):
+    return ModelCheckpoint(dirpath=dirpath, save_top_k=-1, **kwargs)
+
+
+def checkpointed(name, max_epochs=2, ckpt_path=None, **checkpoint_kwargs):
+    dirpath = os.path.join(CHECKPOINTS["root"], name)
+    return run("fit", callbacks=[every_checkpoint(dirpath, **checkpoint_kwargs)],
+               trainer_kwargs={"enable_checkpointing": True, "max_epochs": max_epochs},
+               ckpt_path=ckpt_path and os.path.join(dirpath, ckpt_path))
+
+
+def saved(name, **checkpoint_kwargs):
+    """The directory of an unrecorded fit that saved every checkpoint."""
+    dirpath = os.path.join(CHECKPOINTS["root"], name)
+    if not os.path.isdir(dirpath):
+        checkpointed(name, **checkpoint_kwargs)
+    return dirpath
+
+
+def resumed(name, ckpt, max_epochs=2, **checkpoint_kwargs):
+    saved(name, **checkpoint_kwargs)
+    return checkpointed(name, max_epochs=max_epochs, ckpt_path=ckpt, **checkpoint_kwargs)
 
 
 SCENARIOS = {
@@ -274,6 +309,12 @@ SCENARIOS = {
     "bf16-mixed": lambda: run("fit", trainer_kwargs={"precision": "bf16-mixed"}),
     "test": lambda: run("test"),
     "predict": lambda: run("predict"),
+    "save": lambda: checkpointed("save"),
+    "save-resume": lambda: resumed("epochs", "epoch=1-step=6.ckpt", max_epochs=4),
+    "save-resume-mid": lambda: resumed("steps", "epoch=0-step=2.ckpt",
+                                       every_n_train_steps=2),
+    "test-ckpt": lambda: run(
+        "test", ckpt_path=os.path.join(saved("epochs"), "epoch=1-step=6.ckpt")),
 }
 
 
@@ -429,8 +470,10 @@ def scenario_text(name, events):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else OUT
-    scenarios = "\n".join(scenario_text(name, SCENARIOS[name]())
-                          for name in sorted(SCENARIOS))
+    with tempfile.TemporaryDirectory() as root:
+        CHECKPOINTS["root"] = root
+        scenarios = "\n".join(scenario_text(name, SCENARIOS[name]())
+                              for name in sorted(SCENARIOS))
     rows = "\n".join(scenario_text(name, LOGGED[name]())
                      for name in sorted(LOGGED))
     text = ("#hasheq((lightning . %s)\n"
