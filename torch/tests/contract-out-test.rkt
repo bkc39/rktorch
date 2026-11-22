@@ -93,7 +93,9 @@
 
 (module+ test
   (require (prefix-in plain: (submod ".." checked-lib))
-           (prefix-in checked: (submod ".." checked-lib checked)))
+           (prefix-in checked: (submod ".." checked-lib checked))
+           (prefix-in unchecked: (submod ".." lib unchecked))
+           (prefix-in checked-unchecked: (submod ".." checked-lib unchecked)))
 
   (check-equal? (checked:safe-div 6 3) 2)
   (check-equal? (plain:safe-div 6 3) 2)
@@ -113,15 +115,11 @@
   (check-exn #rx"^twice: contract violation"
              (lambda () (checked:twice "a")))
   (check-exn #rx"^[*]: contract violation"
-             (lambda () (plain:twice "a"))))
-
-(module+ test
-  (require (prefix-in unchecked: (submod ".." lib unchecked))
-           (prefix-in checked-unchecked: (submod ".." checked-lib unchecked)))
+             (lambda () (plain:twice "a")))
 
   (check-equal? (unchecked:safe-div 6 3) 2)
   (check-exn #rx"^/: division by zero" (lambda () (unchecked:safe-div 1 0)))
-  (check-exn #rx"^quotient: undefined for 0"
+  (check-exn exn:fail:contract:divide-by-zero?
              (lambda () (unchecked:split-heads 32 0)))
   (check-equal? unchecked:answer 42)
   (check-exn #rx"^/: division by zero"

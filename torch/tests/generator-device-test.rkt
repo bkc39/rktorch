@@ -76,6 +76,26 @@
     (zeros-4)
     (check-equal? (op-calls-of rand-4) (op-calls-of zeros-4)))
 
+  (bounded-test "a random transform asks (current-generator) for its device"
+    (define batch (zeros 2 3 4 4))
+    (define draws
+      (list (cons "random-horizontal-flip"
+                  (lambda () (random-horizontal-flip batch #:p 0.0)))
+            (cons "random-crop" (lambda () (random-crop batch #:padding 0)))
+            (cons "random-resized-crop"
+                  (lambda ()
+                    (random-resized-crop batch 2 #:scale '(1.0 1.0)
+                                         #:ratio '(1 1))))))
+    (for ([row (in-list draws)])
+      (match-define (cons label draw) row)
+      (draw)
+      (check-equal? (- (parameterize ([current-generator (make-generator 1)])
+                         (op-calls-of draw))
+                       (parameterize ([current-generator #f])
+                         (op-calls-of draw)))
+                    1
+                    label)))
+
   (define (explicit-rows accelerator)
     (list (list "uniform! on the accelerator, cpu generator" (cpu-device)
                 (lambda (g) (uniform! (zeros 3 #:device accelerator) #:generator g)))
@@ -160,6 +180,18 @@
           (cons "random-resized-crop, accelerator generator"
                 (lambda ()
                   (random-resized-crop images 4 #:generator elsewhere)))
+          (cons "random-crop through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (random-crop images))))
+          (cons "random-horizontal-flip through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (random-horizontal-flip images))))
+          (cons "random-resized-crop through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (random-resized-crop images 4))))
           (cons "normal! through current-generator"
                 (lambda ()
                   (parameterize ([current-generator elsewhere])

@@ -4,7 +4,9 @@
 ;; unused
 #|review: ignore|#
 
-(require (only-in racket/contract/base -> contract-out)
+(require (for-syntax racket/base (only-in syntax/parse str))
+         (only-in racket/contract/base -> contract-out)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (submod "foreign/device-type.rkt" checked)
          (submod "foreign/error.rkt" checked)
          (only-in "foreign/structs.rkt" tensor-free!)
@@ -289,36 +291,26 @@
    (contract-out
     [tensor-free! (-> tensor? void?)])))
 
+(define-syntax-parse-rule (provide-unchecked-from file:str ...)
+  (begin
+    (require (submod file unchecked) ...)
+    (provide (all-from-out (submod file unchecked) ...))))
+
 (module+ unchecked
-  (require (submod "foreign/accelerator.rkt" unchecked)
-           (submod "foreign/autocast.rkt" unchecked)
-           (submod "foreign/autograd-ops.rkt" unchecked)
-           (submod "foreign/creation-ops.rkt" unchecked)
-           (submod "foreign/device-type.rkt" unchecked)
-           (submod "foreign/error.rkt" unchecked)
-           (submod "foreign/generator.rkt" unchecked)
-           (submod "foreign/nn-promoted.rkt" unchecked)
-           (submod "foreign/ops.rkt" unchecked)
-           (submod "foreign/order-ops.rkt" unchecked)
-           (submod "foreign/promoted.rkt" unchecked)
-           (submod "foreign/sequences.rkt" unchecked)
-           (submod "foreign/slice.rkt" unchecked)
-           (submod "foreign/structs.rkt" unchecked)
-           (submod "foreign/switches.rkt" unchecked)
-           (submod "foreign/tensor-ops.rkt" unchecked))
-  (provide (all-from-out (submod "foreign/accelerator.rkt" unchecked)
-                         (submod "foreign/autocast.rkt" unchecked)
-                         (submod "foreign/autograd-ops.rkt" unchecked)
-                         (submod "foreign/creation-ops.rkt" unchecked)
-                         (submod "foreign/device-type.rkt" unchecked)
-                         (submod "foreign/error.rkt" unchecked)
-                         (submod "foreign/generator.rkt" unchecked)
-                         (submod "foreign/nn-promoted.rkt" unchecked)
-                         (submod "foreign/ops.rkt" unchecked)
-                         (submod "foreign/order-ops.rkt" unchecked)
-                         (submod "foreign/promoted.rkt" unchecked)
-                         (submod "foreign/sequences.rkt" unchecked)
-                         (submod "foreign/slice.rkt" unchecked)
-                         (submod "foreign/structs.rkt" unchecked)
-                         (submod "foreign/switches.rkt" unchecked)
-                         (submod "foreign/tensor-ops.rkt" unchecked))))
+  (provide-unchecked-from "foreign/accelerator.rkt"
+                          "foreign/autocast.rkt"
+                          "foreign/autograd-ops.rkt"
+                          "foreign/creation-ops.rkt"
+                          "foreign/device-type.rkt"
+                          "foreign/error.rkt"
+                          "foreign/generator.rkt"
+                          "foreign/nn-promoted.rkt"
+                          "foreign/ops.rkt"
+                          "foreign/order-ops.rkt"
+                          "foreign/promoted.rkt"
+                          "foreign/sequences.rkt"
+                          "foreign/sized.rkt"
+                          "foreign/slice.rkt"
+                          "foreign/structs.rkt"
+                          "foreign/switches.rkt"
+                          "foreign/tensor-ops.rkt"))

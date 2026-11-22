@@ -7,17 +7,18 @@
          (only-in racket/match match match-define)
          (only-in racket/math exact-round)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" - cpu-generator/c)
+         (only-in "../foreign.rkt" -)
          (only-in (submod "../foreign.rkt" unchecked)
                   add arange clamp cpu-capability device device-type draw-seed
                   dtype flip masked-fill! mul narrow ne permute rand reshape
                   select stack sub! tensor tensor->list tensor-shape tensor?
                   to to-dtype where zeros)
+         (only-in "../foreign/generator.rkt" generator-on? generator?)
          (only-in "../generated.rkt"
                   constant-pad-nd div-scalar! div-tensor! index-tensor
                   random-from! round-tensor upsample-bilinear2d
                   upsample-bilinear2d-aa)
-         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "private/contracts.rkt"
                   default-ratio default-scale ratio/c scale/c))
 
@@ -62,9 +63,12 @@
 (define/contract-out (random-horizontal-flip x ;; noqa
                                              #:p [p 0.5]
                                              #:generator [generator #f])
-  (->* [image-or-image-batch/c]
-       [#:p (real-in 0 1) #:generator (or/c cpu-generator/c #f)]
-       tensor?)
+  (->i ([x image-or-image-batch/c])
+       (#:p [p (real-in 0 1)]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (generator) "the generator lives on the CPU"
+       (generator-on? (supplied-or generator) 'cpu)
+       [result tensor?])
   (define n (image-count x))
   (define heads (coins n p generator))
   (cond
@@ -89,10 +93,12 @@
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
                                   #:generator [generator #f])
-  (->* [croppable/c]
-       [#:padding exact-nonnegative-integer?
-        #:generator (or/c cpu-generator/c #f)]
-       tensor?)
+  (->i ([x croppable/c])
+       (#:padding [padding exact-nonnegative-integer?]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (generator) "the generator lives on the CPU"
+       (generator-on? (supplied-or generator) 'cpu)
+       [result tensor?])
   (define n (image-count x))
   (cond
     [(or (zero? n) (zero? padding)) x]
@@ -371,12 +377,14 @@
                                           #:ratio [ratio default-ratio]
                                           #:antialias? [antialias? #t]
                                           #:generator [generator #f])
-  (->* [resizable-image/c exact-positive-integer?]
-       [#:scale scale/c
-        #:ratio ratio/c
-        #:antialias? boolean?
-        #:generator (or/c cpu-generator/c #f)]
-       tensor?)
+  (->i ([x resizable-image/c] [size exact-positive-integer?])
+       (#:scale [scale scale/c]
+        #:ratio [ratio ratio/c]
+        #:antialias? [antialias? boolean?]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (generator) "the generator lives on the CPU"
+       (generator-on? (supplied-or generator) 'cpu)
+       [result tensor?])
   (define rng (batch-rng generator))
   (define-values (h w) (spatial-size x))
   (define (one image)
