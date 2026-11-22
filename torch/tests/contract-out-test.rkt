@@ -119,7 +119,7 @@
 
   (check-equal? (unchecked:safe-div 6 3) 2)
   (check-exn #rx"^/: division by zero" (lambda () (unchecked:safe-div 1 0)))
-  (check-exn #rx"^quotient: undefined for 0"
+  (check-exn exn:fail:contract:divide-by-zero?
              (lambda () (unchecked:split-heads 32 0)))
   (check-equal? unchecked:answer 42)
   (check-exn #rx"^/: division by zero"
