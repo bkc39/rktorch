@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out listof
-                  non-empty-listof not/c real-in unsupplied-arg?)
+                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out contract?
+                  flat-named-contract listof non-empty-listof not/c real-in unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
          (only-in racket/list count)
@@ -319,3 +319,33 @@
        (#:t-mult exact-positive-integer? #:eta-min real?)
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
+
+(define scheduler-state-keys '("last_epoch" "base_lrs" "_last_lr" "T_cur" "T_i" "_schedulers"))
+
+(define (reals? v)
+  (and (list? v) (andmap real? v)))
+
+(define (scheduler-state-shape? v)
+  (and (hash? v) (immutable? v) (hash-equal? v)
+       (for/and ([k (in-hash-keys v)]) (and (member k scheduler-state-keys) #t))
+       (exact-integer? (hash-ref v "last_epoch" #f))
+       (reals? (hash-ref v "base_lrs" #f))
+       (reals? (hash-ref v "_last_lr" #f))
+       (eq? (hash-has-key? v "T_cur") (hash-has-key? v "T_i"))
+       (real? (hash-ref v "T_cur" 0))
+       (exact-positive-integer? (hash-ref v "T_i" 1))
+       (match (hash-ref v "_schedulers" '())
+         [(list (? scheduler-state-shape?) ...) #t]
+         [_ #f])))
+
+(define/contract-out scheduler-state/c ;; noqa
+  contract?
+  (flat-named-contract 'scheduler-state/c scheduler-state-shape?))
+
+(define/contract-out (scheduler-state-dict s) ;; noqa
+  (-> scheduler? scheduler-state/c)
+  (error 'unimplemented))
+
+(define/contract-out (load-scheduler-state! s state) ;; noqa
+  (-> scheduler? scheduler-state/c void?)
+  (error 'unimplemented))

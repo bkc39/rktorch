@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >/c and/c any/c contract-out or/c unsupplied-arg?)
+                  -> ->* ->i </c >/c and/c any/c contract-out contract? flat-named-contract or/c
+                  unsupplied-arg?)
          (only-in racket/match match match* match-define struct*)
          (only-in "../foreign.rkt"
                   * + copy! cuda-available? device device-type device? full item tensor? to)
@@ -257,3 +258,29 @@
 (define/contract-out (grad-scaler-enabled? s)
   (-> grad-scaler? boolean?)
   (grad-scaler-active? s))
+
+(define grad-scaler-state-checks
+  (hash "scale" (lambda (x) (and (flonum? x) (> x 0.0)))
+        "growth_factor" (lambda (x) (and (flonum? x) (> x 1.0)))
+        "backoff_factor" (lambda (x) (and (flonum? x) (< 0.0 x 1.0)))
+        "growth_interval" exact-positive-integer?
+        "_growth_tracker" exact-nonnegative-integer?))
+
+(define (grad-scaler-state-shape? v)
+  (and (hash? v) (immutable? v) (hash-equal? v)
+       (or (hash-empty? v)
+           (and (= (hash-count v) (hash-count grad-scaler-state-checks))
+                (for/and ([(key ok?) (in-hash grad-scaler-state-checks)])
+                  (and (hash-has-key? v key) (ok? (hash-ref v key))))))))
+
+(define/contract-out grad-scaler-state/c ;; noqa
+  contract?
+  (flat-named-contract 'grad-scaler-state/c grad-scaler-state-shape?))
+
+(define/contract-out (grad-scaler-state-dict s) ;; noqa
+  (-> grad-scaler? grad-scaler-state/c)
+  (error 'unimplemented))
+
+(define/contract-out (load-grad-scaler-state! s state) ;; noqa
+  (-> grad-scaler? grad-scaler-state/c void?)
+  (error 'unimplemented))

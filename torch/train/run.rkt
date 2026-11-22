@@ -63,6 +63,8 @@
 
 (define-named-contract interval/c (or/c 'step 'epoch))
 
+(define-named-contract ckpt-path/c (or/c #f path-string? 'last 'best))
+
 (define-named-contract state-key/c (and/c string? (not/c "")))
 
 (define-live-run-contract fitting-run/c (r)

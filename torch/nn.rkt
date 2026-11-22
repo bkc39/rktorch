@@ -42,6 +42,7 @@
                   optimizer-param-groups param-group-ref param-group-set! rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
          (submod "nn/optim.rkt" checked)
+         "nn/optim-state.rkt"
          "nn/param-group.rkt"
          "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
@@ -182,7 +183,10 @@
          param-group-count
          optimizer-param-groups
          param-group-ref
-         param-group-set!)
+         param-group-set!
+         optimizer-state/c
+         optimizer-state-dict
+         load-optimizer-state!)
 
 (provide scheduler?
          scheduler-step-count
@@ -197,7 +201,10 @@
          lambda-lr
          chained-scheduler
          sequential-lr
-         cosine-annealing-warm-restarts)
+         cosine-annealing-warm-restarts
+         scheduler-state/c
+         scheduler-state-dict
+         load-scheduler-state!)
 
 (provide clip-grad-norm!
          clip-grad-value!)
@@ -209,13 +216,18 @@
          grad-scaler-step!
          grad-scaler-update!
          grad-scaler-scale
-         grad-scaler-enabled?)
+         grad-scaler-enabled?
+         grad-scaler-state/c
+         grad-scaler-state-dict
+         load-grad-scaler-state!)
 
 (provide ema
          ema?
          ema-average
          ema-decay
-         ema-update!)
+         ema-update!
+         ema-n-averaged
+         set-ema-n-averaged!)
 
 (provide mse-loss
          cross-entropy

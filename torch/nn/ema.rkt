@@ -55,3 +55,11 @@
     [else
      (define weight (real->double-flonum (- 1.0 (ema-decay e))))
      (update-average! e (lambda (qs ps) (g:foreach-lerp-scalar! qs ps weight)))]))
+
+(define/contract-out (ema-n-averaged e) ;; noqa
+  (-> ema? exact-nonnegative-integer?)
+  (error 'unimplemented))
+
+(define/contract-out (set-ema-n-averaged! e n) ;; noqa
+  (-> ema? exact-nonnegative-integer? void?)
+  (error 'unimplemented))
