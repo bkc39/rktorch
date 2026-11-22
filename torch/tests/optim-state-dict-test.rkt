@@ -139,8 +139,14 @@
                    (update-slot saved "weight" "exp_avg" (lambda (_) (zeros 3)))
                    #rx"weight.*exp_avg|exp_avg.*weight")
     (check-refused "a slot's dtype" opt net
-                   (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'float64)))
+                   (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'int64)))
                    #rx"weight.*exp_avg|exp_avg.*weight"))
+
+  (test-case "T3-L10: a floating slot takes its parameter's dtype, as torch's load does"
+    (define net (fresh-net))
+    (define-values (opt saved) (adam-after-steps net))
+    (load-optimizer-state! opt net (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'float64))))
+    (check-equal? (comparable (optimizer-state-dict opt net)) (comparable saved)))
 
   (test-case "T3-L11: a malformed state, or a parameter outside the model, blames the caller"
     (define net (fresh-net))

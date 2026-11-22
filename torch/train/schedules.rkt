@@ -3,8 +3,8 @@
 (require (only-in racket/contract/base -> ->* ->i >=/c contract-name non-empty-listof or/c)
          (only-in racket/contract/combinator contract-first-order-passes?)
          (only-in racket/list range)
-         (only-in "../nn/optim.rkt"
-                  has-hyperparameter? hyperparameter-value/c param-group-count param-group-set!)
+         (only-in "../nn/optim.rkt" has-hyperparameter? hyperparameter-value/c param-group-count)
+         (only-in "../nn/optim-hyperparameters.rkt" param-group-set!)
          (only-in "optimization.rkt" set-hparam!)
          (only-in "private/types.rkt" callback? define-named-contract trainer-hparam-names)
          (only-in "run.rkt" interval/c run-epoch run-global-step run-optimizers run-trainer)

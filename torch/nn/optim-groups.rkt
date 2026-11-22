@@ -9,7 +9,9 @@
 (provide group-store
          store-count
          store-groups
+         store-initial-lrs
          store-initial-lrs!
+         store-load!
          store-params
          store-partition
          store-ref
@@ -19,7 +21,7 @@
          store-update-each!
          store-values)
 
-(struct store (groups-box initial-lrs params owner))
+(struct store (groups-box initial-lrs-box params owner))
 
 (define (setting v)
   (if (boolean? v) v (real->double-flonum v)))
@@ -88,10 +90,22 @@
 
 (define (store-initial-lrs! st initial)
   (define groups (store-groups st))
-  (cas-update! (store-initial-lrs st)
+  (cas-update! (store-initial-lrs-box st)
                (lambda (initials)
                  (for/list ([g (in-list groups)] [recorded (in-list initials)])
                    (or initial recorded (setting-of g 'lr))))))
+
+(define (store-initial-lrs st)
+  (unbox (store-initial-lrs-box st)))
+
+(define (store-load! st settings initial-lrs)
+  (update-groups! st (lambda (gs)
+                       (for/list ([g (in-list gs)] [h (in-list settings)])
+                         (make-param-group (param-group-tensors g)
+                                           (for/hasheq ([(k v) (in-hash h)])
+                                             (values k (setting v)))))))
+  (cas-update! (store-initial-lrs-box st) (lambda (_) initial-lrs))
+  (void))
 
 (define (store-partition st qs gs)
   (match (store-groups st)
