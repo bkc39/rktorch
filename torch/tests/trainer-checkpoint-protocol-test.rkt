@@ -177,6 +177,57 @@
                                            #:on-train-start (lambda (_r) (set-box! started #t)))))))
       (check-false (unbox started) "no training ran")))
 
+  (test-case "C3: a mid-epoch checkpoint is refused at fit entry until mid-epoch resume lands"
+    (with-temporary-directory (dir #:template "mid-epoch-~a")
+      (define batch-end (build-path dir "batch-end.ckpt"))
+      (define validation-end (build-path dir "validation-end.ckpt"))
+      (void (fit (Small) (toy-loader 4) #:val (toy-loader 2) #:max-epochs 1 #:logger #f
+                 #:callbacks (list (lambda-callback
+                                    #:on-train-batch-end
+                                    (lambda (r . _)
+                                      (when (= (run-global-step r) 1)
+                                        (save-checkpoint! r batch-end)))
+                                    #:on-validation-end
+                                    (lambda (r) (save-checkpoint! r validation-end))))))
+      (for ([path (list batch-end validation-end)] [phase (list #rx"batch-end" #rx"validation-end")])
+        (define seen (box '()))
+        (check-exn (lambda (e) (and (exn:fail:unsupported? e)
+                                    (regexp-match? phase (exn-message e))
+                                    (regexp-match? #rx"mid-epoch.*not implemented" (exn-message e))))
+                   (lambda ()
+                     (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
+                          #:callbacks (list (lambda-callback
+                                             #:setup (lambda (_r _stage)
+                                                       (set-box! seen '(setup))))))))
+        (check-equal? (unbox seen) '() (format "~a" path)))))
+
+  (test-case "C3: a checkpoint saved after the fit resumes at the epoch it ended on"
+    (with-temporary-directory (dir #:template "fit-end-~a")
+      (define path (build-path dir "end.ckpt"))
+      (void (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f
+                 #:callbacks (list (lambda-callback
+                                    #:on-train-end (lambda (r) (save-checkpoint! r path))))))
+      (define epochs (box '()))
+      (define r
+        (fit (Small) (toy-loader 4) #:max-epochs 3 #:logger #f #:ckpt-path path
+             #:callbacks (list (lambda-callback
+                                #:on-train-epoch-start
+                                (lambda (r) (set-box! epochs (cons (run-epoch r) (unbox epochs))))))))
+      (check-equal? (unbox epochs) '(2))
+      (check-equal? (run-global-step r) 6)))
+
+  (define-trainer Unparameterized (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (test-case "C3: a saved hyperparameter the trainer does not define warns and is skipped"
+    (with-temporary-directory (dir #:template "hparams-~a")
+      (define path (saved-with dir '()))
+      (define-values (warnings err) (resume-capturing (Unparameterized) path '()))
+      (check-true (for/or ([w (in-list warnings)]) (regexp-match? #rx"hyperparameter lr" w)))
+      (check-regexp-match #rx"hyperparameter lr" err)))
+
   (test-case (string-append "§1.7 row 16: a checkpoint taken under a current-generator resumes only"
                             " under one on its device")
     (with-temporary-directory (dir #:template "generator-~a")

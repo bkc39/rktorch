@@ -16,7 +16,7 @@
     (define-test-step (x y) (mse-loss (net x) y))
     (define-predict-step (x _y) (net x)))
 
-  (define not-implemented? #rx"#:ckpt-path: not implemented until T3 \\(#386\\)")
+  (define not-implemented? #rx"#:ckpt-path '(last|best): not implemented until T3 \\(#386\\)")
 
   (test-case "T3-L21: a #:ckpt-path that is no path, 'last or 'best blames the caller"
     (check-exn blames-this-test?
@@ -24,15 +24,16 @@
     (check-exn blames-this-test? (lambda () (test (Tiny) (toy-loader 4) #:ckpt-path 'latest)))
     (check-exn blames-this-test? (lambda () (predict (Tiny) (toy-loader 4) #:ckpt-path #t))))
 
-  (test-case "#:ckpt-path accepts 'last, 'best and paths, and resuming is not implemented yet"
-    (for ([path (list 'last 'best "epoch=0-step=2.ckpt")])
-      (check-exn (lambda (e) (and (exn:fail:unsupported? e)
-                                  (regexp-match? not-implemented? (exn-message e))))
+  (test-case "#:ckpt-path accepts 'last and 'best, which are not implemented yet"
+    (define (unsupported? e)
+      (and (exn:fail:unsupported? e) (regexp-match? not-implemented? (exn-message e))))
+    (for ([path (list 'last 'best)])
+      (check-exn unsupported?
                  (lambda () (fit (Tiny) (toy-loader 4) #:max-epochs 1 #:logger #f
                                  #:ckpt-path path)))
-      (check-exn exn:fail:unsupported?
+      (check-exn unsupported?
                  (lambda () (test (Tiny) (toy-loader 4) #:logger #f #:ckpt-path path)))
-      (check-exn exn:fail:unsupported?
+      (check-exn unsupported?
                  (lambda () (predict (Tiny) (toy-loader 4) #:ckpt-path path)))))
 
   (test-case "T3-L21: save-checkpoint!, read-checkpoint and load-from-checkpoint blame the caller"
