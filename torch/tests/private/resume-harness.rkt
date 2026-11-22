@@ -33,12 +33,13 @@
 (define (resumable-net)
   (Sequential (Linear 4 8) (Dropout #:p 0.5) (Linear 8 1)))
 
-(define-trainer Resumable (net temperature seen)
+(define-trainer Resumable (net temperature scale seen)
   (define-init (s)
     (set! net (resumable-net))
     (set! temperature 1.0)
+    (set! scale 1.0)
     (set! seen s))
-  (define-hparams temperature)
+  (define-hparams temperature scale)
   (define-optimizers
     (define opt (adamw (weight-decay-param-groups net #:weight-decay 0.1) #:lr 0.01))
     (define warmup (linear-lr opt #:start-factor 0.1 #:total-iters 2))
@@ -48,11 +49,28 @@
                               #:interval 'step)))
   (define-training-step (x y i)
     (set-box! seen (cons (tensor->list i) (unbox seen)))
-    (define loss (* (mse-loss (net x) y) temperature))
+    (define loss (* (mse-loss (net x) y) temperature scale))
     (log! 'train-loss loss)
+    (log! 'train-mean loss #:on-step? #f #:on-epoch? #t)
+    (when (= (run-batch-index run) 6)
+      (log! 'rare loss))
     loss)
+  (define-hook (on-train-epoch-start)
+    (set! scale (* scale 0.5)))
   (define-validation-step (x y _i)
-    (log! 'val-loss (mse-loss (net x) y))))
+    (log! 'val-loss (mse-loss (net x) y) #:on-step? #t)))
+
+(define (metric-reader)
+  (define reads '())
+  (lambda-callback #:state-key "metric-reader"
+                   #:on-train-epoch-start
+                   (lambda (r)
+                     (define named
+                       (for/list ([key (in-list '(train-loss train-mean rare val-loss))])
+                         (run-metric r key)))
+                     (set! reads (cons (list (run-epoch r) named (run-metrics r)) reads)))
+                   #:state-dict (lambda (_r) reads)
+                   #:load-state! (lambda (_r state) (set! reads state))))
 
 (define (counting-callback)
   (define count 0)
@@ -87,7 +105,7 @@
                   (arange n)))
 
 (define fixture-fit-args
-  '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5)))
+  '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5) (#:log-every-n-steps . 3)))
 
 (define (training-world _dir #:generator? [generator? #f] #:workers [workers 0])
   (define seen (box '()))
@@ -99,7 +117,8 @@
          (dataloader (data 8 source) #:batch-size 4)
          (list (hparam-scheduler 'temperature (lambda (t) (/ 1.0 (add1 t))))
                (counting-callback)
-               (averaging))
+               (averaging)
+               (metric-reader))
          (if g (list g) '())
          seen))
 
