@@ -16,10 +16,10 @@
                   note-batch-size! publish-epoch! publish-steps! set-up! tear-down! transfer
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
-         (only-in "resume.rkt" restore-modules! restore-rng! restore-training-state!)
          (only-in "precision.rkt"
                   backward-pass! call-in-precision check-clippable! configure-precision!
                   count-step! window-step!)
+         (only-in "resume.rkt" restore-modules! restore-rng! restore-training-state!)
          (only-in "state.rkt"
                   run-accumulate run-batches-stepped run-book run-callbacks run-device
                   run-epoch run-global-step run-loggers run-optimizers run-scheduler-configs
