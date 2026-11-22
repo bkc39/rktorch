@@ -1,21 +1,34 @@
 #lang racket/base
 
-(require (only-in racket/match match-define)
+(require (only-in racket/contract/base flat-named-contract)
+         (only-in racket/match match-define)
          (only-in "../../foreign.rkt"
                   device dtype eq full max min numel shape stack tensor->list tensor? where))
 
-(provide in-range?
+(provide float-dtype?
+         in-range?
+         int64?
+         labels/c
          rank-of
          rows
          same-device?
          same-rows?
          tensor-of?)
 
+(define (float-dtype? dt)
+  (and (memq dt '(float16 bfloat16 float32 float64)) #t))
+
+(define (int64? dt)
+  (eq? dt 'int64))
+
 (define (rank-of v)
   (length (shape v)))
 
 (define (tensor-of? v ranks dtype?)
   (and (tensor? v) (memv (rank-of v) ranks) (dtype? (dtype v)) #t))
+
+(define labels/c
+  (flat-named-contract 'labels (lambda (v) (tensor-of? v '(1) int64?))))
 
 (define (rows v)
   (match-define (cons n _) (shape v))

@@ -3,9 +3,10 @@
 Ten-class Gaussian blobs in 24 dimensions, seeded 0, as fit, select and
 test splits; the twin's stratified split of the CIFAR-10 fixture's labels
 (and of the cached training archive's, when present); its standardiser,
-fit_linear and probe_suite; sklearn's logistic regression and cosine kNN
-on the twin-standardised float64 features; and torch.optim.LBFGS on the
-2-D Rosenbrock function.
+fit_linear and probe_suite; torch.std of the fit split; sklearn's logistic
+regression and cosine kNN on the twin-standardised float64 features; and
+torch.optim.LBFGS on the 2-D Rosenbrock function, on probe-fit-test.rkt's
+P14 quadratic, and on the probe objective, each closure's loss recorded.
 """
 import importlib.util
 import json
@@ -15,6 +16,7 @@ import tarfile
 import numpy as np
 import sklearn
 import torch
+import torch.nn.functional as F
 from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import KNeighborsClassifier
 
@@ -38,7 +40,7 @@ def dino():
 twin = dino()
 
 g = torch.Generator().manual_seed(0)
-centres = 1.5 * torch.randn(10, 24, generator=g)
+centres = 0.85 * torch.randn(10, 24, generator=g)
 
 
 def split(n):
@@ -98,21 +100,57 @@ neighbours.fit(f64[0], fy.numpy())
 knn = {name: packed(torch.from_numpy(neighbours.predict(x)))
        for name, x in (("select", f64[1]), ("test", f64[2]), ("loo", None))}
 
-x = torch.tensor([-1.5, 2.0], dtype=torch.float64, requires_grad=True)
-lbfgs = torch.optim.LBFGS([x], lr=1, max_iter=100, history_size=20,
-                          line_search_fn="strong_wolfe")
-losses = []
 
 
-def rosenbrock():
-    lbfgs.zero_grad()
-    loss = (1 - x[0]) ** 2 + 100 * (x[1] - x[0] ** 2) ** 2
-    loss.backward()
-    losses.append(loss.item())
-    return loss
+def minimised(params, objective, **settings):
+    lbfgs = torch.optim.LBFGS(params, **settings)
+    losses = []
+
+    def closure():
+        lbfgs.zero_grad()
+        loss = objective()
+        loss.backward()
+        losses.append(loss.item())
+        return loss
+
+    lbfgs.step(closure)
+    return losses
 
 
-lbfgs.step(rosenbrock)
+def rosenbrock(start, dtype):
+    x = torch.tensor(start, dtype=dtype, requires_grad=True)
+    losses = minimised([x], lambda: (1 - x[0]) ** 2 + 100 * (x[1] - x[0] ** 2) ** 2,
+                       lr=1, max_iter=100, history_size=20,
+                       line_search_fn="strong_wolfe")
+    return {"losses": losses, "x": x.detach().tolist()}
+
+
+SPD_A = [[26, -6, 0, -17, -12, -9], [-6, 29, -17, 11, 1, -14],
+         [0, -17, 25, -3, 3, 14], [-17, 11, -3, 35, 8, 2],
+         [-12, 1, 3, 8, 29, -1], [-9, -14, 14, 2, -1, 32]]
+SPD_B = [3, -1, 4, -1, 5, -9]
+
+
+def quadratic(line_search):
+    a = torch.tensor(SPD_A, dtype=torch.float64)
+    b = torch.tensor(SPD_B, dtype=torch.float64)
+    x = torch.zeros(6, dtype=torch.float64, requires_grad=True)
+    losses = minimised([x], lambda: 0.5 * (x * (a @ x)).sum() - (b * x).sum(),
+                       max_iter=100, tolerance_change=1e-12,
+                       line_search_fn=line_search)
+    return {"losses": losses, "x": x.detach().tolist()}
+
+
+def probe_trace(n, scale, wd):
+    x, y = scale * fit_std[:n], fy[:n]
+    w = torch.zeros(24, 10, requires_grad=True)
+    b = torch.zeros(10, requires_grad=True)
+    return minimised([w, b],
+                     lambda: F.cross_entropy(x @ w + b, y) + 0.5 * wd * (w * w).sum(),
+                     lr=1.0, max_iter=twin.PROBE_ITERS, tolerance_grad=1e-7,
+                     tolerance_change=1e-10, history_size=20,
+                     line_search_fn="strong_wolfe")
+
 
 out = {"fit": packed(fit), "fit_labels": packed(fy),
        "select": packed(sel), "select_labels": packed(sy),
@@ -121,9 +159,16 @@ out = {"fit": packed(fit), "fit_labels": packed(fy),
        "split": [packed(i) for i in split256],
        "full_split": full_split,
        "std": [packed(t) for t in twin.standardise(fit, sel, te)],
+       "fit_sd": packed(fit.std(0).clamp_min(1e-6)),
        "fit_linear": fit_linear,
        "suite": twin.probe_suite(fit, sel, te, fy, sy, ty),
        "sklearn": {"logistic": logistic, "knn": knn,
                    "version": sklearn.__version__},
-       "lbfgs_rosenbrock": {"losses": losses, "x": x.detach().tolist()}}
+       "lbfgs_rosenbrock": rosenbrock([-1.5, 2.0], torch.float64),
+       "lbfgs_rosenbrock32": [{"start": start, **rosenbrock(start, torch.float32)}
+                              for start in ([1.3, 2.0], [-1.2, 2.0])],
+       "lbfgs_quadratic": {"a": SPD_A, "b": SPD_B, "none": quadratic(None),
+                           "strong_wolfe": quadratic("strong_wolfe")},
+       "lbfgs_probe": {"n": 100, "scale": 10.0, "weight_decay": 1e-2,
+                       "losses": probe_trace(100, 10.0, 1e-2)}}
 print(json.dumps(out))

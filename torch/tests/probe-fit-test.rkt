@@ -7,12 +7,14 @@
            (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + - / @ backward! index-select manual-seed! randn requires-grad! reshape
-                    select shape sum tensor tensor->list topk zero-grad! zeros)
+                    * + - / @ backward! grad-enabled? index-select manual-seed! randn
+                    requires-grad! requires-grad? reshape select shape sum tensor tensor->list
+                    topk with-no-grad zero-grad! zeros)
            (only-in "../train.rkt"
                     knn-accuracy linear-probe linear-probe-bias linear-probe-mean
                     linear-probe-std linear-probe-weight linear-probe-weight-decay probe-accuracy
                     probe-dataset-features probe-dataset-labels tensors->probe-dataset)
+           (only-in "../train/private/copy.rkt" copy-of)
            (only-in "../train/private/lbfgs.rkt" lbfgs-minimize!)
            (only-in (submod "../train/probe.rkt" private) probe-objective)
            (only-in "private/gradcheck.rkt" gradcheck)
@@ -162,6 +164,15 @@
                1e-6
                (format "k ~a, standardize? ~a, query? ~a" k standardize? (and q #t)))))
 
+  (bounded-test "P12: a small temperature does not overflow float32 votes"
+    (define unit-fit
+      (tensors->probe-dataset (tensor '((0.8 0.6) (0.9 0.4358899)) #:dtype 'float32)
+                              (tensor '(0 1))))
+    (define unit-query
+      (tensors->probe-dataset (tensor '((1.0 0.0)) #:dtype 'float32) (tensor '(1))))
+    (check-= (knn-accuracy unit-fit unit-query #:k 2 #:temperature 0.001 #:standardize? #f)
+             1.0 0.0))
+
   (define (logits probe ds)
     (~> (- (probe-dataset-features ds) (linear-probe-mean probe))
         (/ (linear-probe-std probe))
@@ -186,7 +197,7 @@
 
   (slow-test "P11: permuting feature columns changes no figure"
     (define perm '(3 0 5 1 4 2))
-    (define fit (overlapping 300 31))
+    (define fit (overlapping 300 37))
     (define select (overlapping 90 32))
     (define test (overlapping 150 33))
     (define probe (linear-probe fit select))
@@ -258,7 +269,7 @@
     (for ([line-search (in-list '(#f strong-wolfe))])
       (define x (requires-grad! (zeros 6 #:dtype 'float64)))
       (lbfgs-minimize! (list x) (quadratic-closure x (box 0))
-                       #:max-iter 100 #:line-search line-search)
+                       #:max-iter 100 #:tolerance-change 1e-12 #:line-search line-search)
       (for ([got (in-list (flat x))] [want (in-list exact)])
         (check-= got (exact->inexact want) 1e-6 (format "~a" line-search)))))
 
@@ -270,8 +281,44 @@
     (check-equal? (unbox evaluations) 1)
     (check-equal? (flat x) (flat (tensor start #:dtype 'float64))))
 
-  (define (rosenbrock-closure x)
+  (bounded-test "P14: the closure runs with grad on, under a caller's with-no-grad"
+    (define x (requires-grad! (zeros 6 #:dtype 'float64)))
+    (define modes (box '()))
+    (define quadratic (quadratic-closure x (box 0)))
+    (define (closure)
+      (set-box! modes (cons (grad-enabled?) (unbox modes)))
+      (quadratic))
+    (with-no-grad
+      (lbfgs-minimize! (list x) closure #:max-iter 5 #:line-search 'strong-wolfe)
+      (check-false (grad-enabled?)))
+    (check-true (andmap values (unbox modes)))
+    (check-true (< 1 (length (unbox modes)))))
+
+  (bounded-test "P14: a closure that raises leaves grad mode as the caller had it"
+    (define x (requires-grad! (zeros 6 #:dtype 'float64)))
+    (define quadratic (quadratic-closure x (box 0)))
+    (define calls (box 0))
+    (define (closure)
+      (set-box! calls (+ 1 (unbox calls)))
+      (when (< 2 (unbox calls))
+        (raise 'closure-failed))
+      (quadratic))
+    (with-no-grad
+      (check-equal? (with-handlers ([symbol? values])
+                      (lbfgs-minimize! (list x) closure #:max-iter 5 #:line-search 'strong-wolfe))
+                    'closure-failed)
+      (check-false (grad-enabled?)))
+    (check-true (grad-enabled?)))
+
+  (bounded-test "P14: the saved parameters do not require grad"
+    (define x (requires-grad! (tensor '(1.0 2.0) #:dtype 'float64)))
+    (define saved (copy-of x))
+    (check-false (requires-grad? saved))
+    (check-equal? (flat saved) '(1.0 2.0)))
+
+  (define (rosenbrock-closure x evaluations)
     (lambda ()
+      (set-box! evaluations (+ 1 (unbox evaluations)))
       (zero-grad! x)
       (define x0 (select x 0 0))
       (define x1 (select x 0 1))
@@ -283,10 +330,8 @@
   (bounded-test "P14: L-BFGS never exceeds max-iter"
     (for ([max-iter (in-list '(1 3 7))])
       (define x (requires-grad! (tensor '(-1.5 2.0) #:dtype 'float64)))
-      (define iterations
-        (call-with-values (lambda ()
-                            (lbfgs-minimize! (list x) (rosenbrock-closure x) #:max-iter max-iter
-                                             #:line-search 'strong-wolfe))
-                          (lambda (iterations _final-loss) iterations)))
-      (check-true (<= iterations max-iter)
-                  (format "~a iterations at max-iter ~a" iterations max-iter)))))
+      (define evaluations (box 0))
+      (lbfgs-minimize! (list x) (rosenbrock-closure x evaluations)
+                       #:lr 1e-3 #:max-iter max-iter #:max-eval 10000)
+      (check-equal? (unbox evaluations) max-iter
+                    (format "one evaluation per iteration at max-iter ~a" max-iter)))))

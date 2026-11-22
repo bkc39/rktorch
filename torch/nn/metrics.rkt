@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i any/c contract-out flat-contract-predicate flat-named-contract
+                  -> ->* ->i any/c contract-out flat-named-contract
                   integer-in or/c)
          (only-in racket/flonum fl/ flexp)
          (only-in racket/generic define-generics)
@@ -14,18 +14,13 @@
          (prefix-in g: (only-in "../generated.rkt" nll-loss sum-dim-intlist))
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "private/tensor-checks.rkt"
-                  in-range? rank-of same-device? same-rows? tensor-of?))
+                  float-dtype? in-range? int64? labels/c rank-of same-device? same-rows?
+                  tensor-of?))
 
 (provide (contract-out [metric? (-> any/c boolean?)]))
 
 (module+ private
   (provide tally-state))
-
-(define (float-dtype? dt)
-  (and (memq dt '(float16 bfloat16 float32 float64)) #t))
-
-(define (int64? dt)
-  (eq? dt 'int64))
 
 (define (float32? dt)
   (eq? dt 'float32))
@@ -37,8 +32,6 @@
   (flat-named-contract 'class-indices (lambda (v) (tensor-of? v '(1) int64?))))
 
 (define predictions/c (or/c logits/c class-indices/c))
-
-(define labels/c (flat-named-contract 'labels (flat-contract-predicate class-indices/c)))
 
 (define int64-min (- (expt 2 63)))
 

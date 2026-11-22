@@ -31,10 +31,12 @@ output, by default @racket[(encoder images)]. @racket[pool] reduces tokens
 @tt{[N, T, D]}: @racket['cls] is token 0, @racket['mean] is the mean of the
 others, @racket['cls+mean] concatenates the two, and @racket[#f] keeps a
 @tt{[N, D]} output as it is. Every layer's mode is restored afterwards.
-@racket[device] defaults to the device of the encoder's first parameter,
-else the dataset's, else @racket[(default-device)].
+Images go to the encoder's device: its first parameter's, else the
+dataset's, else @racket[(default-device)]; @racket[device] defaults to it.
+An empty dataset, or a label outside @tt{[0, classes)}, raises
+@racket[exn:fail:contract?].
 
-@racketblock[
+@examples[#:eval train-eval
 (define images (tensor-dataset (randn 32 1 2 2) (tensor (for/list ([i 32]) (modulo i 4)))))
 (define encoded (probe-dataset (Sequential (Flatten) (Linear 4 8)) images #:pool #f))
 (shape (probe-dataset-features encoded))]
@@ -45,7 +47,9 @@ else the dataset's, else @racket[(default-device)].
                                  [#:classes classes (or/c #f exact-positive-integer?) #f])
          probe-dataset?]{
 Features already computed, @tt{[N, D]} @racket['float32] or
-@racket['float64], with their @tt{[N]} @racket['int64] labels.
+@racket['float64], with their @tt{[N]} @racket['int64] labels: at least
+one row, labels in @tt{[0, classes)}, features and labels on one device.
+The features are kept detached.
 }
 
 @deftogether[(@defproc[(probe-dataset-features [ds probe-dataset?]) tensor?]
@@ -87,9 +91,10 @@ fitted full batch by L-BFGS with strong-Wolfe line search from zero
 weights. The objective is mean cross-entropy plus half the weight decay
 times the squared weights; the bias is not decayed. With @racket[select],
 it fits once per entry of @racket[weight-decays] and keeps the first with
-the best select accuracy. Otherwise it fits once at @racket[weight-decay].
+the best select accuracy; its classes must be within the fit's. Otherwise
+it fits once at @racket[weight-decay].
 
-@racketblock[
+@examples[#:eval train-eval
 (manual-seed! 0)
 (define blobs
   (tensors->probe-dataset (cat (list (+ (randn 60 2) 3.0) (- (randn 60 2) 3.0)))
@@ -128,11 +133,13 @@ own statistics.
          (real-in 0 1)]{
 Top-1 accuracy of a weighted vote among the @racket[k] fit rows most
 cosine-similar to each query row, after standardising both with the fit's
-statistics when @racket[standardize?]. Each neighbour votes
-@racket[(exp (/ similarity temperature))]. Without @racket[query] it
-scores the fit split, each row leaving itself out.
+statistics when @racket[standardize?], which needs at least two fit rows.
+Each neighbour votes @racket[(exp (/ similarity temperature))], scaled
+per query row by its nearest neighbour's vote so that a small
+@racket[temperature] does not overflow. Without @racket[query] it scores
+the fit split, each row leaving itself out.
 
-@racketblock[
+@examples[#:eval train-eval
 (knn-accuracy fit)
 (knn-accuracy fit select)]
 }
