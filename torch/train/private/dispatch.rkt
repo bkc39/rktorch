@@ -20,7 +20,8 @@
                   callback-hook callback-kind callback-state-key callback-type
                   trainer-hook))
 
-(provide call-callbacks
+(provide call-callback
+         call-callbacks
          call-hooks
          call-trainer
          call-trainer/values

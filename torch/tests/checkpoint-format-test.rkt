@@ -38,6 +38,7 @@
     (define-hparams lr)
     (define-optimizers (sgd (parameters net) #:lr lr))
     (define-training-step (x y) (mse-loss (net x) y))
+    (define-validation-step (x y) (mse-loss (net x) y))
     (define-hook (on-save-checkpoint ckpt) (set-box! seen (comparable ckpt #:hash-kinds? #t))))
 
   (test-case "T3-L7: load-state! reads the model, read-checkpoint the tree the hooks saw"

@@ -57,7 +57,7 @@
         (flush-output out)))
     (rename-file-or-directory temporary path #t)))
 
-(define (write-safetensors! who path entries #:metadata [metadata #f])
+(define (write-safetensors! who path entries #:metadata [metadata #f] #:on-written [on-written void])
   (define-values (fields chunks)
     (for/fold ([fields '()] [chunks '()] [offset 0] #:result (values fields chunks))
               ([e (in-list entries)])
@@ -84,7 +84,8 @@
      (write-bytes (integer->integer-bytes (bytes-length header-bytes) 8 #f #f) out)
      (write-bytes header-bytes out)
      (for ([bs (in-list (reverse chunks))])
-       (write-bytes bs out)))))
+       (write-bytes bs out))
+     (on-written))))
 
 ;; `header` maps each entry's name, a symbol, to its jsexpr; `metadata` is
 ;; the `__metadata__` map with string keys, or #f

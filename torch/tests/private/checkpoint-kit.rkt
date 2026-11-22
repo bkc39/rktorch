@@ -21,7 +21,7 @@
   (define-validation-step (x y) (log! 'val-loss (mse-loss (net x) y))))
 
 (define-trainer Drawing (net)
-  (define-init () (set! net (Sequential (Linear 2 4) (Dropout 0.5) (Linear 4 1))))
+  (define-init () (set! net (Sequential (Linear 2 4) (Dropout #:p 0.5) (Linear 4 1))))
   (define-optimizers (sgd (parameters net) #:lr 0.1))
   (define-training-step (x y) (mse-loss (net x) y))
   (define-validation-step (x y) (log! 'val-loss (mse-loss (net x) y))))

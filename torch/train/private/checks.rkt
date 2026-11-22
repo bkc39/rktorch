@@ -14,8 +14,10 @@
                   callback? make-scheduler-config scheduler-config-scheduler
                   scheduler-config?))
 
-(provide checked-hparam
+(provide (struct-out captured-arguments)
+         checked-hparam
          checked-hparams!
+         formal-name
          readable-arguments)
 
 (define (optimizer-only? v)
@@ -85,9 +87,18 @@
   (or (real? v) (string? v) (symbol? v) (boolean? v)
       (and (list? v) (andmap readable? v))))
 
-(define (readable-arguments names vals)
-  (for/hasheq ([name (in-list names)] [v (in-list vals)] #:when (readable? v))
-    (values name v)))
+(struct captured-arguments (shapes values))
+
+(define (formal-name shape)
+  (match shape
+    [(list _ name) name]
+    [(list 'keyword _ name) name]))
+
+(define (readable-arguments captured)
+  (for/hasheq ([shape (in-list (captured-arguments-shapes captured))]
+               [v (in-list (captured-arguments-values captured))]
+               #:when (readable? v))
+    (values (formal-name shape) v)))
 
 (define/contract-out (checked-state-key key)
   (->i ([key state-key/c]) [result any/c])
