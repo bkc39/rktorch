@@ -173,6 +173,13 @@
     (check-equal? (dtype (perplexity (cross-entropy (zeros 4 10 #:dtype 'float64) targets)))
                   'float64))
 
+  (bounded-test "M8: half-precision logits are summed in float32, so perplexity stays finite"
+    (define half-targets (labels-of (for/list ([i (in-range 32768)]) (modulo i 10))))
+    (for ([half (in-list '(float16 bfloat16))])
+      (define half-ppl (perplexity-metric))
+      (metric-update! half-ppl (zeros 32768 10 #:dtype half) half-targets)
+      (check-true (close? (item (metric-compute half-ppl)) 10 1e-5) (format "~a" half))))
+
   (bounded-test "M9: the gradient of perplexity in its NLL is perplexity over the tokens"
     (check-true (gradcheck (lambda (nll) (perplexity nll #:tokens 5))
                            (list (tensor 3.0 #:dtype 'float64))))
