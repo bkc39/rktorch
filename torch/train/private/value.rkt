@@ -50,14 +50,13 @@
       [(? tensor?) (and (not (memq (dtype v) tagged-dtypes)) (bad path v))]
       [(? pair?) (spine v 0 path)]
       [(? hash?)
-       (if (taggable-hash? v)
-           (node v path
-                 (lambda ()
-                   (for/or ([(k x) (in-hash v)])
-                     (cond
-                       [(reserved-key? k) (bad (cons k path) k)]
-                       [else (or (check k (cons k path)) (check x (cons k path)))]))))
-           (bad path v))]
+       #:when (taggable-hash? v)
+       (node v path
+             (lambda ()
+               (for/or ([(k x) (in-hash v)])
+                 (cond
+                   [(reserved-key? k) (bad (cons k path) k)]
+                   [else (or (check k (cons k path)) (check x (cons k path)))]))))]
       [_ (bad path v)]))
   (match (check v '())
     [#f #f]
