@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >/c and/c any/c contract-out or/c unsupplied-arg?)
+                  -> ->* ->i </c >/c and/c any/c contract-out contract? or/c rename-contract
+                  unsupplied-arg?)
          (only-in racket/match match match* match-define struct*)
          (only-in "../foreign.rkt"
                   * + copy! cuda-available? device device-type device? full item tensor? to)
@@ -9,10 +10,12 @@
                                 addcdiv! amp-foreach-non-finite-check-and-unscale!
                                 amp-update-scale! fill-scalar! sum-dim-intlist))
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "optim.rkt" optimizer-root optimizer?)
          (only-in (submod "optim.rkt" private)
                   call-with-gradient-buckets gradient-bucket gradient-bucket-dtype
-                  optimizer-fused? scaled-step!))
+                  optimizer-fused? scaled-step!)
+         (only-in "private/state-shape.rkt" immutable-equal-hash/c record/c))
 
 (provide (contract-out [grad-scaler? (-> any/c boolean?)]))
 
@@ -257,3 +260,22 @@
 (define/contract-out (grad-scaler-enabled? s)
   (-> grad-scaler? boolean?)
   (grad-scaler-active? s))
+
+(define/contract-out grad-scaler-state/c ;; noqa
+  contract?
+  (rename-contract
+   (or/c (and/c immutable-equal-hash/c hash-empty?)
+         (record/c (hash "scale" (and/c flonum? (>/c 0.0))
+                         "growth_factor" (and/c flonum? (>/c 1.0))
+                         "backoff_factor" (and/c flonum? (>/c 0.0) (</c 1.0))
+                         "growth_interval" exact-positive-integer?
+                         "_growth_tracker" exact-nonnegative-integer?)))
+   'grad-scaler-state/c))
+
+(define/contract-out (grad-scaler-state-dict s) ;; noqa
+  (-> grad-scaler? grad-scaler-state/c)
+  (not-implemented 'grad-scaler-state-dict 'T3))
+
+(define/contract-out (load-grad-scaler-state! s state) ;; noqa
+  (-> grad-scaler? grad-scaler-state/c void?)
+  (not-implemented 'load-grad-scaler-state! 'T3))

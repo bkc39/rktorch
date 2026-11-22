@@ -1,20 +1,23 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out listof
-                  non-empty-listof not/c real-in unsupplied-arg?)
+                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out contract? listof
+                  non-empty-listof not/c real-in recursive-contract rename-contract
+                  unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
          (only-in racket/list count)
          (only-in racket/match match match-define struct*)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "optim-groups.rkt"
                   store-initial-lrs! store-set-each! store-update-each! store-values)
          (only-in "optim.rkt"
                   gen:optimizer group-index? lr-optimizer/c optimizer-parameters
                   optimizer-root optimizer-store optimizer?)
-         (only-in (submod "optim.rkt" private) prop:wrapped-optimizer))
+         (only-in (submod "optim.rkt" private) prop:wrapped-optimizer)
+         (only-in "private/state-shape.rkt" record/c state-real/c))
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
@@ -319,3 +322,27 @@
        (#:t-mult exact-positive-integer? #:eta-min real?)
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
+
+(define (restarts-paired? v)
+  (eq? (hash-has-key? v "T_cur") (hash-has-key? v "T_i")))
+
+(define/contract-out scheduler-state/c ;; noqa
+  contract?
+  (rename-contract
+   (and/c (record/c (hash "last_epoch" exact-integer?
+                          "base_lrs" (listof state-real/c)
+                          "_last_lr" (listof state-real/c)
+                          "T_cur" state-real/c
+                          "T_i" exact-positive-integer?
+                          "_schedulers" (listof (recursive-contract scheduler-state/c #:flat)))
+                    #:required '("last_epoch" "base_lrs" "_last_lr"))
+          restarts-paired?)
+   'scheduler-state/c))
+
+(define/contract-out (scheduler-state-dict s) ;; noqa
+  (-> scheduler? scheduler-state/c)
+  (not-implemented 'scheduler-state-dict 'T3))
+
+(define/contract-out (load-scheduler-state! s state) ;; noqa
+  (-> scheduler? scheduler-state/c void?)
+  (not-implemented 'load-scheduler-state! 'T3))

@@ -60,9 +60,26 @@
               (list 'trainer 'on-before-zero-grad epoch step #f lr))]
        [_ (list e)]))))
 
+(define (epoch-counted-after-restore events)
+  (for/fold ([phase 'before] [out '()] #:result (reverse out))
+            ([e (in-list events)])
+    (define next
+      (match e
+        [(list 'trainer 'on-fit-start _ ...) 'restored]
+        [(list 'callback 'on-train-start _ ...) 'started]
+        [_ phase]))
+    (values next
+            (cons (match e
+                    [(list source hook epoch rest ...)
+                     #:when (and (eq? phase 'restored) (eq? next 'restored))
+                     (list* source hook (add1 epoch) rest)]
+                    [_ e])
+                  out))))
+
 (define deviations
   (hasheq 'exception teardown-after-exception
-          'manual zero-grads-run-hooks))
+          'manual zero-grads-run-hooks
+          'save-resume epoch-counted-after-restore))
 
 (define (expected-events scenario)
   (define events

@@ -15,7 +15,7 @@
                   callback? not-implemented trainer-automatic?
                   trainer-defines? trainer?)
          (only-in "run.rkt"
-                  clip-algorithm/c fast-dev-run/c limit/c precision/c run?
+                  ckpt-path/c clip-algorithm/c fast-dev-run/c limit/c precision/c run?
                   val-check-interval/c))
 
 (define (selects-a-batch? loader limit)
@@ -80,7 +80,7 @@
         #:limit-val-batches [limit-val limit/c]
         #:log-every-n-steps [log-every exact-positive-integer?]
         #:fast-dev-run [fast-dev-run fast-dev-run/c]
-        #:ckpt-path [ckpt-path (or/c #f path-string?)])
+        #:ckpt-path [ckpt-path ckpt-path/c])
        #:pre/name (max-epochs max-steps fast-dev-run)
        "fit needs #:max-epochs or #:max-steps"
        (or (supplied-or max-epochs) (supplied-or max-steps) (supplied-or fast-dev-run))
@@ -138,7 +138,7 @@
         #:logger [logger logger-spec/c]
         #:callbacks [callbacks (listof callback?)]
         #:limit-test-batches [limit limit/c]
-        #:ckpt-path [ckpt-path (or/c #f path-string?)])
+        #:ckpt-path [ckpt-path ckpt-path/c])
        #:pre/name (trainer) "the trainer has no define-test-step"
        (trainer-defines? trainer 'define-test-step)
        #:pre/name (loader limit)
@@ -161,7 +161,7 @@
        (#:device [device (or/c #f device?)]
         #:callbacks [callbacks (listof callback?)]
         #:limit-predict-batches [limit limit/c]
-        #:ckpt-path [ckpt-path (or/c #f path-string?)])
+        #:ckpt-path [ckpt-path ckpt-path/c])
        #:pre/name (trainer) "the trainer has no define-predict-step"
        (trainer-defines? trainer 'define-predict-step)
        [result list?])

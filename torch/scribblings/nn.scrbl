@@ -1175,3 +1175,44 @@ anything is copied.
              #:rename (lambda (key) (string-replace key "_" "-")))
 ]
 }
+
+The state functions below are not implemented yet: they raise
+@racket[exn:fail:unsupported].
+
+@deftogether[(@defproc[(optimizer-state-dict [opt optimizer?] [model layer?]) optimizer-state/c]
+              @defproc[(load-optimizer-state! [opt optimizer?] [model layer?]
+                                              [state optimizer-state/c]) void?]
+              @defthing[optimizer-state/c flat-contract?])]{
+@tt{Optimizer.state_dict} and @tt{load_state_dict}, keyed by @racket[model]'s
+parameter names rather than positions, so a reordered model fails loudly. The
+state tensors are the optimizer's own, as in torch, and @racket["step"] is an
+integer in every mode, so a state moves between @racket['loop], @racket['foreach]
+and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash. Group
+hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as @racket[0.1];
+a value that bypasses the groups can stay exact, as @racket[one-cycle-lr] with
+@racket[#:max-lr 1/10 #:div-factor 25] saves an exact @racket[1/250] as its
+@tt{initial_lr} and @tt{base_lrs}. Loading checks everything first and replaces each group's
+hyperparameters; floating tensors go to their parameter's device and dtype, as
+torch does.}
+
+@deftogether[(@defproc[(scheduler-state-dict [s scheduler?]) scheduler-state/c]
+              @defproc[(load-scheduler-state! [s scheduler?] [state scheduler-state/c]) void?]
+              @defthing[scheduler-state/c flat-contract?])]{
+@tt{LRScheduler.state_dict}'s progress: @tt{last_epoch}, @tt{base_lrs} and
+@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts and each inner
+scheduler's state for chained and sequential ones. The constructor's arguments
+are not saved. Loading leaves the optimizer's rates alone, as torch does; load
+the optimizer's state first.}
+
+@deftogether[(@defproc[(grad-scaler-state-dict [s grad-scaler?]) grad-scaler-state/c]
+              @defproc[(load-grad-scaler-state! [s grad-scaler?] [state grad-scaler-state/c]) void?]
+              @defthing[grad-scaler-state/c flat-contract?])]{
+@tt{GradScaler.state_dict}: @tt{scale}, @tt{growth_factor}, @tt{backoff_factor},
+@tt{growth_interval} and @tt{_growth_tracker}, empty for a disabled scaler.
+Loading into a disabled scaler does nothing; loading an empty state into an
+enabled one raises.}
+
+@deftogether[(@defproc[(ema-n-averaged [e ema?]) exact-nonnegative-integer?]
+              @defproc[(set-ema-n-averaged! [e ema?] [n exact-nonnegative-integer?]) void?])]{
+@tt{AveragedModel.n_averaged}: the updates so far. The first update copies; a
+restored count makes the next one average.}
