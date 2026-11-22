@@ -61,15 +61,19 @@
   "constructor formal (id, [id default], or #:kw id / #:kw [id default])"
   (pattern id:id
     #:attr bare? #t
+    #:attr shape (list 'positional (syntax-e #'id))
     #:with (decl ...) #'(id))
   (pattern [id:id default:expr]
     #:attr bare? #f
+    #:attr shape (list 'positional (syntax-e #'id))
     #:with (decl ...) #'([id default]))
   (pattern (~seq (~and kw:keyword (~not #:rest)) id:id)
     #:attr bare? #f
+    #:attr shape (list 'keyword (syntax-e #'kw) (syntax-e #'id))
     #:with (decl ...) #'(kw id))
   (pattern (~seq (~and kw:keyword (~not #:rest)) [id:id default:expr])
     #:attr bare? #f
+    #:attr shape (list 'keyword (syntax-e #'kw) (syntax-e #'id))
     #:with (decl ...) #'(kw [id default])))
 
 (define-syntax-class forward-formal ;; noqa
@@ -90,12 +94,15 @@
   #:description "#:init formals: (formal ... [#:rest id]) or (formal ... . id)"
   (pattern (f:ctor-formal ... #:rest rest:id)
     #:with (id ...) #'(f.id ... rest)
+    #:attr shapes (append (attribute f.shape) (list (list 'rest (syntax-e #'rest))))
     #:with formals #'((~@ f.decl ...) ... . rest))
   (pattern (f:ctor-formal ... . rest:id)
     #:with (id ...) #'(f.id ... rest)
+    #:attr shapes (append (attribute f.shape) (list (list 'rest (syntax-e #'rest))))
     #:with formals #'((~@ f.decl ...) ... . rest))
   (pattern (f:ctor-formal ...)
     #:with (id ...) #'(f.id ...)
+    #:attr shapes (attribute f.shape)
     #:with formals #'((~@ f.decl ...) ...)))
 
 (define-splicing-syntax-class layer-field

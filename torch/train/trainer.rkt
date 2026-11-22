@@ -200,30 +200,14 @@
                                                 (attribute formals.rest?)))]
       #:fail-when (and problem #'id) problem))
 
-  (define (formal-shapes formals)
-    (let walk ([fs (syntax-e formals)])
-      (match fs
-        ['() '()]
-        [(cons (app syntax-e (? keyword? kw)) (cons decl more))
-         (cons (list 'keyword kw (formal-id decl)) (walk more))]
-        [(cons decl more) (cons (list 'positional (formal-id decl)) (walk more))]
-        [(? syntax? rest) (walk (syntax-e rest))]
-        [rest (list (list 'rest rest))])))
-
-  (define (formal-id decl)
-    (syntax-parse decl
-      [x:id (syntax-e #'x)]
-      [[x:id _] (syntax-e #'x)]))
-
-  (define (capture args formals ids)
-    #`(set! #,args (let ([given (captured-arguments '#,(formal-shapes formals)
-                                                    (list #,@ids))])
+  (define (capture args shapes ids)
+    #`(set! #,args (let ([given (captured-arguments '#,shapes (list #,@ids))])
                      (lambda () given))))
 
   (define (init-clauses init-form args field-decls #:check check)
     (syntax-parse (or init-form #`(define-init #,@field-decls))
       [(_ formals:init-formals body ...)
-       #`(#:init formals #,(capture args #'formals.formals (attribute formals.id))
+       #`(#:init formals #,(capture args (attribute formals.shapes) (attribute formals.id))
           body ... #,check)]))
 
   (define (callback-init-clauses init-form)
