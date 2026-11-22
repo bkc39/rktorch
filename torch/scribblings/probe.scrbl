@@ -34,7 +34,7 @@ others, @racket['cls+mean] concatenates the two, and @racket[#f] keeps a
 @racket[device] defaults to the device of the encoder's first parameter,
 else the dataset's, else @racket[(default-device)].
 
-@racketblock[
+@examples[#:eval train-eval
 (define images (tensor-dataset (randn 32 1 2 2) (tensor (for/list ([i 32]) (modulo i 4)))))
 (define encoded (probe-dataset (Sequential (Flatten) (Linear 4 8)) images #:pool #f))
 (shape (probe-dataset-features encoded))]
@@ -89,7 +89,7 @@ times the squared weights; the bias is not decayed. With @racket[select],
 it fits once per entry of @racket[weight-decays] and keeps the first with
 the best select accuracy. Otherwise it fits once at @racket[weight-decay].
 
-@racketblock[
+@examples[#:eval train-eval
 (manual-seed! 0)
 (define blobs
   (tensors->probe-dataset (cat (list (+ (randn 60 2) 3.0) (- (randn 60 2) 3.0)))
@@ -132,7 +132,7 @@ statistics when @racket[standardize?]. Each neighbour votes
 @racket[(exp (/ similarity temperature))]. Without @racket[query] it
 scores the fit split, each row leaving itself out.
 
-@racketblock[
+@examples[#:eval train-eval
 (knn-accuracy fit)
 (knn-accuracy fit select)]
 }

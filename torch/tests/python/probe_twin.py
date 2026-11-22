@@ -38,7 +38,7 @@ def dino():
 twin = dino()
 
 g = torch.Generator().manual_seed(0)
-centres = 1.5 * torch.randn(10, 24, generator=g)
+centres = 0.85 * torch.randn(10, 24, generator=g)
 
 
 def split(n):

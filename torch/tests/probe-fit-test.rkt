@@ -186,7 +186,7 @@
 
   (slow-test "P11: permuting feature columns changes no figure"
     (define perm '(3 0 5 1 4 2))
-    (define fit (overlapping 300 31))
+    (define fit (overlapping 300 37))
     (define select (overlapping 90 32))
     (define test (overlapping 150 33))
     (define probe (linear-probe fit select))

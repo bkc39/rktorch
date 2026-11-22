@@ -128,7 +128,7 @@
 
   (define (dropout-encoder)
     (manual-seed! 0)
-    (Sequential (Flatten) (Linear 4 8) (Dropout 0.5)))
+    (Sequential (Flatten) (Linear 4 8) (Dropout #:p 0.5)))
 
   (define (image-dataset n)
     (manual-seed! 1)
@@ -170,7 +170,9 @@
     (define ds (probe-dataset enc images #:pool #f #:batch-size 5))
     (reclaim-native-memory!)
     (check-equal? (- (cpu-bytes) base) (+ (* 24 8 4) (* 24 8)))
-    (check-true (probe-dataset? ds)))
+    (check-true (probe-dataset? ds))
+    (check-equal? (dataset-length images) 24)
+    (check-equal? (length (parameters enc)) 2))
 
   (define split-labels '(0 1 2 0 1 2 0 1 2 0 1 2 0 1 0 2 2 0))
 
@@ -183,6 +185,9 @@
 
   (define (ascending? xs)
     (or (null? xs) (null? (cdr xs)) (and (< (car xs) (cadr xs)) (ascending? (cdr xs)))))
+
+  (define (take-2 xs)
+    (list (car xs) (cadr xs)))
 
   (bounded-test "P5: a stratified split of the labels alone"
     (define features (randn 18 2))
@@ -205,9 +210,6 @@
     (check-true (< 1 (length (remove-duplicates
                               (for/list ([seed (in-range 5)])
                                 (cadr (split-indices (labelled features) #:seed seed))))))))
-
-  (define (take-2 xs)
-    (list (car xs) (cadr xs)))
 
   (bounded-test "P5: a class short of select-per-class raises"
     (check-exn exn:fail:contract?

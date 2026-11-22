@@ -938,8 +938,11 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 - `torch/train.rkt` — pure re-export facade over `torch/train/trainer.rkt`
   (`define-trainer`, `define-callback` and their body forms),
   `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),
-  `torch/train/logging.rkt`, `torch/train/callbacks.rkt` and
-  `torch/train/optimization.rkt`; `torch/train/private/hooks.rkt` is the one
+  `torch/train/logging.rkt`, `torch/train/callbacks.rkt`,
+  `torch/train/optimization.rkt` and `torch/train/probe.rkt` (linear and kNN
+  probes over an encoder's cached features, #592, fitted by
+  `torch/train/private/lbfgs.rkt`, a port of PyTorch 2.14's `torch.optim.LBFGS`
+  with its strong-Wolfe line search); `torch/train/private/hooks.rkt` is the one
   hook table, read at phase 0 and for-syntax. The loop runs in
   `torch/train/private/fit.rkt` and `torch/train/private/evaluate.rkt`;
   `torch/train/private/dispatch.rkt` calls hooks and holds the failure

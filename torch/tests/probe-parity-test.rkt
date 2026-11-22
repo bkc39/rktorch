@@ -5,7 +5,7 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + - / @ abs argmax backward! dtype eq eye item masked-fill! max min ones
+                    * + - / @ abs argmax backward! dtype eq eye item masked-fill! max min ones pow
                     requires-grad! reshape select shape sqrt sum tensor tensor->list to-dtype
                     topk transpose zero-grad! zeros)
            (only-in "../train.rkt"
@@ -159,10 +159,8 @@
     (define losses '())
     (define (closure)
       (zero-grad! x)
-      (define x0 (select x 0 0))
-      (define x1 (select x 0 1))
-      (define loss (+ (* (- 1.0 x0) (- 1.0 x0))
-                      (* 100.0 (* (- x1 (* x0 x0)) (- x1 (* x0 x0))))))
+      (define loss (+ (pow (- 1 (select x 0 0)) 2)
+                      (* 100 (pow (- (select x 0 1) (pow (select x 0 0) 2)) 2))))
       (backward! loss)
       (set! losses (cons (item loss) losses))
       loss)
