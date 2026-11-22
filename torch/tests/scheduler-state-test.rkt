@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/match match-define match-lambda)
            rackunit
            (only-in "../nn.rkt"
                     Linear chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
@@ -80,7 +80,7 @@
     (define chained (scheduler-state-dict (fresh chain-of)))
     (check-refused "an inner state that does not fit" chain-of
                    (hash-update chained "_schedulers"
-                                (lambda (subs) (list (car subs) (hash-set plain "base_lrs" '()))))
+                                (match-lambda [(list first _) (list first (hash-set plain "base_lrs" '()))]))
                    #rx"_schedulers\\[1\\].*base_lrs"))
 
   (test-case "T3-L12: an exact one-cycle base survives a state round trip exact"
