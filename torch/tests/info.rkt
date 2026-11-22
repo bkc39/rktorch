@@ -13,6 +13,9 @@
 
 (define c2-legs
   '("checkpoint-codec-test.rkt"
-    "checkpoint-format-test.rkt"))
+    "checkpoint-format-parity-test.rkt"
+    "checkpoint-format-test.rkt"
+    "checkpoint-load-test.rkt"
+    "trainer-hook-order-save-test.rkt"))
 
 (define test-omit-paths (append c1-legs c2-legs))
