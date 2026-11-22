@@ -79,4 +79,48 @@
         (parameterize ([current-generator (make-generator 13)])
           (saved-with dir '() #:name "generated.ckpt")))
       (check-names-path #rx"current-generator" generated (lambda () (resume (Small) generated))
-                        "no current-generator"))))
+                        "no current-generator")))
+
+  (define (reshaping key edit)
+    (lambda-callback #:state-key (format "reshape-~a" key)
+                     #:on-save-checkpoint (lambda (_r tree) (edit tree))))
+
+  (define (fit-loop-set field v)
+    (lambda (tree)
+      (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
+      (hash-set! tree "loops" (hash "fit_loop" (hash-set loop field v)))))
+
+  (define-trainer Tested (net lr)
+    (define-init () (set! net (Linear 2 1)) (set! lr 0.1))
+    (define-hparams lr)
+    (define-test-step (x y) (log! 'test-loss (mse-loss (net x) y))))
+
+  (test-case "T3-L3: a malformed tree is refused before any hook, naming the path and the key"
+    (with-temporary-directory (dir #:template "malformed-~a")
+      (for ([edit (list (lambda (tree) (hash-remove! tree "loops"))
+                        (lambda (tree) (hash-set! tree "loops" (hash)))
+                        (fit-loop-set "phase" 3)
+                        (fit-loop-set "eval_batches" "many")
+                        (lambda (tree) (hash-remove! tree "trainer_hparams"))
+                        (lambda (tree) (hash-set! tree "trainer_hparams" '(lr)))
+                        (lambda (tree) (hash-remove! tree "global_step")))]
+            [key (list "loops" "loops" "phase" "eval_batches" "trainer_hparams" "trainer_hparams"
+                       "global_step")]
+            [i (in-naturals)])
+        (define path (saved-with dir (list (reshaping i edit)) #:name (format "~a.ckpt" i)))
+        (define seen (box '()))
+        (check-names-path (regexp (string-append "cannot be resumed.*key: \"[a-z_.]*" key))
+                          path
+                          (lambda ()
+                            (resume (Small) path
+                                    #:callbacks (list (lambda-callback
+                                                       #:setup (lambda (_r _stage)
+                                                                 (set-box! seen '(setup)))))))
+                          key)
+        (check-equal? (unbox seen) '() (format "~a: no hook ran" key)))
+      (define path (saved-with dir (list (reshaping "test" (lambda (tree)
+                                                             (hash-remove! tree "trainer_hparams"))))
+                               #:name "test.ckpt"))
+      (check-names-path #rx"cannot be resumed.*trainer_hparams" path
+                        (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path))
+                        "test #:ckpt-path"))))

@@ -2,6 +2,7 @@
 
 (require (only-in racket/list filter-not)
          (only-in racket/match match match* match-define)
+         (only-in racket/string string-join)
          (only-in "../../nn/grad-scaler.rkt" load-grad-scaler-state!)
          (only-in "../../nn/optim-state.rkt" load-optimizer-state!)
          (only-in "../../nn/scheduler.rkt" load-scheduler-state!)
@@ -27,8 +28,26 @@
 (define (fit-loop tree)
   (hash-ref (hash-ref tree "loops") "fit_loop"))
 
+(define (checked who path tree keys ok?)
+  (define v
+    (for/fold ([v tree]) ([k (in-list keys)])
+      (and (hash? v) (hash-ref v k #f))))
+  (unless (ok? v)
+    (raise-arguments-error
+     who "the checkpoint's entry is missing or malformed, so it cannot be resumed"
+     "key" (string-join keys ".")
+     "path" path))
+  v)
+
+(define (string-keyed? h)
+  (and (hash? h) (andmap string? (hash-keys h))))
+
 (define (check-resumable! path tree)
-  (match (hash-ref (fit-loop tree) "phase")
+  (checked 'fit path tree '("global_step") exact-nonnegative-integer?)
+  (checked 'fit path tree '("callback_metrics") string-keyed?)
+  (for ([key (in-list '("epoch" "batches_that_stepped" "eval_batches"))])
+    (checked 'fit path tree (list "loops" "fit_loop" key) exact-nonnegative-integer?))
+  (match (checked 'fit path tree '("loops" "fit_loop" "phase") string?)
     [(or "epoch-end" "fit-end") (void)]
     [(and phase (or "batch-end" "validation-end" "exception"))
      (not-implemented (format "fit: resuming from a mid-epoch (~a) checkpoint" phase) 'T3)]
@@ -41,6 +60,7 @@
 
 (define (checkpoint-source who path)
   (define tree (read-checkpoint-file who path))
+  (checked who path tree '("trainer_hparams") string-keyed?)
   (when (eq? who 'fit)
     (check-resumable! path tree))
   (source path tree))
