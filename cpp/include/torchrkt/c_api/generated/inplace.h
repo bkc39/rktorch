@@ -28,6 +28,7 @@ int tr_gen_addcmul_(tr_tensor* self, const tr_tensor* tensor1,
                     const tr_tensor* tensor2, double value);
 int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking);
 int tr_gen_div__scalar(tr_tensor* self, double other);
+int tr_gen_div__tensor(tr_tensor* self, const tr_tensor* other);
 int tr_gen_fill__scalar(tr_tensor* self, double value);
 int tr_gen_index_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
                       const tr_tensor* source, double alpha);

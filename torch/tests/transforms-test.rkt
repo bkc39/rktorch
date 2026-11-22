@@ -189,13 +189,13 @@
     (check-exn #rx"expected: crop-size-within-image" (lambda () (center-crop x '(2 6))))
     (check-exn #rx"expected: crop-size-within-image" (lambda () (center-crop x 0))))
 
-  (test-case "normalize: per channel, one mean and one positive std each"
+  (test-case "normalize: per channel, one mean and one nonzero std each"
     (define x (reshape (tensor '(1.0 2.0 3.0 4.0)) 2 1 2))
     (check-true (close? (normalize x '(1 2) '(2 4)) '(0.0 0.5 0.25 0.5)))
-    (check-exn exn:fail:contract? (lambda () (normalize x '(1) '(2))))
+    (check-exn exn:fail:contract? (lambda () (normalize x '(1 2 3) '(2))))
     (check-exn exn:fail:contract? (lambda () (normalize x '(1 2) '(2 0))))
     (define centred
-      (imagenet-normalize (reshape (tensor imagenet-mean) 3 1 1)))
+      (~> (tensor imagenet-mean) (reshape 3 1 1) imagenet-normalize))
     (check-true (close? centred '(0.0 0.0 0.0)))
     (check-exn exn:fail:contract?
                (lambda () (imagenet-normalize (rand 1 4 4)))))

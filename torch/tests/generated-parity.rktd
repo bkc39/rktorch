@@ -34,6 +34,7 @@
  (ctc-loss-intlist "ctc_loss.IntList" (tensor tensor int-array int-array int64 int64 bool) #f 1)
  (cudnn-rnn-flatten-weight "_cudnn_rnn_flatten_weight" (tensor-list int64 int64 int64 int64 int64 int64 bool bool) #f 1)
  (div-scalar! "div_.Scalar" (tensor scalar) #t 1)
+ (div-tensor! "div_.Tensor" (tensor tensor) #t 1)
  (dot "dot" (tensor tensor) #f 1)
  (dropout "dropout" (tensor double bool) #f 1)
  (embedding "embedding" (tensor tensor int64 bool bool) #f 1)

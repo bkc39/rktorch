@@ -228,8 +228,9 @@ with `backward!` outside the form as PyTorch recommends). From
   torchvision v2's paths: the native uint8 kernel where `cpu-capability` is
   avx2/avx512 or on arm64, else float32 + round half to even;
   `upsample-bilinear2d` / `upsample-bilinear2d-aa`, tranche 13, #458),
-  `center-crop` (offsets round half to even), `normalize`,
-  `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
+  `center-crop` (offsets round half to even), `normalize #:inplace?`
+  (`div-tensor!`, tranche 14, #581), `imagenet-normalize`, `imagenet-mean`,
+  `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
   `pretrained-weights` fetches a torchvision ImageNet checkpoint, timm's
   `tv_in1k` safetensors on Hugging Face pinned to a commit, into the cache
@@ -760,7 +761,7 @@ its regression test, once a pinned libtorch fixes the kernel.
   NULL unless the whole call succeeded; `alloc_result_list` for a
   `Tensor[]` return into a caller-sized out array) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..11}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..14}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a

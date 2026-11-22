@@ -255,3 +255,7 @@ inplace random_.from
 vision upsample_bilinear2d
 vision _upsample_bilinear2d_aa
 math round
+# --- tranche 14 (#581): torchvision's normalize -----------------------------
+# F.normalize's in-place divide by the per-channel std, on the image itself or
+# on the one tensor its subtraction allocated.
+inplace div_.Tensor
