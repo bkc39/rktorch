@@ -26,7 +26,10 @@
     "trainer-test-ckpt-test.rkt"))
 
 (define c4-legs
-  '("trainer-resume-test.rkt"))
+  '("model-checkpoint-test.rkt"
+    "on-exception-checkpoint-test.rkt"
+    "trainer-ckpt-alias-test.rkt"
+    "trainer-resume-test.rkt"))
 
 (define c5-legs
   '("trainer-hook-order-resume-mid-test.rkt"
