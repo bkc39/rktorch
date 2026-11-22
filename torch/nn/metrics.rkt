@@ -125,12 +125,16 @@
 
 (define sum-reduction 2)
 
+(define (at-least-float32 logits)
+  (if (memq (dtype logits) '(float16 bfloat16)) (to-dtype logits 'float32) logits))
+
 (define (perplexity-counts logits targets ignore-index)
   ;; no target in [0, V) is int64-min, so #f ignores none
   (define ignored (or ignore-index int64-min))
   (define flat-targets (reshape targets -1))
   (define nll
     (~> (reshape logits -1 (last (shape logits)))
+        at-least-float32
         (log-softmax -1)
         (g:nll-loss flat-targets #f sum-reduction ignored)))
   (list (to-dtype nll 'float32) (~> (kept flat-targets ignored) (to-dtype 'float32) sum)))

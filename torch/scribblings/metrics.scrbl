@@ -103,7 +103,8 @@ mean for @racket[accuracy] and @racket[confusion-matrix].
 their summed negative log-likelihood and token count. The counts live on
 the device of the first update. Its @racket[metric-compute] is a
 @racket['float32] scalar whatever the logits' dtype, where
-@racket[perplexity] keeps its NLL's.
+@racket[perplexity] keeps its NLL's; half-precision logits are reduced
+in @racket['float32], so their summed NLL does not overflow.
 }
 
 @defproc[(metric-update! [m metric?] [predictions tensor?] [targets tensor?]) void?]{
