@@ -93,18 +93,26 @@
     (load-state! tr path #:rename model-entry))
   (restore-callbacks! r tree))
 
-(define (only-the-model what)
-  (error 'fit (string-append "trying to restore ~a state, but the checkpoint contains only the"
-                             " model; it was probably saved with #:weights-only? #t")
-         what))
-
-(define (check-count! what saved configured)
-  (unless (= (length saved) (length configured))
-    (error 'fit "~a states: the checkpoint holds ~a and the trainer configures ~a"
-           what (length saved) (length configured))))
+(define (restore-each! path tree key what targets load!)
+  (define states
+    (hash-ref tree key
+              (lambda ()
+                (raise-arguments-error
+                 'fit (format (string-append "trying to restore ~a state, but the checkpoint"
+                                             " contains only the model; it was probably saved"
+                                             " with #:weights-only? #t")
+                              what)
+                 "path" path))))
+  (unless (= (length states) (length targets))
+    (raise-arguments-error
+     'fit (format "~a states: the checkpoint holds ~a and the trainer configures ~a"
+                  what (length states) (length targets))
+     "path" path))
+  (for ([target (in-list targets)] [state (in-list states)])
+    (load! target state)))
 
 (define (restore-training-state! r ckpt max-epochs)
-  (define tree (source-tree ckpt))
+  (match-define (source path tree) ckpt)
   (match* ((run-grad-scaler r) (hash-ref tree "MixedPrecision" #f))
     [((? values scaler) (? values state)) (load-grad-scaler-state! scaler state)]
     [(_ _) (void)])
@@ -121,17 +129,16 @@
                        (hash-ref tree "metric_book" #f)
                        #:close-train-epoch? (equal? phase "epoch-end"))
   (when (and max-epochs (> epoch max-epochs))
-    (error 'fit "the checkpoint resumes at epoch ~a, past #:max-epochs ~a" epoch max-epochs))
+    (raise-arguments-error
+     'fit (format "the checkpoint resumes at epoch ~a, past #:max-epochs ~a" epoch max-epochs)
+     "path" path))
   (define tr (run-trainer r))
-  (define optimizer-states (hash-ref tree "optimizer_states" (lambda () (only-the-model "optimizer"))))
-  (check-count! "optimizer" optimizer-states (run-optimizers r))
-  (for ([opt (in-list (run-optimizers r))] [state (in-list optimizer-states)])
-    (load-optimizer-state! opt tr state))
-  (define scheduler-states (hash-ref tree "lr_schedulers" (lambda () (only-the-model "scheduler"))))
-  (define schedulers (map scheduler-config-scheduler (run-scheduler-configs r)))
-  (check-count! "scheduler" scheduler-states schedulers)
-  (for ([s (in-list schedulers)] [state (in-list scheduler-states)])
-    (load-scheduler-state! s state)))
+  (restore-each! path tree "optimizer_states" "optimizer" (run-optimizers r)
+                 (lambda (opt state) (load-optimizer-state! opt tr state)))
+  (restore-each! path tree "lr_schedulers" "scheduler"
+                 (map scheduler-config-scheduler (run-scheduler-configs r))
+                 load-scheduler-state!))
 
 (define (restore-rng! r ckpt)
-  (restore-rng-bundle! (hash-ref (source-tree ckpt) "rng") (run-device r)))
+  (match-define (source path tree) ckpt)
+  (restore-rng-bundle! (hash-ref tree "rng") (run-device r) #:path path))

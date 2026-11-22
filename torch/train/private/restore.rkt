@@ -27,22 +27,23 @@
     ['cpu streams]
     [type (hash-set streams (symbol->string type) (rng-state #:device device))]))
 
-(define (restore-current-generator! saved)
+(define (restore-current-generator! saved path)
+  (define (refuse message . fields)
+    (apply raise-arguments-error 'fit message (append fields (if path (list "path" path) '()))))
   (match* (saved (current-generator))
     [(#f _) (void)]
     [((hash-table ("device" form)) #f)
-     (raise-arguments-error
-      'fit "the checkpoint was saved under a current-generator, and this fit has none"
-      "saved generator's device" form)]
+     (refuse "the checkpoint was saved under a current-generator, and this fit has none"
+             "saved generator's device" form)]
     [((hash-table ("device" form) ("state" state)) g)
      (unless (equal? (device-form (generator-device g)) form)
-       (raise-arguments-error 'fit "the checkpoint's current-generator is on another device"
-                              "saved generator's device" form
-                              "current-generator's device" (device-form (generator-device g))))
+       (refuse "the checkpoint's current-generator is on another device"
+               "saved generator's device" form
+               "current-generator's device" (device-form (generator-device g))))
      (set-generator-state! g state)]))
 
-(define (restore-rng-bundle! bundle [device (cpu-device)])
-  (restore-current-generator! (hash-ref bundle "current_generator" #f))
+(define (restore-rng-bundle! bundle [device (cpu-device)] #:path [path #f])
+  (restore-current-generator! (hash-ref bundle "current_generator" #f) path)
   (set-rng-state! (hash-ref bundle "cpu"))
   (define type (device-type device))
   (match (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f))
