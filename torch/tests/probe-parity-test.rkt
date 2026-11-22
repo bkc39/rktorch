@@ -5,14 +5,15 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + - / @ abs argmax backward! dtype eq eye item masked-fill! max min ones pow
-                    requires-grad! reshape select shape sqrt sum tensor tensor->list to-dtype
-                    topk transpose zero-grad! zeros)
+                    * + - / @ abs argmax backward! dtype eq eye item masked-fill! max min narrow
+                    ne ones pow requires-grad! reshape select shape sqrt sum take tensor
+                    tensor->list to-dtype topk transpose zero-grad! zeros)
            (only-in "../train.rkt"
                     knn-accuracy linear-probe linear-probe-bias linear-probe-mean linear-probe-std
                     linear-probe-weight linear-probe-weight-decay probe-accuracy
                     probe-dataset-features probe-dataset-indices probe-dataset-labels probe-split
                     tensors->probe-dataset)
+           (only-in (submod "../train/probe.rkt" private) knn-predictions probe-objective)
            (only-in "../train/private/lbfgs.rkt" lbfgs-minimize!)
            (only-in "../vision/cifar10.rkt" cifar10-cached? load-cifar10)
            (only-in "private/python-env.rkt" python-check python-module-available? unpack))
@@ -44,13 +45,17 @@
   (define (row-normalised x)
     (/ x (sqrt (@ (* x x) (ones (cadr (shape x)) 1 #:dtype (dtype x))))))
 
-  (define (smallest-gap fit-x query-x)
+  (define (narrow-gaps fit-x fit-labels query-x)
     (define f (row-normalised fit-x))
     (define sims (@ (row-normalised (or query-x fit-x)) (transpose f 0 1)))
     (unless query-x
       (masked-fill! sims (~> (shape fit-x) car (eye #:dtype 'int64) (eq 1)) -inf.0))
-    (define-values (top _) (topk sims 21 #:dim 1))
-    (~> (- (select top 1 19) (select top 1 20)) min item))
+    (define-values (top idx) (topk sims 21 #:dim 1))
+    (define gaps (flat (- (select top 1 19) (select top 1 20))))
+    (define (neighbour-labels rank) (take fit-labels (select idx 1 rank)))
+    (define split? (flat (ne (neighbour-labels 19) (neighbour-labels 20))))
+    (for/sum ([gap (in-list gaps)] [split (in-list split?)])
+      (if (and split (<= gap 1e-5)) 1 0)))
 
   (define (hits-ratio predicted labels)
     (/ (for/sum ([p (in-list (flat predicted))] [y (in-list (flat labels))]) (if (= p y) 1 0))
@@ -118,8 +123,9 @@
     (for ([query (in-list (list #f select test))]
           [query-x (in-list (list #f (std-of 1) (std-of 2)))]
           [key (in-list '(train val test))])
-      (check-true (< 1e-5 (smallest-gap (std-of 0) query-x))
-                  (format "P16c: similarity gap precondition, ~a" key))
+      (check-equal? (narrow-gaps (std-of 0) (probe-dataset-labels fit) query-x) 0
+                    (format "P16c: rows with 20th and 21st neighbours of two labels within 1e-5, ~a"
+                            key))
       (check-= (knn-accuracy fit query) (hash-ref knn key) 1e-6 (format "P16c: knn ~a" key))))
 
   (define (check-sklearn j fit select test)
@@ -146,30 +152,70 @@
     (define knn (hash-ref learn 'knn))
     (for ([query (in-list (list select test #f))]
           [key (in-list '(select test loo))])
-      (define labels (probe-dataset-labels (or query fit)))
-      (check-= (knn-accuracy fit query) (hash-ref-ratio knn key labels) 1e-6
-               (format "P16e: knn ~a" key))))
+      (check-equal? (flat (knn-predictions fit query #:k 20 #:temperature 0.07 #:standardize? #t))
+                    (flat (unpack (hash-ref knn key) 'int64))
+                    (format "P16e: knn ~a predictions" key))))
 
-  (define (hash-ref-ratio knn key labels)
-    (~> (hash-ref knn key) (unpack 'int64) (hits-ratio labels) exact->inexact))
-
-  (define (check-rosenbrock j)
-    (define want (hash-ref j 'lbfgs_rosenbrock))
-    (define x (requires-grad! (tensor '(-1.5 2.0) #:dtype 'float64)))
+  (define (traced params objective minimize!)
     (define losses '())
     (define (closure)
-      (zero-grad! x)
-      (define loss (+ (pow (- 1 (select x 0 0)) 2)
-                      (* 100 (pow (- (select x 0 1) (pow (select x 0 0) 2)) 2))))
+      (for-each zero-grad! params)
+      (define loss (objective))
       (backward! loss)
       (set! losses (cons (item loss) losses))
       loss)
-    (lbfgs-minimize! (list x) closure #:max-iter 100 #:history-size 20 #:line-search 'strong-wolfe)
+    (minimize! params closure)
+    (reverse losses))
+
+  (define (rosenbrock-trace start dtype)
+    (define x (requires-grad! (tensor start #:dtype dtype)))
+    (define (rosenbrock)
+      (define x0 (select x 0 0))
+      (define x1 (select x 0 1))
+      (+ (pow (- 1 x0) 2) (* 100 (pow (- x1 (pow x0 2)) 2))))
+    (values (traced (list x) rosenbrock
+                    (lambda (params closure)
+                      (lbfgs-minimize! params closure #:max-iter 100 #:history-size 20
+                                       #:line-search 'strong-wolfe)))
+            (flat x)))
+
+  (define (check-rosenbrock j)
+    (define want (hash-ref j 'lbfgs_rosenbrock))
+    (define-values (losses x) (rosenbrock-trace '(-1.5 2.0) 'float64))
     (check-equal? (length losses) (length (hash-ref want 'losses)) "P18: closure evaluations")
-    (for ([got (in-list (reverse losses))] [expected (in-list (hash-ref want 'losses))] [i (in-naturals)])
+    (for ([got (in-list losses)] [expected (in-list (hash-ref want 'losses))] [i (in-naturals)])
       (check-= got expected 1e-10 (format "P18: loss at evaluation ~a" i)))
-    (for ([got (in-list (flat x))] [expected (in-list (hash-ref want 'x))])
-      (check-= got expected 1e-10 "P18: final x")))
+    (for ([got (in-list x)] [expected (in-list (hash-ref want 'x))])
+      (check-= got expected 1e-10 "P18: final x"))
+    (for ([run (in-list (hash-ref j 'lbfgs_rosenbrock32))])
+      (define start (hash-ref run 'start))
+      (define-values (losses x) (rosenbrock-trace start 'float32))
+      (check-equal? losses (hash-ref run 'losses)
+                    (format "P18: float32 losses from ~a, evaluation for evaluation" start))
+      (check-equal? x (hash-ref run 'x) (format "P18: float32 x from ~a" start))))
+
+  (define (check-probe-trace j fit)
+    (define want (hash-ref j 'lbfgs_probe))
+    (define n (hash-ref want 'n))
+    (define x (~> (hash-ref j 'std) car (unpack 'float32) (narrow 0 0 n) (* (hash-ref want 'scale))))
+    (define y (narrow (probe-dataset-labels fit) 0 0 n))
+    (define w (requires-grad! (zeros 24 10)))
+    (define b (requires-grad! (zeros 10)))
+    (check-equal? (traced (list w b)
+                          (lambda () (probe-objective x y w b (hash-ref want 'weight_decay)))
+                          (lambda (params closure)
+                            (lbfgs-minimize! params closure #:lr 1.0 #:max-iter 1000
+                                             #:tolerance-grad 1e-7 #:tolerance-change 1e-10
+                                             #:history-size 20 #:line-search 'strong-wolfe)))
+                  (hash-ref want 'losses)
+                  "P14: float32 probe objective losses, evaluation for evaluation"))
+
+  (define (check-quadratic j)
+    (define worst (hash-ref j 'lbfgs_quadratic))
+    (for ([key (in-list '(none strong_wolfe))])
+      (check-true (<= (hash-ref worst key) 1e-6)
+                  (format "P14: torch.optim.LBFGS (~a) within 1e-6 of the minimum, off by ~a"
+                          key (hash-ref worst key)))))
 
   (cond
     [(not (python-module-available? "sklearn"))
@@ -185,4 +231,6 @@
      (check-fit-linear j (car (split 'float32)))
      (apply check-suite j (split 'float32))
      (apply check-sklearn j (split 'float64))
-     (check-rosenbrock j)]))
+     (check-rosenbrock j)
+     (check-quadratic j)
+     (check-probe-trace j (car (split 'float32)))]))

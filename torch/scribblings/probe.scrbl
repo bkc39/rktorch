@@ -31,8 +31,8 @@ output, by default @racket[(encoder images)]. @racket[pool] reduces tokens
 @tt{[N, T, D]}: @racket['cls] is token 0, @racket['mean] is the mean of the
 others, @racket['cls+mean] concatenates the two, and @racket[#f] keeps a
 @tt{[N, D]} output as it is. Every layer's mode is restored afterwards.
-@racket[device] defaults to the device of the encoder's first parameter,
-else the dataset's, else @racket[(default-device)].
+Images go to the encoder's device: its first parameter's, else the
+dataset's, else @racket[(default-device)]; @racket[device] defaults to it.
 
 @examples[#:eval train-eval
 (define images (tensor-dataset (randn 32 1 2 2) (tensor (for/list ([i 32]) (modulo i 4)))))
@@ -45,7 +45,8 @@ else the dataset's, else @racket[(default-device)].
                                  [#:classes classes (or/c #f exact-positive-integer?) #f])
          probe-dataset?]{
 Features already computed, @tt{[N, D]} @racket['float32] or
-@racket['float64], with their @tt{[N]} @racket['int64] labels.
+@racket['float64], with their @tt{[N]} @racket['int64] labels. The
+features are kept detached.
 }
 
 @deftogether[(@defproc[(probe-dataset-features [ds probe-dataset?]) tensor?]

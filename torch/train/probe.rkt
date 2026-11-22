@@ -5,23 +5,25 @@
                   -> ->* ->i >/c >=/c any/c cons/c contract-out flat-named-contract listof
                   non-empty-listof or/c procedure-arity-includes/c real-in unsupplied-arg?)
          (only-in racket/generic define/generic)
-         (only-in racket/match match match* match-define match-lambda)
+         (prefix-in list: (only-in racket/list argmax))
+         (only-in racket/match match match* match-define)
          (only-in threading ~>)
          (only-in "../data/dataset.rkt"
                   dataset-batch dataset-device dataset-length dataset-ref dataset? gen:dataset)
          (only-in "../data/loader.rkt" dataloader in-dataloader tensor-dataset)
          (only-in "../foreign.rkt"
-                  * + - / @ arange backward! cat clamp default-device detach device device/c
-                  dtype eq exp gen:sized index-fill! index-select item length make-generator max
-                  min narrow nonzero numel ones randperm requires-grad! reshape scatter!
-                  scatter-add! seed/c select shape sort sqrt stack sum take tensor->list tensor?
-                  to to-dtype topk transpose with-no-grad zero-grad! zeros)
+                  * + - / @ arange argmax backward! cat clamp default-device detach device device/c
+                  dtype eq exp gen:sized index-fill! index-select item length make-generator max min
+                  narrow nonzero numel ones randperm requires-grad! reshape scatter! scatter-add!
+                  seed/c select shape sort sqrt stack sum take tensor->list tensor? to to-dtype topk
+                  transpose with-no-grad zero-grad! zeros)
          (prefix-in g: (only-in "../generated.rkt" linalg-vector-norm mean-dim sum-dim-intlist))
          (only-in "../nn/layer.rkt" layer? parameters)
          (only-in "../nn/loss.rkt" cross-entropy)
          (only-in "../nn/metrics.rkt" accuracy)
          (only-in "../nn/mode.rkt" call-with-eval-mode)
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in "private/copy.rkt" copy-of)
          (only-in "private/lbfgs.rkt" lbfgs-minimize!)
          (only-in "private/types.rkt" define-named-contract))
 
@@ -110,7 +112,8 @@
   (or (not query) (<= (probe-dataset-classes query) (probe-dataset-classes fit))))
 
 (define (cached features labels classes indices)
-  (make-probe-dataset features labels classes indices (tensor-dataset features labels)))
+  (define kept (detach features))
+  (make-probe-dataset kept labels classes indices (tensor-dataset kept labels)))
 
 (define (encoder-device encoder dataset)
   (match (and (layer? encoder) (parameters encoder))
@@ -127,7 +130,7 @@
 (define (pooled out pool)
   (match* (pool (shape out))
     [(#f (list _ _)) out]
-    [('cls (list _ _ _)) (select out 1 0)]
+    [('cls (list _ _ _)) (copy-of (select out 1 0))]
     [('mean (list _ (? several?) _)) (tokens-mean out)]
     [('cls+mean (list _ (? several?) _)) (cat (list (select out 1 0) (tokens-mean out)) 1)]
     [(_ dims)
@@ -152,15 +155,18 @@
                            "labels" (rows labels)))
   features)
 
-(define (encode-all dataset forward pool batch-size device)
+(define (encode-all dataset forward pool batch-size encoder-place cache-place)
   (with-no-grad
     (for/lists (_features _labels)
                ([batch (~> (dataloader dataset #:batch-size batch-size)
                            in-dataloader
                            in-values-sequence)])
-      (match-define (list* images ys _) batch)
-      (values (~> (to images device) forward (batch-features ys pool) (to device))
-              (~> ys (to-dtype 'int64) (to device))))))
+      (match batch
+        [(list* images ys _)
+         (values (~> (to images encoder-place) forward (batch-features ys pool) (to cache-place))
+                 (~> ys (to-dtype 'int64) (to cache-place)))]
+        [_ (raise-arguments-error 'probe-dataset "a batch is not images and labels"
+                                  "values" (length batch))]))))
 
 (define/contract-out (probe-dataset encoder dataset ;; noqa
                                     #:pool [pool 'cls]
@@ -175,17 +181,18 @@
         #:device (or/c #f device/c)
         #:classes (or/c #f exact-positive-integer?)]
        probe-dataset?)
-  (define place (or device (encoder-device encoder dataset)))
+  (define encoder-place (encoder-device encoder dataset))
   (define (pass)
-    (encode-all dataset (or forward encoder) pool batch-size place))
+    (encode-all dataset (or forward encoder) pool batch-size encoder-place
+                (or device encoder-place)))
   (define-values (features labels)
     (if (layer? encoder) (call-with-eval-mode encoder pass) (pass)))
   (when (null? features)
     (raise-arguments-error 'probe-dataset "the dataset has no items" "dataset" dataset))
   (define all-labels (cat labels))
-  (match-define (list lo hi) (label-extremes all-labels))
-  (define class-count (or classes (+ 1 hi)))
-  (unless (and (<= 0 lo) (< hi class-count))
+  (define class-count (or classes (+ 1 (item (max all-labels)))))
+  (unless (labels-in-range? all-labels class-count)
+    (match-define (list lo hi) (label-extremes all-labels))
     (raise-arguments-error 'probe-dataset "a label is outside [0, classes)"
                            "classes" class-count
                            "smallest" lo
@@ -231,7 +238,7 @@
           (class-draw labels c per-class generator))
         cat
         sort))
-  (define kept (ones (numel labels) #:dtype 'int64))
+  (define kept (ones (numel labels) #:dtype 'int64 #:device (device labels)))
   (index-fill! kept 0 chosen 0)
   (values (subset ds (reshape (nonzero kept) -1)) (subset ds chosen)))
 
@@ -293,10 +300,7 @@
                    #:line-search 'strong-wolfe)
   (values (detach weight) (detach bias)))
 
-(define (first-best fits)
-  (for/fold ([best (car fits)]) ([fit (in-list (cdr fits))])
-    (match* (best fit)
-      [((list _ _ _ top) (list _ _ _ score)) (if (> score top) fit best)])))
+(struct swept (weight-decay weight bias score))
 
 (define (scored weight bias x labels)
   (~> (@ x weight) (+ bias) (accuracy labels #:validate-args? #f) item))
@@ -332,9 +336,11 @@
      (define fits
        (for/list ([wd (in-list weight-decays)])
          (define-values (w b) (fitted wd))
-         (list wd w b (scored w b z-select (probe-dataset-labels select)))))
-     (match-define (list wd w b _) (first-best fits))
-     (make-linear-probe w b wd (map (match-lambda [(list wd _ _ score) (cons wd score)]) fits)
+         (swept wd w b (scored w b z-select (probe-dataset-labels select)))))
+     (match-define (swept wd w b _) (list:argmax swept-score fits))
+     (make-linear-probe w b wd
+                        (for/list ([fit (in-list fits)])
+                          (cons (swept-weight-decay fit) (swept-score fit)))
                         mean std classes)]
     [else
      (define-values (w b) (fitted weight-decay))
@@ -388,6 +394,16 @@
        #:pre/name (fit query) "query classes within the fit's"
        (classes-fit? fit (supplied-or query #f))
        [result (real-in 0 1)])
+  (~> (knn-predictions fit query #:k k #:temperature temperature #:standardize? standardize?
+                       #:batch-size batch-size)
+      (accuracy (probe-dataset-labels (or query fit)) #:validate-args? #f)
+      item))
+
+(define (knn-predictions fit query
+                         #:k k
+                         #:temperature temperature
+                         #:standardize? standardize?
+                         #:batch-size [batch-size 1000])
   (define x (probe-dataset-features fit))
   (define prepared
     (cond
@@ -397,13 +413,11 @@
       [else normalised]))
   (define fit-x (prepared x))
   (define query-x (if query (prepared (probe-dataset-features query)) fit-x))
-  (define labels (probe-dataset-labels (or query fit)))
   (with-no-grad
     (~> (votes fit-x (probe-dataset-labels fit) (probe-dataset-classes fit) query-x (not query)
                k temperature batch-size)
         cat
-        (accuracy labels #:validate-args? #f)
-        item)))
+        (argmax 1))))
 
 (module+ private
-  (provide probe-objective))
+  (provide knn-predictions pooled probe-objective))

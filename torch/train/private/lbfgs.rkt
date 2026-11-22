@@ -1,18 +1,18 @@
 #lang racket/base
 
 (require (only-in racket/flonum flsingle)
-         (only-in racket/match match-define)
-         (only-in racket/vector vector-copy)
+         (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  * - abs cat copy! dot dtype item max maybe-grad narrow neg numel reshape shape
-                  sub! sum with-no-grad zeros-like))
+                  * - abs cat copy! dot dtype grad-enabled? item max maybe-grad narrow neg numel
+                  reshape shape sub! sum with-no-grad zeros-like)
+         (only-in "../../foreign/error.rkt" check-ok)
+         (only-in "../../foreign/raw/autograd.rkt" tr-set-grad-enabled/raw)
+         (only-in "copy.rkt" copy-of))
 
 (provide lbfgs-minimize!)
 
-;; A 0-d tensor of the parameters' dtype, as torch's step holds gtd, ys, ro,
-;; H_diag and the step length: arithmetic touching one rounds to that dtype,
-;; while losses and hyperparameters stay Python floats.
+;; torch's 0-d step tensors: arithmetic touching one rounds to the parameters' dtype.
 (struct scalar (value round))
 
 (define (scalar-of t)
@@ -48,19 +48,29 @@
 (define s+ (arithmetic +))
 (define s- (arithmetic -))
 (define s* (arithmetic *))
-(define s/ (arithmetic /))
 (define s< (comparison <))
 (define s<= (comparison <=))
 (define s> (comparison >))
 (define s>= (comparison >=))
 (define s-abs (unary abs))
 (define s-sqrt (unary sqrt))
+(define s-reciprocal (unary (lambda (v) (/ 1.0 v))))
+
+(define s/
+  (let ([divide (arithmetic /)])
+    (lambda (a b)
+      (if (and (scalar? b) (not (scalar? a)))
+          (s* (s-reciprocal b) a)
+          (divide a b)))))
 
 (define (py-max a b)
   (if (s> b a) b a))
 
 (define (py-min a b)
   (if (s< b a) b a))
+
+(define (abs-max v)
+  (~> v abs max scalar-of))
 
 (define (cubic-interpolate x1 f1 g1 x2 f2 g2 [bounds #f])
   (match-define (cons lo hi) (or bounds (if (s<= x1 x2) (cons x1 x2) (cons x2 x1))))
@@ -78,23 +88,26 @@
 
 (struct point (t f g gtd))
 
-(define (vector-with v i x)
-  (define copy (vector-copy v))
-  (vector-set! copy i x)
-  copy)
+(define (placed low-first? low high)
+  (if low-first? (values low high) (values high low)))
 
-(define (low-high bracket)
-  (if (<= (point-f (vector-ref bracket 0))
-          (point-f (vector-ref bracket (- (vector-length bracket) 1))))
-      (values 0 1)
-      (values 1 0)))
+(define (zoom-step t0 f0 gtd0 t1 f1 gtd1 insufficient?)
+  (define t-cubic (cubic-interpolate t0 f0 gtd0 t1 f1 gtd1))
+  (define hi (py-max t0 t1))
+  (define lo (py-min t0 t1))
+  (define eps (s* 0.1 (s- hi lo)))
+  (cond
+    [(~> (py-min (s- hi t-cubic) (s- t-cubic lo)) (s< eps) not) (values t-cubic #f)]
+    [(or insufficient? (s>= t-cubic hi) (s<= t-cubic lo))
+     (values (if (s< (s-abs (s- t-cubic hi)) (s-abs (s- t-cubic lo))) (s- hi eps) (s+ lo eps)) #f)]
+    [else (values t-cubic #t)]))
 
 (define (strong-wolfe obj-func x t d f g gtd
                       #:c1 [c1 1e-4]
                       #:c2 [c2 0.9]
                       #:tolerance-change [tolerance-change 1e-9]
                       #:max-ls [max-ls 25])
-  (define d-norm (~> d abs max scalar-of))
+  (define d-norm (abs-max d))
   (define (probe step)
     (define-values (f-new g-new) (obj-func x step d))
     (point step f-new g-new (scalar-of (dot g-new d))))
@@ -102,14 +115,15 @@
     (s> (point-f p) (s+ f (s* (s* c1 (point-t p)) gtd))))
   (define (curvature-holds? p)
     (s<= (s-abs (point-gtd p)) (s* (- c2) gtd)))
-  (define-values (bracket done? bracketed)
-    (let bracketing ([prev (point 0 f g gtd)] [new (probe t)] [ls-iter 0])
+  (define start (point 0 f g gtd))
+  (define-values (first0 first1 first-done? bracketed)
+    (let bracketing ([prev start] [new (probe t)] [ls-iter 0])
       (cond
-        [(= ls-iter max-ls) (values (vector (point 0 f g gtd) new) #f ls-iter)]
+        [(= ls-iter max-ls) (values start new #f ls-iter)]
         [(or (sufficient-decrease-fails? new) (and (> ls-iter 1) (>= (point-f new) (point-f prev))))
-         (values (vector prev new) #f ls-iter)]
-        [(curvature-holds? new) (values (vector new) #t ls-iter)]
-        [(s>= (point-gtd new) 0) (values (vector prev new) #f ls-iter)]
+         (values prev new #f ls-iter)]
+        [(curvature-holds? new) (values new new #t ls-iter)]
+        [(s>= (point-gtd new) 0) (values prev new #f ls-iter)]
         [else
          (define t-new (point-t new))
          (define bounds (cons (s+ t-new (s* 0.01 (s- t-new (point-t prev)))) (s* t-new 10)))
@@ -117,87 +131,77 @@
            (cubic-interpolate (point-t prev) (point-f prev) (point-gtd prev)
                               t-new (point-f new) (point-gtd new) bounds))
          (bracketing new (probe t-next) (+ ls-iter 1))])))
-  (define-values (low0 high0) (low-high bracket))
-  (let zoom ([bracket bracket] [done? done?] [ls-iter bracketed] [insufficient? #f]
-             [low low0] [high high0])
-    (define (finish)
-      (match-define (point t-low f-low g-low _) (vector-ref bracket low))
-      (values f-low g-low t-low (+ ls-iter 1)))
+  (let zoom ([p0 first0] [p1 first1] [low-first? (<= (point-f first0) (point-f first1))]
+             [done? first-done?] [ls-iter bracketed] [insufficient? #f])
+    (match-define (point t0 f0 _ gtd0) p0)
+    (match-define (point t1 f1 _ gtd1) p1)
+    (define-values (low high) (placed low-first? p0 p1))
+    (define finished?
+      (or done? (>= ls-iter max-ls) (~> (s- t1 t0) s-abs (s* d-norm) (s< tolerance-change))))
     (cond
-      [(or done? (>= ls-iter max-ls)) (finish)]
+      [finished?
+       (match-define (point t-low f-low g-low _) low)
+       (values f-low g-low t-low (+ ls-iter 1))]
       [else
-       (match-define (vector (point t0 f0 _ gtd0) (point t1 f1 _ gtd1)) bracket)
-       (cond
-         [(~> (s- t1 t0) s-abs (s* d-norm) (s< tolerance-change)) (finish)]
-         [else
-          (define t-cubic (cubic-interpolate t0 f0 gtd0 t1 f1 gtd1))
-          (define hi (py-max t0 t1))
-          (define lo (py-min t0 t1))
-          (define eps (s* 0.1 (s- hi lo)))
-          (define-values (t-next insufficient-next?)
-            (cond
-              [(~> (py-min (s- hi t-cubic) (s- t-cubic lo)) (s< eps) not) (values t-cubic #f)]
-              [(or insufficient? (s>= t-cubic hi) (s<= t-cubic lo))
-               (values (if (s< (s-abs (s- t-cubic hi)) (s-abs (s- t-cubic lo))) (s- hi eps) (s+ lo eps))
-                       #f)]
-              [else (values t-cubic #t)]))
-          (define p (probe t-next))
-          (cond
-            [(or (sufficient-decrease-fails? p)
-                 (>= (point-f p) (point-f (vector-ref bracket low))))
-             (define bracket* (vector-with bracket high p))
-             (define-values (low* high*) (low-high bracket*))
-             (zoom bracket* #f (+ ls-iter 1) insufficient-next? low* high*)]
-            [else
-             (define done-next? (curvature-holds? p))
-             (define span (s- (point-t (vector-ref bracket high)) (point-t (vector-ref bracket low))))
-             (define kept
-               (if (and (not done-next?) (~> (point-gtd p) (s* span) (s>= 0)))
-                   (vector-with bracket high (vector-ref bracket low))
-                   bracket))
-             (zoom (vector-with kept low p) done-next? (+ ls-iter 1) insufficient-next? low high)])])])))
+       (define-values (t-next insufficient-next?) (zoom-step t0 f0 gtd0 t1 f1 gtd1 insufficient?))
+       (define p (probe t-next))
+       (define rejected? (or (sufficient-decrease-fails? p) (>= (point-f p) (point-f low))))
+       (define done-next? (and (not rejected?) (curvature-holds? p)))
+       (define old-high-dropped?
+         (and (not rejected?)
+              (not done-next?)
+              (~> (point-gtd p) (s* (s- (point-t high) (point-t low))) (s>= 0))))
+       (define-values (q0 q1)
+         (if rejected?
+             (placed low-first? low p)
+             (placed low-first? p (if old-high-dropped? low high))))
+       (zoom q0 q1 (if rejected? (<= (point-f q0) (point-f q1)) low-first?) done-next?
+             (+ ls-iter 1) insufficient-next?)])))
+
+(define (call-with-grad thunk)
+  (define was? (grad-enabled?))
+  (dynamic-wind (lambda () (check-ok (tr-set-grad-enabled/raw #t) 'lbfgs-minimize!))
+                thunk
+                (lambda () (check-ok (tr-set-grad-enabled/raw was?) 'lbfgs-minimize!))))
 
 (define (flat-gradient params)
   (cat (for/list ([p (in-list params)])
          (reshape (or (maybe-grad p) (zeros-like p)) -1))))
 
 (define (add-scaled! params step update)
-  (with-no-grad
-    (for/fold ([offset 0]) ([p (in-list params)])
-      (define n (numel p))
-      (sub! p (apply reshape (narrow update 0 offset n) (shape p)) (- (value-of step)))
-      (+ offset n))))
-
-(define (copy-of p)
-  (define copy (zeros-like p))
-  (copy! copy p)
-  copy)
+  (for/fold ([offset 0]) ([p (in-list params)])
+    (define n (numel p))
+    (sub! p (apply reshape (narrow update 0 offset n) (shape p)) (- (value-of step)))
+    (+ offset n)))
 
 (define (restore! params saved)
-  (with-no-grad
-    (for ([p (in-list params)] [s (in-list saved)])
-      (copy! p s))))
+  (for ([p (in-list params)] [s (in-list saved)])
+    (copy! p s)))
 
-(define (abs-max v)
-  (~> v abs max scalar-of))
+(struct curvature (y s rho))
+
+(define (in-curvatures memory)
+  (in-parallel (map curvature-y memory) (map curvature-s memory) (map curvature-rho memory)))
 
 (define (direction flat-grad memory h-diag)
   (define q (neg flat-grad))
   (define alphas
-    (for/list ([m (in-list (reverse memory))])
-      (match-define (list y s rho) m)
+    (for/list ([(y s rho) (in-curvatures (reverse memory))])
       (define al (~> (dot s q) scalar-of (s* rho)))
       (sub! q y (value-of al))
       al))
   (define r (* q (value-of h-diag)))
-  (for ([m (in-list memory)] [al (in-list (reverse alphas))])
-    (match-define (list y s rho) m)
+  (for ([(y s rho) (in-curvatures memory)] [al (in-list (reverse alphas))])
     (define be (~> (dot y r) scalar-of (s* rho)))
     (sub! r s (value-of (s- be al))))
   r)
 
 (define (remember memory entry history-size)
-  (append (if (= (length memory) history-size) (cdr memory) memory) (list entry)))
+  (define kept
+    (match memory
+      [(cons _ rest) #:when (= (length memory) history-size) rest]
+      [_ memory]))
+  (append kept (list entry)))
 
 (define (lbfgs-minimize! params closure ;; noqa
                          #:lr [lr 1.0]
@@ -209,7 +213,7 @@
                          #:line-search [line-search #f])
   (define max-evals (or max-eval (quotient (* max-iter 5) 4)))
   (define (evaluate)
-    (item (closure)))
+    (call-with-grad (lambda () (item (closure)))))
   (define (directional-evaluate saved step d)
     (add-scaled! params step d)
     (define loss (evaluate))
@@ -218,57 +222,57 @@
     (values loss flat-grad))
   (define (optimal? flat-grad)
     (s<= (abs-max flat-grad) tolerance-grad))
-  (define first-loss (evaluate))
-  (define first-grad (flat-gradient params))
-  (cond
-    [(optimal? first-grad) (values 0 first-loss)]
-    [else
-     (let loop ([n-iter 1] [loss first-loss] [flat-grad first-grad] [opt? #f] [current-evals 1]
-                [d #f] [t #f] [memory '()] [h-diag 1] [prev-flat-grad #f])
-       (define-values (memory* h-diag*)
-         (cond
-           [(= n-iter 1) (values '() 1)]
-           [else
-            (define y (- flat-grad prev-flat-grad))
-            (define s (* d (value-of t)))
-            (define ys (scalar-of (dot y s)))
-            (if (s> ys 1e-10)
-                (values (remember memory (list y s (s/ 1.0 ys)) history-size)
-                        (s/ ys (scalar-of (dot y y))))
-                (values memory h-diag))]))
-       (define d* (if (= n-iter 1) (neg flat-grad) (direction flat-grad memory* h-diag*)))
-       (define prev-loss loss)
-       (define t*
-         (if (= n-iter 1)
-             (s* (py-min 1.0 (s/ 1.0 (~> flat-grad abs sum scalar-of))) lr)
-             lr))
-       (define gtd (scalar-of (dot flat-grad d*)))
-       (cond
-         [(s> gtd (- tolerance-change)) (values n-iter loss)]
-         [else
-          (define-values (loss* flat-grad* step opt*? evals)
-            (cond
-              [line-search
-               (define saved (map copy-of params))
-               (define-values (f-new g-new t-new ls-evals)
-                 (strong-wolfe directional-evaluate saved t* d* loss flat-grad gtd
-                               #:max-ls (- max-evals current-evals)))
-               (add-scaled! params t-new d*)
-               (values f-new g-new t-new (optimal? g-new) ls-evals)]
-              [else
-               (add-scaled! params t* d*)
-               (cond
-                 [(= n-iter max-iter) (values loss flat-grad t* opt? 0)]
-                 [else
-                  (define loss-new (evaluate))
-                  (define g-new (flat-gradient params))
-                  (values loss-new g-new t* (optimal? g-new) 1)])]))
-          (define evals* (+ current-evals evals))
-          (if (or (= n-iter max-iter)
-                  (>= evals* max-evals)
-                  opt*?
-                  (~> (* d* (value-of step)) abs-max (s<= tolerance-change))
-                  (~> (- loss* prev-loss) abs (< tolerance-change)))
-              (values n-iter loss*)
-              (loop (+ n-iter 1) loss* flat-grad* opt*? evals* d* step memory* h-diag*
-                    flat-grad))]))]))
+  (with-no-grad
+    (define first-loss (evaluate))
+    (define first-grad (flat-gradient params))
+    (cond
+      [(optimal? first-grad) (values 0 first-loss)]
+      [else
+       (let loop ([n-iter 1] [loss first-loss] [flat-grad first-grad] [current-evals 1]
+                  [d #f] [t #f] [memory '()] [h-diag 1] [prev-flat-grad #f])
+         (define y (and prev-flat-grad (- flat-grad prev-flat-grad)))
+         (define s (and prev-flat-grad (* d (value-of t))))
+         (define ys (and prev-flat-grad (scalar-of (dot y s))))
+         (define-values (memory* h-diag*)
+           (cond
+             [(not prev-flat-grad) (values '() 1)]
+             [(s> ys 1e-10)
+              (values (remember memory (curvature y s (s/ 1.0 ys)) history-size)
+                      (s/ ys (scalar-of (dot y y))))]
+             [else (values memory h-diag)]))
+         (define d* (if prev-flat-grad (direction flat-grad memory* h-diag*) (neg flat-grad)))
+         (define t*
+           (if prev-flat-grad
+               lr
+               (s* (py-min 1.0 (s/ 1.0 (~> flat-grad abs sum scalar-of))) lr)))
+         (define gtd (scalar-of (dot flat-grad d*)))
+         (define uphill? (s> gtd (- tolerance-change)))
+         (define last-iter? (= n-iter max-iter))
+         (define-values (loss* flat-grad* step opt? evals)
+           (cond
+             [uphill? (values loss flat-grad t* #t 0)]
+             [line-search
+              (define-values (f-new g-new t-new ls-evals)
+                (strong-wolfe directional-evaluate (map copy-of params) t* d* loss flat-grad gtd
+                              #:max-ls (- max-evals current-evals)))
+              (add-scaled! params t-new d*)
+              (values f-new g-new t-new (optimal? g-new) ls-evals)]
+             [last-iter?
+              (add-scaled! params t* d*)
+              (values loss flat-grad t* #f 0)]
+             [else
+              (add-scaled! params t* d*)
+              (define loss-new (evaluate))
+              (define g-new (flat-gradient params))
+              (values loss-new g-new t* (optimal? g-new) 1)]))
+         (define evals* (+ current-evals evals))
+         (define stop?
+           (or uphill?
+               last-iter?
+               (>= evals* max-evals)
+               opt?
+               (~> (* d* (value-of step)) abs-max (s<= tolerance-change))
+               (~> (- loss* loss) abs (< tolerance-change))))
+         (if stop?
+             (values n-iter loss*)
+             (loop (+ n-iter 1) loss* flat-grad* evals* d* step memory* h-diag* flat-grad)))])))

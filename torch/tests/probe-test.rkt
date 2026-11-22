@@ -2,18 +2,21 @@
 
 (module+ test
   (require (only-in racket/dict in-dict)
-           (only-in racket/list append-map check-duplicates first last range remove-duplicates)
+           (only-in racket/list
+                    append-map check-duplicates first last range remove-duplicates take)
            (only-in racket/match match match-define)
            rackunit
            (only-in threading ~>)
            (only-in "../data/loader.rkt"
                     dataloader dataset-batch dataset-length dataset-ref default-collate
                     in-dataloader tensor-dataset)
+           (only-in "../foreign/addresses.rkt" tensor-storage-ptr)
            (only-in "../main.rkt"
                     * + - / @ argmax cuda-available? cuda-device device device-type dtype
-                    has-grad? index-select item manual-seed! mps-available? mps-device narrow
-                    native-memory-use randn reclaim-native-memory! requires-grad? reshape select
-                    shape tensor tensor->list to to-dtype zeros)
+                    grad-enabled? has-grad? index-select item manual-seed! mps-available?
+                    mps-device narrow native-memory-use randn reclaim-native-memory!
+                    requires-grad! requires-grad? reshape select shape tensor tensor->list to
+                    to-dtype with-default-device with-no-grad zeros)
            (only-in "../nn.rkt"
                     Dropout Flatten Linear Sequential children eval! layer-mode layer-set-mode!
                     parameters train!)
@@ -23,6 +26,7 @@
                     linear-probe-weight-decay probe-accuracy probe-dataset probe-dataset-classes
                     probe-dataset-features probe-dataset-indices probe-dataset-labels
                     probe-dataset? probe-split tensors->probe-dataset)
+           (only-in (submod "../train/probe.rkt" private) pooled)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/within.rkt" bounded-test))
 
@@ -31,6 +35,11 @@
   (define accelerators
     (append (if (cuda-available?) (list (cuda-device)) '())
             (if (mps-available?) (list (mps-device)) '())))
+
+  (when (null? accelerators)
+    (displayln (string-append "[probe-test] skipped on CPU: P1 encoder and cache devices apart, "
+                              "P5 split under an accelerator default device, P15 accelerator "
+                              "blame cases, P17")))
 
   (define (flat t)
     (~> t (to 'cpu) (reshape -1) tensor->list))
@@ -157,22 +166,52 @@
       (check-false (requires-grad? (probe-dataset-features a)))
       (check-false (ormap has-grad? (parameters enc)))))
 
+  (define ((recording-forward enc seen) x)
+    (set-box! seen (cons (device-type (device x)) (unbox seen)))
+    (enc x))
+
+  (bounded-test "P1: the encoder sees its own device, whatever #:device caches on"
+    (define enc (Sequential (Flatten) (Linear 4 3)))
+    (define seen (box '()))
+    (define (pass)
+      (probe-dataset enc (image-dataset 6) #:forward (recording-forward enc seen) #:pool #f
+                     #:batch-size 4 #:device (cuda-device)))
+    (if (cuda-available?)
+        (check-eq? (device-type (device (probe-dataset-features (pass)))) 'cuda)
+        (check-exn exn:fail? pass))
+    (check-equal? (remove-duplicates (unbox seen)) '(cpu)))
+
+  (for ([dev (in-list accelerators)])
+    (bounded-test (format "P1: an encoder on ~a caches on #:device, its images on ~a" dev dev)
+      (define enc (to (Sequential (Flatten) (Linear 4 3)) dev))
+      (define seen (box '()))
+      (define ds (probe-dataset enc (image-dataset 6) #:forward (recording-forward enc seen)
+                                #:pool #f #:batch-size 4 #:device 'cpu))
+      (check-eq? (device-type (device (probe-dataset-features ds))) 'cpu)
+      (check-eq? (device-type (device (probe-dataset-labels ds))) 'cpu)
+      (check-equal? (unbox seen) (list (device-type dev) (device-type dev)))))
+
   (define (cpu-bytes)
     (for/sum ([(place bytes) (in-dict (native-memory-use))]
               #:when (eq? (device-type place) 'cpu))
       bytes))
 
   (bounded-test "P4: the pass keeps exactly its features and labels"
-    (define images (image-dataset 24))
-    (define enc (dropout-encoder))
-    (reclaim-native-memory!)
-    (define base (cpu-bytes))
-    (define ds (probe-dataset enc images #:pool #f #:batch-size 5))
-    (reclaim-native-memory!)
-    (check-equal? (- (cpu-bytes) base) (+ (* 24 8 4) (* 24 8)))
-    (check-true (probe-dataset? ds))
-    (check-equal? (dataset-length images) 24)
-    (check-equal? (length (parameters enc)) 2))
+    (for ([case (in-list (list (list #f (image-dataset 24) (dropout-encoder) 8)
+                               (list 'cls (token-dataset 24 5 3) doubled 3)))])
+      (match-define (list pool images enc width) case)
+      (reclaim-native-memory!)
+      (define base (cpu-bytes))
+      (define ds (probe-dataset enc images #:pool pool #:batch-size 5))
+      (reclaim-native-memory!)
+      (check-equal? (- (cpu-bytes) base) (+ (* 24 width 4) (* 24 8)) (format "~a" pool))
+      (void (black-box (list ds images enc)))))
+
+  (bounded-test "P4: 'cls pooling copies token 0 out of the encoder's output"
+    (define out (integer-tokens 4 5 3))
+    (define features (pooled out 'cls))
+    (check-not-equal? (tensor-storage-ptr features) (tensor-storage-ptr out))
+    (check-equal? (rows features) (rows (select out 1 0))))
 
   (define split-labels '(0 1 2 0 1 2 0 1 2 0 1 2 0 1 0 2 2 0))
 
@@ -183,19 +222,13 @@
     (define-values (fit select) (probe-split ds #:select-per-class n #:seed seed))
     (list (flat (probe-dataset-indices fit)) (flat (probe-dataset-indices select)) fit select))
 
-  (define (ascending? xs)
-    (or (null? xs) (null? (cdr xs)) (and (< (car xs) (cadr xs)) (ascending? (cdr xs)))))
-
-  (define (take-2 xs)
-    (list (car xs) (cadr xs)))
-
   (bounded-test "P5: a stratified split of the labels alone"
     (define features (randn 18 2))
     (match-define (list fit-ix select-ix fit select) (split-indices (labelled features)))
     (check-false (check-duplicates (append fit-ix select-ix)))
     (check-equal? (sort (append fit-ix select-ix) <) (range 18))
-    (check-true (ascending? fit-ix))
-    (check-true (ascending? select-ix))
+    (check-true (apply < fit-ix))
+    (check-true (apply < select-ix))
     (for ([c (in-range 3)])
       (check-equal? (for/sum ([i (in-list select-ix)]) (if (= c (list-ref split-labels i)) 1 0))
                     3))
@@ -203,9 +236,9 @@
                   (rows (index-select features 0 (tensor select-ix))))
     (check-equal? (flat (probe-dataset-labels fit))
                   (for/list ([i (in-list fit-ix)]) (list-ref split-labels i)))
-    (check-equal? (take-2 (split-indices (labelled features)))
+    (check-equal? (take (split-indices (labelled features)) 2)
                   (list fit-ix select-ix))
-    (check-equal? (take-2 (split-indices (labelled (randn 18 2))))
+    (check-equal? (take (split-indices (labelled (randn 18 2))) 2)
                   (list fit-ix select-ix))
     (check-true (< 1 (length (remove-duplicates
                               (for/list ([seed (in-range 5)])
@@ -214,6 +247,12 @@
   (bounded-test "P5: a class short of select-per-class raises"
     (check-exn exn:fail:contract?
                (lambda () (split-indices (labelled (randn 18 2)) #:per-class 6))))
+
+  (for ([dev (in-list accelerators)])
+    (bounded-test (format "P5: the split of CPU labels under a ~a default device" dev)
+      (define ds (labelled (randn 18 2)))
+      (match-define (list fit-ix select-ix _ _) (split-indices ds))
+      (check-equal? (take (with-default-device dev (split-indices ds)) 2) (list fit-ix select-ix))))
 
   (bounded-test "P5: the split leaves the global stream alone"
     (define ds (labelled (randn 18 2)))
@@ -306,6 +345,22 @@
                                     #:weight-decays grid #:max-iter 50))
     (check-equal? (linear-probe-weight-decay separable) (car grid)))
 
+  (bounded-test "P8: a fit under with-no-grad is the fit"
+    (define fit (blob-set 40 2))
+    (define plain (linear-probe fit #:weight-decay 1e-3 #:max-iter 20))
+    (define quiet (with-no-grad (linear-probe fit #:weight-decay 1e-3 #:max-iter 20)))
+    (check-equal? (flat (linear-probe-weight quiet)) (flat (linear-probe-weight plain)))
+    (check-equal? (flat (linear-probe-bias quiet)) (flat (linear-probe-bias plain)))
+    (check-true (grad-enabled?)))
+
+  (bounded-test "P8: features that require grad are fitted detached"
+    (manual-seed! 3)
+    (define w (requires-grad! (randn 3 3)))
+    (define ds (tensors->probe-dataset (@ (randn 40 3) w) (cycle-labels 40 3)))
+    (check-false (requires-grad? (probe-dataset-features ds)))
+    (check-true (< 0 (probe-accuracy (linear-probe ds #:weight-decay 1e-3 #:max-iter 20) ds)))
+    (check-false (has-grad? w)))
+
   (bounded-test "P8: one #:weight-decay fits on the fit split alone"
     (define fit (blob-set 40 2))
     (define alone (linear-probe fit #:weight-decay 1e-2 #:max-iter 50))
@@ -387,7 +442,9 @@
     (check-exn raised-by-probe-dataset?
                (lambda () (probe-dataset doubled (image-dataset 4) #:pool #f)))
     (check-exn raised-by-probe-dataset?
-               (lambda () (probe-dataset cls-token (token-dataset 4 5 3) #:pool 'cls))))
+               (lambda () (probe-dataset cls-token (token-dataset 4 5 3) #:pool 'cls)))
+    (check-exn raised-by-probe-dataset?
+               (lambda () (probe-dataset doubled (tensor-dataset (randn 4 3)) #:pool #f))))
 
   (for ([dev (in-list accelerators)])
     (bounded-test (format "P17: on ~a the probes match the CPU within 1/n" dev)
