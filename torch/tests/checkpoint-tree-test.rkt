@@ -1,15 +1,19 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
-           (only-in "../main.rkt" current-generator make-generator rng-state)
+  (require (only-in racket/function curryr)
+           rackunit
+           (only-in racket/match match-define)
+           (only-in "../main.rkt"
+                    current-generator make-generator ones rng-state transpose)
            (only-in "../nn.rkt"
                     Linear load-optimizer-state! mse-loss optimizer-state-dict parameters
                     scheduler-state-dict sgd step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
-           (only-in "private/checkpoint-kit.rkt" call-with-live-run Small)
+           (only-in "private/checkpoint-kit.rkt" call-with-live-run Small stored)
            (only-in "private/comparable.rkt" comparable host-bytes)
+           (only-in "private/safetensors-reader.rkt" read-safetensors)
            (only-in "private/trainer-kit.rkt" toy-loader))
 
   (define-trainer Scheduled (net)
@@ -73,6 +77,24 @@
       (check-equal? (hash-ref loop "batch_index") 0)
       (check-equal? (hash-ref loop "epoch") 0)))
 
+  (test-case "LO-9: a validation-end save keeps the training loop's batch index"
+    (with-temporary-directory (dir #:template "val-end-~a")
+      (define saves (box '()))
+      (define saver
+        (lambda-callback
+         #:on-validation-end
+         (lambda (r)
+           (define path (build-path dir (format "v~a.ckpt" (length (unbox saves)))))
+           (save-checkpoint! r path)
+           (set-box! saves (cons path (unbox saves))))))
+      (void (fit (Small) (toy-loader 8) #:val (toy-loader 2) #:max-epochs 1 #:logger #f
+                 #:val-check-interval 2 #:num-sanity-val-steps 0 #:callbacks (list saver)))
+      (define loops
+        (for/list ([path (in-list (reverse (unbox saves)))])
+          (hash-ref (hash-ref (read-checkpoint path) "loops") "fit_loop")))
+      (check-equal? (map (curryr hash-ref "phase") loops) '("validation-end" "validation-end"))
+      (check-equal? (map (curryr hash-ref "batch_index" #f) loops) '(1 3))))
+
   (test-case "weights-only keeps the model, hyperparameters and position, as Lightning's"
     (with-temporary-directory (dir #:template "weights-~a")
       (define-values (tree _r) (saved-at (build-path dir "w.ckpt") #:weights-only? #t))
@@ -125,4 +147,62 @@
                  (lambda ()
                    (call-with-live-run #:callbacks (list bad)
                                        (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
-      (check-equal? (directory-list dir) '()))))
+      (check-equal? (directory-list dir) '())))
+
+  (define (save-raises dir rx #:callbacks [callbacks '()])
+    (check-exn (lambda (e) (and (exn:fail:contract? e) (regexp-match? rx (exn-message e))))
+               (lambda ()
+                 (call-with-live-run #:callbacks callbacks
+                                     (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
+    (check-equal? (directory-list dir) '() "nothing is written"))
+
+  (test-case "a top-level key a hook adds must be a string"
+    (with-temporary-directory (dir #:template "top-key-~a")
+      (define note (lambda-callback #:on-save-checkpoint (lambda (_r ckpt) (hash-set! ckpt 'note 1))))
+      (save-raises dir #rx"top-level key.*key path: '\\(note\\)" #:callbacks (list note))))
+
+  (test-case "a value shared down 40 levels is refused before it is expanded"
+    (with-temporary-directory (dir #:template "shared-deep-~a")
+      (define (doubled depth) (for/fold ([v '(1)]) ([_ (in-range depth)]) (list v v)))
+      (save-raises dir #rx"100 MB" #:callbacks (list (stored (box (doubled 40)))))
+      (define-values (tree _r) (saved-at (build-path dir "d.ckpt")
+                                         #:callbacks (list (stored (box (doubled 8))))))
+      (check-equal? (hash-ref tree "probe") (doubled 8))))
+
+  (test-case "a tensor held twice is written once and reads back shared"
+    (with-temporary-directory (dir #:template "shared-~a")
+      (define t (ones 2 3))
+      (define view (transpose t 0 1))
+      (define (unnamed-entries path)
+        (for/list ([k (in-hash-keys (read-safetensors path))] #:when (regexp-match? #rx"^[$]" k))
+          k))
+      (define path (build-path dir "t.ckpt"))
+      (define once (build-path dir "once.ckpt"))
+      (define-values (tree _r) (saved-at path #:callbacks (list (stored (box (list t t view))))))
+      (define-values (_once _run) (saved-at once #:callbacks (list (stored (box (list t view))))))
+      (check-equal? (length (unnamed-entries path)) (length (unnamed-entries once)))
+      (match-define (list a b c) (hash-ref tree "probe"))
+      (check-eq? a b)
+      (check-not-eq? a c)
+      (check-equal? (host-bytes c) (host-bytes view))))
+
+  (define-trainer Loading (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y))
+    (define-validation-step (x y) (mse-loss (net x) y))
+    (define-hook (on-load-checkpoint _ckpt)
+      (set-box! load-refusal (with-handlers ([exn:fail:contract? exn-message])
+                               (save-checkpoint! run "never.ckpt")))))
+
+  (define load-refusal (box #f))
+
+  (test-case "a run that has not started or has finished is not saved, as Lightning's"
+    (with-temporary-directory (dir #:template "unstarted-~a")
+      (define path (build-path dir "s.ckpt"))
+      (define-values (_tree finished) (saved-at path #:trainer (Loading)))
+      (check-exn #rx"save-checkpoint!.*contract violation"
+                 (lambda () (save-checkpoint! finished (build-path dir "after.ckpt"))))
+      (void (load-from-checkpoint Loading path))
+      (check-regexp-match #rx"save-checkpoint!.*contract violation" (unbox load-refusal))
+      (check-equal? (directory-list dir) (list (string->path "s.ckpt"))))))

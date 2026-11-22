@@ -84,9 +84,11 @@ hooks.}
 
 @defform[(define-init init-formals init-body ...+)]{
 The constructor body, as @racket[define-layer]'s @racket[#:init];
-@racket[run] is not bound. The logger receives each argument that is a real,
-string, symbol, boolean or list of those; the trainer keeps no other
-argument.}
+@racket[run] is not bound. The trainer keeps each argument that is a
+@racket[checkpoint-value/c], a tensor included, for as long as it lives, and
+@racket[save-checkpoint!] writes them; it keeps no other argument, such as a
+layer or a procedure. The logger receives the kept arguments that are reals,
+strings, symbols, booleans or lists of those.}
 
 @defform[(define-forward forward-formals body ...+)]{
 The trainer's forward, as @racket[define-layer]'s @racket[#:forward]. Without
@@ -284,19 +286,23 @@ Lightning's @tt{Trainer.save_checkpoint}. It writes:
  @item{each optimizer's and scheduler's state, and the grad scaler's;}
  @item{every callback's @tt{state-dict} under its state key;}
  @item{the RNG states: the CPU stream, the run's device stream,
-       @racket[current-generator]'s, Racket's
-       @racket[current-pseudo-random-generator] and the train and validation
-       loaders' generators.}]
+       @racket[current-generator]'s and Racket's
+       @racket[current-pseudo-random-generator].}]
 
 The file is safetensors with Lightning's key names; @racket[load-state!] reads
 the model out of it with @racket[#:rename]. The callbacks' @tt{state-dict}
 hooks run first, then each callback's @tt{on-save-checkpoint} and the
-trainer's with the whole checkpoint as a mutable hash they may change. The file
+trainer's with the checkpoint as a hash whose top level they may change; the
+values under it are immutable, and a key they add must be a string. The file
 is written to a temporary name and renamed, so a failed save leaves
-@racket[path] as it was.
+@racket[path] as it was. A run that has not started, as in
+@tt{on-load-checkpoint}, or has finished cannot be saved, as Lightning
+raises without a trainer attached; neither can a tree that would be written as
+more than safetensors' 100 MB header.
 
 @racket[#:weights-only?] keeps the model, the hyperparameters and the loop's
-position, as Lightning's @tt{weights_only}. A checkpoint taken at an epoch end,
+position, as Lightning's @tt{weights_only}; only the trainer's
+@tt{on-save-checkpoint} runs. A checkpoint taken at an epoch end,
 a batch end, a validation end, an exception or after the fit can be resumed;
 one taken elsewhere is written but @racket[fit] refuses it.}
 
@@ -309,9 +315,13 @@ saw, with every hash immutable and every tensor on the CPU.}
 The values a checkpoint holds: booleans, exact rationals, flonums (including
 infinities, NaN and @racket[-0.0]), strings, interned symbols, tensors, pairs and
 lists of these, and @racket[eq?], @racket[eqv?] or @racket[equal?] hashes of these
-that hold their keys strongly and whose string keys do not begin with @tt{$}. A
-value that contains itself is not one. They read back @racket[equal?], with hashes
-immutable and of the same comparison.}
+that hold their keys strongly and whose string keys do not begin with @tt{$}. An
+@racket[eq?] hash's keys must keep their identity through a read: interned
+symbols, fixnums, booleans and @racket['()]; an @racket[eqv?] hash's may also be
+flonums and exact rationals. A value that contains itself is not one. They read
+back @racket[equal?] but for tensors, each a new CPU tensor of the same dtype,
+shape and elements, one tensor wherever the saved one was held; hashes come
+back immutable and of the same comparison.}
 
 @defproc[(load-from-checkpoint [make-trainer (unconstrained-domain-> trainer?)]
                                [path path-string?]
@@ -321,7 +331,9 @@ immutable and of the same comparison.}
          trainer?]{
 Lightning's @tt{load_from_checkpoint}: applies @racket[make-trainer] to the
 @racket[define-init] arguments the checkpoint saved, with @racket[init-args]
-replacing them by formal name, sets the @racket[define-hparams] fields, runs the
+replacing them by formal name, sets the @racket[define-hparams] fields, logging
+one warning on the @racket['rktorch-train] topic for the saved hparams the
+trainer lacks, which Lightning drops the same way, runs the
 trainer's @tt{on-load-checkpoint} with a run that has not started, loads the
 parameters and buffers, strictly unless @racket[strict?] is @racket[#f], and
 moves the trainer to @racket[device]. An argument that was not a

@@ -26,7 +26,8 @@
                   set-run-batch-index! set-run-batches-stepped! set-run-current-stage!
                   set-run-epoch! set-run-loggers! set-run-optimizers!
                   set-run-scheduler-configs! set-run-skip-epoch?! set-run-skip-window?!
-                  set-run-step-pending?! set-run-stepped?! set-run-stepping-batches!)
+                  set-run-step-pending?! set-run-stepped?! set-run-stepping-batches!
+                  set-run-train-batch-index!)
          (only-in "types.rkt"
                   scheduler-config-frequency scheduler-config-interval
                   scheduler-config-scheduler trainer-automatic? trainer-hook))
@@ -186,6 +187,7 @@
 
 (define (train-batch! r p i raw)
   (set-run-batch-index! r i)
+  (set-run-train-batch-index! r i)
   (set-run-stepped?! r #f)
   (set-run-step-pending?! r (automatic? r))
   (when (window-start? r i)
@@ -207,6 +209,7 @@
           #:break (epoch-over? r p))
       (train-batch! r p i (batch i))))
   (set-run-batch-index! r #f)
+  (set-run-train-batch-index! r #f)
   (set-run-skip-epoch?! r #f)
   (epoch-end-reached! (run-book r) 'train)
   (call-hooks r 'on-train-epoch-end)

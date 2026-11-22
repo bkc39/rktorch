@@ -26,6 +26,7 @@
              [stepping-batches #:auto]
              [current-stage #:auto]
              [batch-index #:auto]
+             [train-batch-index #:auto]
              [hook #:auto]
              [stepped? #:auto]
              [step-pending? #:auto]
