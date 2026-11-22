@@ -302,10 +302,12 @@ The checkpoint at @racket[path] as the hash the @tt{on-save-checkpoint} hooks
 saw, with every hash immutable and every tensor on the CPU.}
 
 @defthing[checkpoint-value/c flat-contract?]{
-The values a checkpoint holds: booleans, exact integers, flonums (including
-infinities, NaN and @racket[-0.0]), strings, symbols, tensors, pairs and lists of
-these, and hashes of these whose string keys do not begin with @tt{$}. They read
-back @racket[equal?], with hashes immutable and of the same comparison.}
+The values a checkpoint holds: booleans, exact rationals, flonums (including
+infinities, NaN and @racket[-0.0]), strings, interned symbols, tensors, pairs and
+lists of these, and @racket[eq?], @racket[eqv?] or @racket[equal?] hashes of these
+that hold their keys strongly and whose string keys do not begin with @tt{$}. A
+value that contains itself is not one. They read back @racket[equal?], with hashes
+immutable and of the same comparison.}
 
 @defproc[(load-from-checkpoint [make-trainer (unconstrained-domain-> trainer?)]
                                [path path-string?]
