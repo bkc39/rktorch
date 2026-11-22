@@ -65,7 +65,9 @@
     (define plain (hash "last_epoch" 3 "base_lrs" '(0.1) "_last_lr" '(0.05)))
     (check-true (scheduler-state? plain))
     (check-true (scheduler-state? (hash-set* plain "T_cur" 1 "T_i" 6)))
-    (check-true (scheduler-state? (hash-set plain "_schedulers" (list plain plain))))
+    (define composite (hash "last_epoch" 3 "_last_lr" '(0.05) "_schedulers" (list plain plain)))
+    (check-true (scheduler-state? composite) "chained and sequential keep no base_lrs, as torch's")
+    (check-false (scheduler-state? (hash-set composite "base_lrs" '(0.1))))
     (check-false (scheduler-state? (hash-set plain "T_cur" 1)) "T_cur without T_i")
     (check-false (scheduler-state? (hash-set* plain "T_cur" 1 "T_i" 0)))
     (check-false (scheduler-state? (hash-set plain "last_epoch" 1.0)))
@@ -124,8 +126,8 @@
   (test-case "optimizer-state-dict's precondition: the model names every parameter"
     (define net (Linear 2 1))
     (define opt (sgd (parameters net) #:lr 0.1))
-    (check-exn #rx"unimplemented" (lambda () (optimizer-state-dict opt net))
-               "parameters of the model reach the body")
+    (check-pred optimizer-state? (optimizer-state-dict opt net)
+                "parameters of the model reach the body")
     (check-exn blames-this-test? (lambda () (optimizer-state-dict opt (Linear 2 1))))
     (check-exn blames-this-test?
                (lambda () (load-optimizer-state! opt (Linear 2 1)
