@@ -1182,16 +1182,27 @@ anything is copied.
               @defthing[optimizer-state/c flat-contract?])]{
 @tt{Optimizer.state_dict} and @tt{load_state_dict}, keyed by @racket[model]'s
 parameter names rather than positions, so a reordered model fails loudly. The
-state tensors are the optimizer's own, as in torch, and @racket["step"] is an
-integer in every mode, so a state moves between @racket['loop], @racket['foreach]
-and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash. Group
-hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as @racket[0.1];
-a value that bypasses the groups can stay exact, as @racket[one-cycle-lr] with
-@racket[#:max-lr 1/10 #:div-factor 25] saves an exact @racket[1/250] as its
-@tt{initial_lr} and @tt{base_lrs}. Loading checks everything first and replaces each group's
-hyperparameters; floating tensors are copied to their parameter's device and
-dtype, as torch casts them, so the loaded state shares no tensor with
-@racket[state].
+state tensors are copies taken when the dict is built, so a dict held across a
+step still describes the step it was taken at; torch's dict aliases the live
+tensors, step count included. @racket["step"] is an integer in every mode, so a
+state moves between @racket['loop], @racket['foreach] and @racket['fused]. Every
+hash in a state is an immutable @racket[equal?] hash. Numeric group
+hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as
+@racket[0.1]; a value that bypasses the groups can stay exact, as
+@racket[one-cycle-lr] with @racket[#:max-lr 1/10 #:div-factor 25] saves an exact
+@racket[1/250] as its @tt{initial_lr} and @tt{base_lrs}.
+
+A parameter's slots are those its optimizer can hold, whatever the group's
+momentum is now: sgd may keep a @tt{momentum_buffer}; rmsprop keeps a
+@tt{square_avg} and may keep a @tt{momentum_buffer}; adam and adamw keep
+@tt{exp_avg}, @tt{exp_avg_sq} and @tt{step}. A buffer kept while momentum was
+changed to 0 is loaded and used again when it rises, and a missing sgd buffer
+starts as a copy of the next gradient, as in torch. Loading checks everything
+first, then replaces each group's hyperparameters and the slots together, so a
+load that raises or is broken leaves the optimizer unchanged. Floating tensors are
+copied to their parameter's device and dtype, as torch casts them, so the loaded
+state shares no tensor with @racket[state]. A load must not overlap a step of the
+same optimizer in another thread, as in torch.
 
 @torch-examples[
 (manual-seed! 0)
