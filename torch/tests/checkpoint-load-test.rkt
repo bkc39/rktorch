@@ -106,7 +106,8 @@
       (for ([strict? (in-list '(#t #f))])
         (define-values (back warnings)
           (call-with-logged-warnings
-           (lambda () (load-from-checkpoint Unscaled path #:strict? strict? #:init-args (an-encoder)))))
+           (lambda ()
+             (load-from-checkpoint Unscaled path #:strict? strict? #:init-args (an-encoder)))))
         (check-equal? (trainer-hparams back) (hasheq))
         (check-equal? (length warnings) 1 (format "strict? ~a" strict?))
         (check-regexp-match #rx"scale.*shaped[.]ckpt" (car warnings)))))

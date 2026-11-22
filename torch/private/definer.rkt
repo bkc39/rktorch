@@ -92,11 +92,7 @@
 
 (define-syntax-class init-formals
   #:description "#:init formals: (formal ... [#:rest id]) or (formal ... . id)"
-  (pattern (f:ctor-formal ... #:rest rest:id)
-    #:with (id ...) #'(f.id ... rest)
-    #:attr shapes (append (attribute f.shape) (list (list 'rest (syntax-e #'rest))))
-    #:with formals #'((~@ f.decl ...) ... . rest))
-  (pattern (f:ctor-formal ... . rest:id)
+  (pattern (~or* (f:ctor-formal ... #:rest rest:id) (f:ctor-formal ... . rest:id))
     #:with (id ...) #'(f.id ... rest)
     #:attr shapes (append (attribute f.shape) (list (list 'rest (syntax-e #'rest))))
     #:with formals #'((~@ f.decl ...) ... . rest))

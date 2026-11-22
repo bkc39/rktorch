@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/function curryr)
+  (require (only-in racket/function curry curryr)
            rackunit
            (only-in racket/match match-define)
            (only-in "../main.rkt"
@@ -55,7 +55,7 @@
       (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
       (check-equal? (sort (hash-keys loop) string<?)
                     '("batches_that_stepped" "epoch" "eval_batches" "phase"))
-      (check-equal? (map (lambda (k) (hash-ref loop k)) '("epoch" "phase" "batches_that_stepped"))
+      (check-equal? (map (curry hash-ref loop) '("epoch" "phase" "batches_that_stepped"))
                     '(1 "fit-end" 2))
       (define fresh (sgd (parameters tr) #:lr 0.5))
       (load-optimizer-state! fresh tr (car (hash-ref tree "optimizer_states")))

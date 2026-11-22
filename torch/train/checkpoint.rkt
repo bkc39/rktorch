@@ -26,8 +26,7 @@
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
                   scheduler-config-scheduler trainer-hook trainer-hparam-names trainer?)
-         (only-in "private/value.rkt" checkpoint-value? value-problem)
-         (only-in "run.rkt" run?))
+         (only-in "private/value.rkt" checkpoint-value? value-problem))
 
 (define-named-contract checkpoint-value/c checkpoint-value?)
 
@@ -117,7 +116,8 @@
   (for ([k (in-hash-keys tree)] #:unless (string? k))
     (refused "a top-level key of the checkpoint is not a string" (list k) k))
   (match (value-problem tree)
-    [(cons key-path part) (refused "a value in the checkpoint is not a checkpoint-value/c" key-path part)]
+    [(cons key-path part)
+     (refused "a value in the checkpoint is not a checkpoint-value/c" key-path part)]
     [_ (void)]))
 
 (define active-run/c
