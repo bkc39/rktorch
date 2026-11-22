@@ -1,8 +1,9 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out contract?
-                  flat-named-contract listof non-empty-listof not/c real-in unsupplied-arg?)
+                  -> ->* ->i </c <=/c >/c >=/c and/c any/c contract-out contract? listof
+                  non-empty-listof not/c real-in recursive-contract rename-contract
+                  unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
          (only-in racket/list append-map count)
@@ -14,7 +15,8 @@
          (only-in "optim.rkt"
                   gen:optimizer group-index? lr-optimizer/c optimizer-parameters
                   optimizer-root optimizer-store optimizer?)
-         (only-in (submod "optim.rkt" private) prop:wrapped-optimizer))
+         (only-in (submod "optim.rkt" private) prop:wrapped-optimizer)
+         (only-in "private/state-shape.rkt" record/c state-real/c))
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
@@ -320,29 +322,27 @@
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
 
-(define scheduler-state-keys '("last_epoch" "base_lrs" "_last_lr" "T_cur" "T_i" "_schedulers"))
-
-(define (reals? v)
-  (and (list? v) (andmap real? v)))
-
 ;; torch's ChainedScheduler and SequentialLR keep no base_lrs
 ;; (optim/lr_scheduler.py:1155-1171, 1534-1537)
-(define (scheduler-state-shape? v)
-  (and (hash? v) (immutable? v) (hash-equal? v)
-       (for/and ([k (in-hash-keys v)]) (and (member k scheduler-state-keys) #t))
-       (exact-integer? (hash-ref v "last_epoch" #f))
-       (reals? (hash-ref v "_last_lr" #f))
-       (eq? (hash-has-key? v "T_cur") (hash-has-key? v "T_i"))
-       (real? (hash-ref v "T_cur" 0))
-       (exact-positive-integer? (hash-ref v "T_i" 1))
-       (match (hash-ref v "_schedulers" #f)
-         [#f (reals? (hash-ref v "base_lrs" #f))]
-         [(list (? scheduler-state-shape?) ...) (not (hash-has-key? v "base_lrs"))]
-         [_ #f])))
+(define (bases-unless-chained? v)
+  (not (eq? (hash-has-key? v "base_lrs") (hash-has-key? v "_schedulers"))))
+
+(define (restarts-paired? v)
+  (eq? (hash-has-key? v "T_cur") (hash-has-key? v "T_i")))
 
 (define/contract-out scheduler-state/c ;; noqa
   contract?
-  (flat-named-contract 'scheduler-state/c scheduler-state-shape?))
+  (rename-contract
+   (and/c (record/c (hash "last_epoch" exact-integer?
+                          "base_lrs" (listof state-real/c)
+                          "_last_lr" (listof state-real/c)
+                          "T_cur" state-real/c
+                          "T_i" exact-positive-integer?
+                          "_schedulers" (listof (recursive-contract scheduler-state/c #:flat)))
+                    #:required '("last_epoch" "_last_lr"))
+          bases-unless-chained?
+          restarts-paired?)
+   'scheduler-state/c))
 
 (define (inner-schedulers rule)
   (match rule

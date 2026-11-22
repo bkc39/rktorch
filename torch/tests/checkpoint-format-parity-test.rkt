@@ -3,6 +3,7 @@
 (module+ test
   (require (only-in json read-json)
            (only-in racket/list remove-duplicates)
+           (only-in racket/match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-prefix?)
            (only-in racket/system system*)
@@ -31,7 +32,8 @@
   (define (tensors-in v)
     (cond
       [(tensor? v) (list (host-bytes v))]
-      [(hash? v) (for*/list ([(k x) (in-hash v)] [t (in-list (append (tensors-in k) (tensors-in x)))])
+      [(hash? v) (for*/list ([(k x) (in-hash v)]
+                             [t (in-list (append (tensors-in k) (tensors-in x)))])
                    t)]
       [(pair? v) (append (tensors-in (car v)) (tensors-in (cdr v)))]
       [else '()]))
@@ -62,6 +64,8 @@
          (void (call-with-live-run #:trainer tr #:callbacks (list (stored (box probe-value)))
                                    (lambda (r) (save-checkpoint! r path))))
          (define seen (python-read path (build-path dir "p.json")))
+         (unless (equal? (hash-ref seen 'reader) "safe_open")
+           (displayln "skipped: the safe_open cross-check (no safetensors module), offsets only"))
          (define tree (read-checkpoint path))
          (check-equal? (hash-ref seen 'metadata) (hasheq 'format "rktorch-checkpoint" 'version "1"))
          (check-equal? (hash-ref seen 'keys)
@@ -76,12 +80,12 @@
          (for ([name (in-list references)])
            (check-true (and (member name names) #t) name))
          (for ([entry (in-list (state-dict tr))])
-           (define name (string-append "state_dict." (car entry)))
-           (check-equal? (entry-form (hash-ref entries (string->symbol name)))
-                         (host-bytes (cdr entry))
-                         name))
+           (match-define (cons key t) entry)
+           (define name (string-append "state_dict." key))
+           (check-equal? (entry-form (hash-ref entries (string->symbol name))) (host-bytes t) name))
          (check-equal? (sorted (for/list ([(name e) (in-hash entries)]
-                                          #:unless (string-prefix? (symbol->string name) "state_dict."))
+                                          #:unless (string-prefix? (symbol->string name)
+                                                                   "state_dict."))
                                  (entry-form e)))
                        (sorted (tensors-in (hash-remove tree "state_dict")))
                        "the other tensors, byte for byte"))])))

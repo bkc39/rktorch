@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require (only-in racket/list append* last)
+         (only-in racket/match match match* match-define)
          (only-in racket/path file-name-from-path)
+         (only-in racket/string string-replace)
          rackunit
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
          (only-in "../../main.rkt"
@@ -27,9 +29,12 @@
 
 (struct world (trainer train val callbacks generators fingerprints))
 
+(define (resumable-net)
+  (Sequential (Linear 4 8) (Dropout 0.5) (Linear 8 1)))
+
 (define-trainer Resumable (net temperature seen)
   (define-init (s)
-    (set! net (Sequential (Linear 4 8) (Dropout 0.5) (Linear 8 1)))
+    (set! net (resumable-net))
     (set! temperature 1.0)
     (set! seen s))
   (define-hparams temperature)
@@ -64,17 +69,16 @@
   (define-init () (set! average #f) (set! e #f))
   (define-state-key "averaging")
   (define-hook (setup _stage)
-    (set! average (Sequential (Linear 4 8) (Dropout 0.5) (Linear 8 1)))
+    (set! average (resumable-net))
     (set! e (ema (run-trainer run) average #:decay 0.9)))
   (define-hook (on-train-batch-end _loss _extra . _batch) (ema-update! e))
   (define-hook (state-dict)
-    (hash "n" (ema-n-averaged e)
-          "average" (for/hash ([entry (in-list (named-parameters average))])
-                      (values (car entry) (cdr entry)))))
+    (hash "n" (ema-n-averaged e) "average" (make-immutable-hash (named-parameters average))))
   (define-hook (load-state! state)
     (with-no-grad
       (for ([entry (in-list (named-parameters average))])
-        (copy! (cdr entry) (hash-ref (hash-ref state "average") (car entry)))))
+        (match-define (cons name p) entry)
+        (copy! p (hash-ref (hash-ref state "average") name))))
     (set-ema-n-averaged! e (hash-ref state "n"))))
 
 (define (data n generator)
@@ -110,12 +114,23 @@
 (define (monitor-checkpoint w)
   (for/first ([cb (in-list (world-callbacks w))] #:when (model-checkpoint? cb)) cb))
 
-(define (callback-states w r)
+(define (dir-relative dir v)
+  (define here (path->string dir))
+  (let walk ([v v])
+    (match v
+      [(? string?) (string-replace v here "<leg>")]
+      [(? path?) (walk (path->string v))]
+      [(? hash?) (for/hash ([(k x) (in-hash v)]) (values (walk k) (walk x)))]
+      [(cons a d) (cons (walk a) (walk d))]
+      [_ v])))
+
+(define (callback-states w r dir)
   (for/list ([cb (in-list (world-callbacks w))])
     (define hook (callback-hook cb 'state-dict))
-    (and hook (comparable (hook cb r)))))
+    (and hook (dir-relative dir (comparable (hook cb r))))))
 
-(define (snapshot w r)
+(define (snapshot leg-run)
+  (match-define (leg w r _logger _saver dir) leg-run)
   (define tr (world-trainer w))
   (hasheq 'parameters (comparable (state-dict tr))
           'optimizers (for/list ([opt (in-list (run-optimizers r))])
@@ -123,7 +138,7 @@
           'schedulers (for/list ([c (in-list (run-schedulers r))])
                         (scheduler-state-dict (scheduler-config-scheduler c)))
           'scaler (and (run-grad-scaler r) (grad-scaler-state-dict (run-grad-scaler r)))
-          'callbacks (callback-states w r)
+          'callbacks (callback-states w r dir)
           'cpu-rng (host-bytes (rng-state))
           'racket-rng (pseudo-random-generator->vector (current-pseudo-random-generator))
           'loader-generators (map (lambda (g) (host-bytes (generator-state g)))
@@ -134,7 +149,7 @@
                                                      (monitor-checkpoint w)))])
                     (values (path->string (file-name-from-path path)) score))))
 
-(struct leg (world run logger saver))
+(struct leg (world run logger saver dir))
 
 (define (seed! n)
   (manual-seed! n)
@@ -152,39 +167,38 @@
                             fit-args
                             (list (cons '#:val (world-val w))
                                   (cons '#:logger l)
-                                  (cons '#:callbacks (cons saver (world-callbacks w)))
+                                  (cons '#:callbacks (append (world-callbacks w) (list saver)))
                                   (cons '#:ckpt-path ckpt-path)))
                     (world-trainer w)
                     (world-train w)))
-  (leg w r l saver))
+  (leg w r l saver dir))
 
 (define (fingerprints l)
   (reverse (unbox (world-fingerprints (leg-world l)))))
 
-(define (check-resume make-world #:split split #:total n #:fit-args [fit-args '()]
+(define (check-resume make-world #:split [splits '()] #:total n #:fit-args [fit-args '()]
                       #:split-step [split-step #f])
-  (define splits (if (list? split) split (list split)))
   (define make-saver (if split-step (every-steps-saver split-step) every-epoch-saver))
   (with-temporary-directory (root #:template "resume-~a")
     (define straight (fit-leg make-world (build-path root "straight") fit-args #:saver make-saver
                               #:seed 0 #:bounds (list (cons '#:max-epochs n))))
     (define split-dir (build-path root "split"))
+    (define-values (first-bounds later-ends)
+      (match* (split-step splits)
+        [(#f (cons first more)) (values (list (cons '#:max-epochs first)) (append more (list n)))]
+        [(step '()) (values (list (cons '#:max-epochs n) (cons '#:max-steps step)) (list n))]))
     (define first-leg
-      (fit-leg make-world split-dir fit-args #:seed 0 #:saver make-saver
-               #:bounds (if split-step
-                            (list (cons '#:max-epochs n) (cons '#:max-steps split-step))
-                            (list (cons '#:max-epochs (car splits))))))
+      (fit-leg make-world split-dir fit-args #:seed 0 #:saver make-saver #:bounds first-bounds))
     (define legs
       (for/fold ([legs (list first-leg)] #:result (reverse legs))
-                ([epochs (in-list (append (if split-step '() (cdr splits)) (list n)))])
-        (define previous (car legs))
+                ([epochs (in-list later-ends)])
+        (match-define (cons previous _) legs)
         (cons (fit-leg make-world split-dir fit-args #:seed 12345 #:saver make-saver
                        #:ckpt-path (model-checkpoint-best-model-path (leg-saver previous))
                        #:bounds (list (cons '#:max-epochs epochs)))
               legs)))
-    (define resumed (last legs))
-    (define expected (snapshot (leg-world straight) (leg-run straight)))
-    (define actual (snapshot (leg-world resumed) (leg-run resumed)))
+    (define expected (snapshot straight))
+    (define actual (snapshot (last legs)))
     (for ([(key v) (in-hash expected)])
       (check-equal? (hash-ref actual key) v (format "resume law: ~a" key)))
     (check-equal? (append* (map (lambda (l) (collecting-steps (leg-logger l))) legs))

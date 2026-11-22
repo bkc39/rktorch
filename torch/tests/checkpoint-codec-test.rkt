@@ -1,11 +1,15 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in json string->jsexpr)
+           (only-in racket/match match)
+           rackunit
            (only-in "../main.rkt" full ones randn zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
-           (only-in "private/checkpoint-kit.rkt" call-with-live-run decoded-form stored))
+           (only-in "private/checkpoint-kit.rkt" call-with-live-run stored)
+           (only-in "private/comparable.rkt" comparable)
+           (only-in "private/safetensors-reader.rkt" safetensors-metadata))
 
   (define dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
 
@@ -17,7 +21,8 @@
                 (if (memq dt '(float32 float64)) (randn 3 #:dtype dt) (zeros 4 #:dtype dt)))))
 
   (define (random-leaf)
-    (pick (list #t #f 0 -7 (expt 2 70) (- (expt 2 70)) 1.5 -0.0 0.0 +inf.0 -inf.0 +nan.0 1e-300
+    (pick (list #t #f 0 -7 (expt 2 70) (- (expt 2 70)) 1/10 -7/3 (/ (expt 10 30) 7)
+                1.5 -0.0 0.0 +inf.0 -inf.0 +nan.0 1e-300
                 "" "plain" "non-ASCII π ✓" "$ in a value" 'sym '|with space| '$sym '()
                 (random-tensor))))
 
@@ -41,12 +46,12 @@
     (if (or (zero? depth) (< (random) 0.3)) (random-leaf) (random-node depth)))
 
   (define (immutable-throughout? v)
-    (cond
-      [(hash? v) (and (immutable? v)
+    (match v
+      [(? hash?) (and (immutable? v)
                       (for/and ([(k x) (in-hash v)])
                         (and (immutable-throughout? k) (immutable-throughout? x))))]
-      [(pair? v) (and (immutable-throughout? (car v)) (immutable-throughout? (cdr v)))]
-      [else #t]))
+      [(cons a d) (and (immutable-throughout? a) (immutable-throughout? d))]
+      [_ #t]))
 
   (define values-to-check
     (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
@@ -67,5 +72,16 @@
             (set-box! current v)
             (save-checkpoint! r path)
             (define back (hash-ref (read-checkpoint path) "probe"))
-            (check-equal? (decoded-form back) (decoded-form v) (format "value ~a: ~e" i v))
-            (check-true (immutable-throughout? back) (format "value ~a is immutable" i)))))))))
+            (check-equal? (comparable back #:hash-kinds? #t) (comparable v #:hash-kinds? #t)
+                          (format "value ~a: ~e" i v))
+            (check-true (immutable-throughout? back) (format "value ~a is immutable" i))))))))
+
+  (test-case "T3-L8: an exact non-integer is {\"$rational\": \"n/d\"}, an integer a JSON integer"
+    (with-temporary-directory (dir #:template "rational-~a")
+      (define path (build-path dir "r.ckpt"))
+      (void (call-with-live-run #:callbacks (list (stored (box (list 1/10 -7/3 5 0.5))))
+                                (lambda (r) (save-checkpoint! r path))))
+      (define tree (string->jsexpr (hash-ref (safetensors-metadata path) 'checkpoint)))
+      (check-equal? (hash-ref tree 'probe)
+                    (list (hasheq '$rational "1/10") (hasheq '$rational "-7/3") 5 0.5))
+      (check-equal? (hash-ref (read-checkpoint path) "probe") (list 1/10 -7/3 5 0.5)))))

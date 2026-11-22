@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >/c and/c any/c contract-out contract? flat-named-contract or/c
+                  -> ->* ->i </c >/c and/c any/c contract-out contract? or/c rename-contract
                   unsupplied-arg?)
          (only-in racket/match match match* match-define struct*)
          (only-in "../foreign.rkt"
@@ -13,7 +13,8 @@
          (only-in "optim.rkt" optimizer-root optimizer?)
          (only-in (submod "optim.rkt" private)
                   call-with-gradient-buckets gradient-bucket gradient-bucket-dtype
-                  optimizer-fused? scaled-step!))
+                  optimizer-fused? scaled-step!)
+         (only-in "private/state-shape.rkt" immutable-equal-hash/c record/c))
 
 (provide (contract-out [grad-scaler? (-> any/c boolean?)]))
 
@@ -263,23 +264,16 @@
   (-> grad-scaler? boolean?)
   (grad-scaler-active? s))
 
-(define grad-scaler-state-checks
-  (hash "scale" (lambda (x) (and (flonum? x) (> x 0.0)))
-        "growth_factor" (lambda (x) (and (flonum? x) (> x 1.0)))
-        "backoff_factor" (lambda (x) (and (flonum? x) (< 0.0 x 1.0)))
-        "growth_interval" exact-positive-integer?
-        "_growth_tracker" exact-nonnegative-integer?))
-
-(define (grad-scaler-state-shape? v)
-  (and (hash? v) (immutable? v) (hash-equal? v)
-       (or (hash-empty? v)
-           (and (= (hash-count v) (hash-count grad-scaler-state-checks))
-                (for/and ([(key ok?) (in-hash grad-scaler-state-checks)])
-                  (and (hash-has-key? v key) (ok? (hash-ref v key))))))))
-
 (define/contract-out grad-scaler-state/c ;; noqa
   contract?
-  (flat-named-contract 'grad-scaler-state/c grad-scaler-state-shape?))
+  (rename-contract
+   (or/c (and/c immutable-equal-hash/c hash-empty?)
+         (record/c (hash "scale" (and/c flonum? (>/c 0.0))
+                         "growth_factor" (and/c flonum? (>/c 1.0))
+                         "backoff_factor" (and/c flonum? (>/c 0.0) (</c 1.0))
+                         "growth_interval" exact-positive-integer?
+                         "_growth_tracker" exact-nonnegative-integer?)))
+   'grad-scaler-state/c))
 
 (define (growth-tracker s)
   (match (grad-scaler-state s)

@@ -2,7 +2,7 @@
 
 (module+ test
   (require rackunit
-           (only-in "../main.rkt" * randn tensor-device to-device zeros)
+           (only-in "../main.rkt" * device randn)
            (only-in "../nn.rkt" Linear Sequential mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
@@ -85,10 +85,10 @@
   (test-case "T3-L22: #:device places the trainer, #:strict? governs a mismatch"
     (with-temporary-directory (dir #:template "strict-~a")
       (define-values (_tr path) (trained dir))
-      (define cpu (tensor-device (to-device (zeros 1) 'cpu)))
-      (define back (load-from-checkpoint Shaped path #:device 'cpu #:init-args (an-encoder)))
+      (define cpu (device 'cpu))
+      (define back (load-from-checkpoint Shaped path #:device cpu #:init-args (an-encoder)))
       (for ([p (in-list (parameters back))])
-        (check-equal? (tensor-device p) cpu))
+        (check-equal? (device p) cpu))
       (check-exn #rx"head" (lambda () (load-from-checkpoint Wider path #:init-args (an-encoder))))
       (check-not-exn
        (lambda () (load-from-checkpoint Wider path #:strict? #f #:init-args (an-encoder)))))))

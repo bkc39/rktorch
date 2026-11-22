@@ -1,13 +1,15 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../nn.rkt"
                     Linear chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
                     exponential-lr lambda-lr learning-rate linear-lr load-optimizer-state!
                     load-scheduler-state! multi-step-lr one-cycle-lr optimizer-state-dict
                     parameters scheduler-rate scheduler-state-dict sequential-lr sgd step!
-                    step-lr))
+                    step-lr)
+           (only-in "private/comparable.rkt" comparable))
 
   (define kinds
     `(("step" ,(lambda (o) (step-lr o #:step-size 2 #:gamma 0.5)))
@@ -39,8 +41,7 @@
 
   (test-case "T3-L12: k steps, save, rebuild with another lr, load optimizer then scheduler"
     (for* ([kind (in-list kinds)] [k (in-list '(0 1 3 5))])
-      (define name (car kind))
-      (define make (cadr kind))
+      (match-define (list name make) kind)
       (define net (Linear 2 1))
       (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
       (define s (make opt))
@@ -51,6 +52,8 @@
       (define rebuilt (make rebuilt-opt))
       (load-optimizer-state! rebuilt-opt net opt-state)
       (load-scheduler-state! rebuilt state)
+      (check-equal? (comparable (optimizer-state-dict rebuilt-opt net)) (comparable opt-state)
+                    (format "~a after ~a: the optimizer, initial_lr included" name k))
       (check-equal? (scheduler-state-dict rebuilt) state (format "~a after ~a: the state" name k))
       (check-equal? (rates rebuilt 6) (rates s 6) (format "~a after ~a: the rates" name k))))
 
@@ -75,4 +78,23 @@
     (check-refused "an inner state that does not fit" chain-of
                    (hash-update chained "_schedulers"
                                 (lambda (subs) (list (car subs) (hash-set plain "base_lrs" '()))))
-                   #rx"_schedulers\\[1\\].*base_lrs")))
+                   #rx"_schedulers\\[1\\].*base_lrs"))
+
+  (test-case "T3-L12: an exact one-cycle base survives a state round trip exact"
+    (define net (Linear 2 1))
+    (define (cycle o) (one-cycle-lr o #:max-lr 1/10 #:div-factor 25 #:total-steps 12))
+    (define opt (sgd (parameters net) #:lr 0.1))
+    (define s (cycle opt))
+    (void (rates s 3))
+    (define state (scheduler-state-dict s))
+    (check-equal? (hash-ref state "base_lrs") '(1/250))
+    (define (initial-lrs o)
+      (map (lambda (grp) (hash-ref grp "initial_lr"))
+           (hash-ref (optimizer-state-dict o net) "param_groups")))
+    (check-equal? (initial-lrs opt) '(1/250))
+    (define rebuilt-opt (sgd (parameters net) #:lr 0.7))
+    (define rebuilt (cycle rebuilt-opt))
+    (load-optimizer-state! rebuilt-opt net (optimizer-state-dict opt net))
+    (load-scheduler-state! rebuilt state)
+    (check-equal? (hash-ref (scheduler-state-dict rebuilt) "base_lrs") '(1/250))
+    (check-equal? (initial-lrs rebuilt-opt) '(1/250))))

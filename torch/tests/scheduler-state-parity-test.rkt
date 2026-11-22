@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../nn.rkt"
                     Linear chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
                     exponential-lr lambda-lr linear-lr multi-step-lr one-cycle-lr parameters
@@ -42,8 +43,7 @@
    (lambda (dir)
      (test-case "T3-L30: scheduler state after each step equals torch's state_dict"
        (for ([kind (in-list kinds)])
-         (define name (car kind))
-         (define make (cadr kind))
+         (match-define (list name make) kind)
          (define opt (sgd (parameters (Linear 3 2)) #:lr 0.1 #:momentum 0.9))
          (define s (make opt))
          (for ([torch (in-list (hash-ref (oracle-json dir name) 'states))] [t (in-naturals)])

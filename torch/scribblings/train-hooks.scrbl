@@ -78,13 +78,14 @@ The order of one @racket[fit], after Lightning 2.6.5, with
        the window's end.}
  @item{@tt{on-train-epoch-end} after the epoch's validation loop, then
        @tt{on-train-end}, @tt{on-fit-end} and @tt{teardown}.}
- @item{With @racket[#:ckpt-path]: after @tt{setup}, the hyperparameters, the
-       trainer's @tt{on-load-checkpoint}, the parameters, each callback's
-       @tt{on-load-checkpoint} and then @tt{load-state!}; after
-       @tt{on-fit-start}, the training state; after @tt{on-train-start}, the
-       RNG states. @racket[save-checkpoint!] runs the callbacks'
-       @tt{state-dict}, then @tt{on-save-checkpoint} for the callbacks and then
-       the trainer.}
+ @item{With @racket[#:ckpt-path]: after @tt{setup} and before the device move,
+       the hyperparameters, the trainer's @tt{on-load-checkpoint}, the
+       parameters, each callback's @tt{on-load-checkpoint} and then
+       @tt{load-state!}; after @tt{on-fit-start}, the training state (the
+       optimizers, schedulers, scaler, counters and metrics); after
+       @tt{on-train-start}, the RNG states and loader generators.
+       @racket[save-checkpoint!] runs the callbacks' @tt{state-dict}, then
+       @tt{on-save-checkpoint} for the callbacks and then the trainer.}
  @item{A validation loop runs in eval mode with gradients off:
        @tt{on-validation-start}, @tt{on-validation-epoch-start}, per batch
        the transfer hooks, @tt{on-validation-batch-start}, the validation

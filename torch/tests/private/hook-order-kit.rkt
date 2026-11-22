@@ -11,7 +11,9 @@
 
 (define (save-here! run dir weights-only?)
   (save-checkpoint! run
-                    (build-path dir (format "epoch=~a-step=~a.ckpt" (run-epoch run) (run-global-step run)))
+                    (build-path dir (format "epoch=~a-step=~a.ckpt"
+                                            (run-epoch run)
+                                            (run-global-step run)))
                     #:weights-only? weights-only?))
 
 (define-callback epoch-saver (dir weights-only?)
@@ -52,7 +54,8 @@
                       #:accumulate [accumulate 1]
                       #:val-check-interval [interval #f]
                       #:max-epochs [max-epochs 2]
-                      #:max-steps [max-steps #f])
+                      #:max-steps [max-steps #f]
+                      #:ckpt-path [ckpt-path #f])
   (fit (make sc) (toy-loader n)
        #:val (toy-loader 4)
        #:max-epochs max-epochs
@@ -62,4 +65,5 @@
        #:val-check-interval interval
        #:precision precision
        #:logger #f
+       #:ckpt-path ckpt-path
        #:callbacks (cons (recorder sc) callbacks)))

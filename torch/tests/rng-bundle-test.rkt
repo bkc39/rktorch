@@ -3,7 +3,8 @@
 (module+ test
   (require (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "../main.rkt" current-generator make-generator rand-like randn tensor->list zeros)
+           (only-in "../main.rkt"
+                    current-generator make-generator rand-like randn tensor->list zeros)
            "../train.rkt"
            (only-in "../train/private/value.rkt" checkpoint-value?))
 

@@ -27,10 +27,10 @@
       (void (fit trained (toy-loader 4) #:max-epochs 3 #:logger #f
                  #:callbacks (list (lambda-callback
                                     #:on-train-end (lambda (r) (save-checkpoint! r path))))))
-      (define-values (fresh plain) (values (Tested) (Tested)))
+      (define-values (fresh resumed plain) (values (Tested) (Tested) (Tested)))
       (check-equal? (test-rows fresh #:ckpt-path path) (test-rows trained))
       (manual-seed! 7)
-      (void (test-rows (Tested) #:ckpt-path path))
+      (void (test-rows resumed #:ckpt-path path))
       (define after-resume (tensor->list (randn 3)))
       (manual-seed! 7)
       (void (test-rows plain))

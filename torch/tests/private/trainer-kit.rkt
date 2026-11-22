@@ -8,6 +8,7 @@
          (only-in racket/match match match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
+         (only-in "../../foreign/raw/fault.rkt" reset-native-fault-latch!)
          (only-in "../../main.rkt" ones zeros)
          (only-in "../../nn.rkt"
                   Linear learning-rate mse-loss parameters sgd step-lr)
@@ -16,6 +17,8 @@
 
 (provide apply-keywords
          batch-indexed?
+         call-with-fault-latch-reset
+         call-with-logged-warnings
          collecting-finalized
          collecting-hparams
          collecting-logger
@@ -55,6 +58,16 @@
 (define (apply-keywords proc keyword-values . positional)
   (match (sort keyword-values keyword<? #:key car)
     [(list (cons kws vals) ...) (keyword-apply proc kws vals positional)]))
+
+(define (call-with-logged-warnings thunk)
+  (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
+  (define result (thunk))
+  (values result
+          (for/list ([event (in-producer (lambda () (sync/timeout 0 receiver)) #f)])
+            (vector-ref event 1))))
+
+(define (call-with-fault-latch-reset thunk)
+  (dynamic-wind void thunk reset-native-fault-latch!))
 
 (define interval-message
   (string-append "an integer #:val-check-interval exceeds the training batches"

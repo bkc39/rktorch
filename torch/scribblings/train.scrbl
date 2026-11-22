@@ -210,18 +210,15 @@ parameters after @racket[on-before-optimizer-step], by
 under a scaler, clipping with a fused optimizer raises before the first batch,
 where Lightning raises at the clip.
 
-@racket[#:ckpt-path] resumes from a checkpoint, in the order of
-@secref["train-hooks"]. @racket['best] is the one @racket[model-checkpoint]'s
-best path. @racket['last] is the newest @tt{last} file or exception checkpoint;
-with none, it warns and trains from the start, as Lightning does. The file is
-read and its format checked before any hook runs. The trainer's parameters,
-hyperparameters and callback states are restored before the device move, and
-the optimizers, schedulers, scaler, counters and metrics after
-@tt{on-fit-start}. The RNG states and loader generators are restored after
-@tt{on-train-start}, so a resumed fit draws what the uninterrupted one would
-have, which Lightning does not do. A fit resumed at epoch @italic{e} runs from
-@italic{e} to @racket[#:max-epochs]; a restored epoch above
-@racket[#:max-epochs] raises.
+@racket[#:ckpt-path] resumes from a checkpoint; @secref["train-hooks"] says
+what is restored at which hook. @racket['best] is the one
+@racket[model-checkpoint]'s best path. @racket['last] is the newest @tt{last}
+file or exception checkpoint; with none, it warns and trains from the start, as
+Lightning does. The file is read and its format checked before any hook runs.
+The RNG states and loader generators are restored too, so a resumed fit draws
+what the uninterrupted one would have, which Lightning does not do. A fit
+resumed at epoch @italic{e} runs from @italic{e} to @racket[#:max-epochs]; a
+restored epoch above @racket[#:max-epochs] raises.
 
 @examples[#:eval train-eval
 (define-trainer Mixed (net)
@@ -279,22 +276,29 @@ Recognize the instances of @racket[define-trainer] and
 @defproc[(save-checkpoint! [r run?] [path path-string?]
                            [#:weights-only? weights-only? boolean? #f])
          void?]{
-Lightning's @tt{Trainer.save_checkpoint}: writes the trainer's parameters and
-buffers, its @racket[define-hparams] fields and @racket[define-init] arguments,
-the loop's position and counters, each optimizer's and scheduler's state, the
-grad scaler's, @racket[run-metrics], every callback's @tt{state-dict} under its
-state key, and the RNG states: the CPU stream, the run's device stream,
-@racket[current-generator]'s, Racket's @racket[current-pseudo-random-generator]
-and the train and validation loaders' generators. The file is safetensors with
-Lightning's key names; @racket[load-state!] reads the model out of it with
-@racket[#:rename]. The callbacks' @tt{state-dict} hooks run first, then each
-callback's @tt{on-save-checkpoint} and the trainer's with the whole checkpoint
-as a mutable hash they may change. The file is written to a temporary name and
-renamed, so a failed save leaves @racket[path] as it was. @racket[#:weights-only?]
-keeps the model, the hyperparameters and the loop's position, as Lightning's
-@tt{weights_only}. A checkpoint taken at an epoch end, a batch end, a validation
-end, an exception or after the fit can be resumed; one taken elsewhere is
-written but @racket[fit] refuses it.}
+Lightning's @tt{Trainer.save_checkpoint}. It writes:
+@itemlist[
+ @item{the trainer's parameters and buffers, its @racket[define-hparams] fields
+       and @racket[define-init] arguments;}
+ @item{the loop's position and counters, and @racket[run-metrics];}
+ @item{each optimizer's and scheduler's state, and the grad scaler's;}
+ @item{every callback's @tt{state-dict} under its state key;}
+ @item{the RNG states: the CPU stream, the run's device stream,
+       @racket[current-generator]'s, Racket's
+       @racket[current-pseudo-random-generator] and the train and validation
+       loaders' generators.}]
+
+The file is safetensors with Lightning's key names; @racket[load-state!] reads
+the model out of it with @racket[#:rename]. The callbacks' @tt{state-dict}
+hooks run first, then each callback's @tt{on-save-checkpoint} and the
+trainer's with the whole checkpoint as a mutable hash they may change. The file
+is written to a temporary name and renamed, so a failed save leaves
+@racket[path] as it was.
+
+@racket[#:weights-only?] keeps the model, the hyperparameters and the loop's
+position, as Lightning's @tt{weights_only}. A checkpoint taken at an epoch end,
+a batch end, a validation end, an exception or after the fit can be resumed;
+one taken elsewhere is written but @racket[fit] refuses it.}
 
 @defproc[(read-checkpoint [path path-string?])
          (hash/c string? checkpoint-value/c #:immutable #t)]{
@@ -302,10 +306,12 @@ The checkpoint at @racket[path] as the hash the @tt{on-save-checkpoint} hooks
 saw, with every hash immutable and every tensor on the CPU.}
 
 @defthing[checkpoint-value/c flat-contract?]{
-The values a checkpoint holds: booleans, exact integers, flonums (including
-infinities, NaN and @racket[-0.0]), strings, symbols, tensors, pairs and lists of
-these, and hashes of these whose string keys do not begin with @tt{$}. They read
-back @racket[equal?], with hashes immutable and of the same comparison.}
+The values a checkpoint holds: booleans, exact rationals, flonums (including
+infinities, NaN and @racket[-0.0]), strings, interned symbols, tensors, pairs and
+lists of these, and @racket[eq?], @racket[eqv?] or @racket[equal?] hashes of these
+that hold their keys strongly and whose string keys do not begin with @tt{$}. A
+value that contains itself is not one. They read back @racket[equal?], with hashes
+immutable and of the same comparison.}
 
 @defproc[(load-from-checkpoint [make-trainer (unconstrained-domain-> trainer?)]
                                [path path-string?]
@@ -342,19 +348,26 @@ Lightning's @tt{ModelCheckpoint}, a @racket['checkpoint] callback. It saves with
 epochs (1 when neither trigger is given) or every @racket[#:every-n-train-steps]
 optimizer steps, at most once per @racket[run-global-step], and keeps the
 @racket[#:save-top-k] best by @racket[#:monitor] under @racket[#:mode] (all for
-@racket[-1], none for 0; NaN counts as worst). An epoch-triggered save happens
-in @tt{on-train-epoch-end} when validation runs every epoch at the epoch end or
-not at all, and otherwise in @tt{on-validation-end}, unless
-@racket[#:save-on-train-epoch-end] says which. Files are named from
-@racket[#:filename], by default @tt{epoch=}@italic{E}@tt{-step=}@italic{S}@tt{.ckpt};
-@tt["{name}"] inserts a metric, @tt{epoch} or @tt{step}, written @tt{name=}value
-unless @racket[#:auto-insert-metric-name?] is @racket[#f], and @tt["{name:.2f}"]
-and @tt["{name:02d}"] format it. A name already taken gets @tt{-v1}, @tt{-v2}, ….
-@racket[#:save-last] also writes @tt{last.ckpt} at every save. Its state, under
-Lightning's state key, carries the best and @italic{k}-th paths and scores; it is
-restored in full only when @racket[dirpath] is the one it was saved from, and
-otherwise only the best path, with a warning. A @racket[#:monitor] key missing
-when it saves warns until a validation loop has run and then raises.}
+@racket[-1], none for 0; NaN counts as worst). A @racket[#:monitor] key missing
+when it saves warns until a validation loop has run and then raises.
+
+An epoch-triggered save happens in @tt{on-train-epoch-end} when validation runs
+every epoch at the epoch end or not at all, and otherwise in
+@tt{on-validation-end}, unless @racket[#:save-on-train-epoch-end] says which.
+
+Files are named from @racket[#:filename], by default
+@tt{epoch=}@italic{E}@tt{-step=}@italic{S}@tt{.ckpt}:
+@itemlist[
+ @item{@tt["{name}"] inserts a metric, @tt{epoch} or @tt{step}, written
+       @tt{name=}value unless @racket[#:auto-insert-metric-name?] is
+       @racket[#f];}
+ @item{@tt["{name:.2f}"] and @tt["{name:02d}"] format it;}
+ @item{a name already taken gets @tt{-v1}, @tt{-v2}, …;}
+ @item{@racket[#:save-last] also writes @tt{last.ckpt} at every save.}]
+
+Its state, under Lightning's state key, carries the best and @italic{k}-th paths
+and scores. It is restored in full only when @racket[dirpath] is the one it was
+saved from, and otherwise only the best path, with a warning.}
 
 @deftogether[(@defproc[(model-checkpoint? [v any/c]) boolean?]
               @defproc[(model-checkpoint-best-model-path [cb model-checkpoint?]) (or/c #f string?)]

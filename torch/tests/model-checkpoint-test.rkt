@@ -4,15 +4,15 @@
   (require (only-in racket/file file->value)
            (only-in racket/path file-name-from-path)
            (only-in racket/port open-output-nowhere)
+           (only-in racket/match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "../train/private/types.rkt" callback-hook callback-state-key)
-           (only-in "private/checkpoint-kit.rkt" Small)
-           (only-in "private/comparable.rkt" layer-bytes)
-           (only-in "private/trainer-kit.rkt" apply-keywords toy-loader))
+           (only-in "private/checkpoint-kit.rkt" fit-draws Small)
+           (only-in "private/trainer-kit.rkt" apply-keywords call-with-logged-warnings toy-loader))
 
   (define-runtime-path fixture-path "lightning-checkpoint.rktd")
 
@@ -60,7 +60,8 @@
                #:callbacks (list (watching dir events) mc)))
     (define state ((callback-hook mc 'state-dict) mc #f))
     (append (unbox events)
-            (list (cons 'best-k (sort (for/list ([(p v) (in-hash (model-checkpoint-best-k-models mc))])
+            (list (cons 'best-k (sort (for/list ([(p v) (in-hash
+                                                         (model-checkpoint-best-k-models mc))])
                                         (cons (name-of p) v))
                                       string<? #:key car))
                   (list 'best (name-of (model-checkpoint-best-model-path mc))
@@ -71,25 +72,21 @@
                   (cons 'state-key (callback-state-key mc)))))
 
   (define cases
-    `((no-monitor ())
-      (min-top-2 ((#:monitor . val-loss) (#:save-top-k . 2) (#:filename . "{epoch}-{val-loss:.2f}")))
-      (max-top-all ((#:monitor . val-loss) (#:save-top-k . -1) (#:mode . max)))
-      (save-last ((#:monitor . val-loss) (#:save-last . #t)))
-      (pre-existing () #:existing ("epoch=0-step=3.ckpt"))
-      (unformatted ((#:monitor . val-loss) (#:filename . "{epoch}-{val-loss}")))
-      (every-2-steps ((#:every-n-train-steps . 2) (#:save-top-k . -1)) #:accumulate 2)))
+    `((no-monitor () ())
+      (min-top-2 ((#:monitor . val-loss) (#:save-top-k . 2) (#:filename . "{epoch}-{val-loss:.2f}"))
+                 ())
+      (max-top-all ((#:monitor . val-loss) (#:save-top-k . -1) (#:mode . max)) ())
+      (save-last ((#:monitor . val-loss) (#:save-last . #t)) ())
+      (pre-existing () ((#:existing . ("epoch=0-step=3.ckpt"))))
+      (unformatted ((#:monitor . val-loss) (#:filename . "{epoch}-{val-loss}")) ())
+      (every-2-steps ((#:every-n-train-steps . 2) (#:save-top-k . -1)) ((#:accumulate . 2)))))
 
   (test-case "T3-L25: model-checkpoint replays Lightning's ModelCheckpoint on a scripted val-loss"
     (define fixture (hash-ref (file->value fixture-path) 'cases))
     (with-temporary-directory (root #:template "replay-~a")
       (for ([c (in-list cases)])
-        (define name (car c))
-        (define kws (cadr c))
-        (define options (cddr c))
-        (define existing (cond [(memq '#:existing options) => cadr] [else '()]))
-        (define accumulate (cond [(memq '#:accumulate options) => cadr] [else 1]))
-        (check-equal? (replay root (symbol->string name) kws #:existing existing
-                              #:accumulate accumulate)
+        (match-define (list name kws replay-kws) c)
+        (check-equal? (apply-keywords replay replay-kws root (symbol->string name) kws)
                       (hash-ref fixture name)
                       (symbol->string name)))))
 
@@ -112,11 +109,10 @@
           (hash-ref state "kth_best_model_path" #f) (hash-ref state "kth_value" #f)))
 
   (define (warnings-of thunk)
-    (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
-    (parameterize ([current-error-port (open-output-nowhere)]) (thunk))
-    (let loop ()
-      (define v (sync/timeout 0 receiver))
-      (if v (cons (vector-ref v 1) (loop)) '())))
+    (define-values (_result warnings)
+      (call-with-logged-warnings
+       (lambda () (parameterize ([current-error-port (open-output-nowhere)]) (thunk)))))
+    warnings)
 
   (test-case "T3-L26: the same dirpath restores fully, another restores only the best path"
     (with-temporary-directory (root #:template "mc-restore-~a")
@@ -142,8 +138,9 @@
     (apply-keywords fit
                     (append (list (cons '#:max-epochs hook-epochs) (cons '#:logger #f)
                                   (list '#:callbacks
-                                        (lambda-callback #:on-train-epoch-end (note! 'epoch-end)
-                                                         #:on-train-epoch-start (note! 'epoch-start))
+                                        (lambda-callback
+                                         #:on-train-epoch-end (note! 'epoch-end)
+                                         #:on-train-epoch-start (note! 'epoch-start))
                                         mc))
                             (if val? (list (cons '#:val (toy-loader 2))) '())
                             more)
@@ -177,12 +174,32 @@
                  #:fast-dev-run 2 #:callbacks (list (model-checkpoint #:dirpath fast))))
       (check-true (or (not (directory-exists? fast)) (null? (directory-list fast))))))
 
-  (test-case "T3-L6: model-checkpoint leaves the fit's bytes as they were"
+  (test-case "T3-L6: model-checkpoint leaves the parameters and every random stream as they were"
     (with-temporary-directory (root #:template "mc-pure-~a")
-      (define-values (plain saved) (values (Small) (Small)))
-      (void (fit plain (toy-loader 4) #:val (toy-loader 2) #:max-epochs 3 #:logger #f))
-      (void (fit-small saved (model-checkpoint #:dirpath root #:save-top-k -1) #:epochs 3))
-      (check-equal? (layer-bytes saved) (layer-bytes plain))
+      (define plain (fit-draws '()))
+      (define saved (fit-draws (list (model-checkpoint #:dirpath root #:save-top-k -1))))
+      (check-not-equal? (hash-ref plain 'cpu-rng) (hash-ref plain 'seeded-rng)
+                        "the fit draws from the default stream")
+      (check-equal? saved plain)
       (check-equal? (length (filter (lambda (f) (regexp-match? #rx"[.]ckpt$" (path->string f)))
                                     (directory-list root)))
-                    3))))
+                    3)))
+
+  (test-case (string-append "model-checkpoint: a missing #:monitor key warns while no validation"
+                            " has run, then raises")
+    (with-temporary-directory (root #:template "mc-absent-~a")
+      (define (absent-monitor name)
+        (model-checkpoint #:dirpath (build-path root name) #:monitor 'absent))
+      (define-values (_run warnings)
+        (call-with-logged-warnings
+         (lambda ()
+           (parameterize ([current-error-port (open-output-nowhere)])
+             (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f
+                  #:callbacks (list (absent-monitor "no-val")))))))
+      (check-true (for/or ([w (in-list warnings)]) (regexp-match? #rx"absent" w))
+                  "without a validation loop it warns")
+      (check-exn #rx"absent"
+                 (lambda ()
+                   (fit (Small) (toy-loader 4) #:val (toy-loader 2) #:max-epochs 2 #:logger #f
+                        #:callbacks (list (absent-monitor "val"))))
+                 "after a validation loop it raises, naming the key"))))

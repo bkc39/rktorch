@@ -6,7 +6,7 @@
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" Small)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
   (define (resumed-from mc epochs path #:more [more '()])
     (define step (box #f))
@@ -15,7 +15,8 @@
                #:ckpt-path path
                #:callbacks (append (list (lambda-callback
                                           #:on-load-checkpoint
-                                          (lambda (_r ckpt) (set-box! step (hash-ref ckpt "global_step")))
+                                          (lambda (_r ckpt)
+                                            (set-box! step (hash-ref ckpt "global_step")))
                                           #:on-train-start
                                           (lambda (r) (set-box! start (run-epoch r))))
                                          mc)
@@ -33,7 +34,8 @@
   (test-case "T3-L24: 'best with no model-checkpoint, or two, raises"
     (with-temporary-directory (dir #:template "best-count-~a")
       (check-exn #rx"model-checkpoint"
-                 (lambda () (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best)))
+                 (lambda ()
+                   (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best)))
       (check-exn #rx"model-checkpoint"
                  (lambda ()
                    (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best
@@ -47,11 +49,10 @@
                  #:callbacks (list mc)))
       (check-equal? (resumed-from mc 3 'last) '(4 2))
       (define empty (build-path dir "empty"))
-      (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
-      (define seen
-        (parameterize ([current-error-port (open-output-nowhere)])
-          (resumed-from (model-checkpoint #:dirpath empty) 1 'last)))
+      (define-values (seen warnings)
+        (call-with-logged-warnings
+         (lambda ()
+           (parameterize ([current-error-port (open-output-nowhere)])
+             (resumed-from (model-checkpoint #:dirpath empty) 1 'last)))))
       (check-equal? seen '(#f 0) "no checkpoint loaded, training from epoch 0")
-      (check-true (let loop ()
-                    (define v (sync/timeout 0 receiver))
-                    (and v (or (regexp-match? #rx"last" (vector-ref v 1)) (loop))))))))
+      (check-true (for/or ([w (in-list warnings)]) (regexp-match? #rx"last" w))))))

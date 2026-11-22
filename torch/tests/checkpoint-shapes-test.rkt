@@ -2,13 +2,15 @@
 
 (module+ test
   (require (only-in racket/contract/base flat-contract-predicate)
+           (only-in racket/match match-define)
            rackunit
            (only-in "../main.rkt" ones tensor zeros)
            (only-in "../nn.rkt"
                     Linear grad-scaler-state/c load-optimizer-state! optimizer-state-dict
                     optimizer-state/c parameters scheduler-state/c sgd)
            "../train.rkt"
-           (only-in "private/blame.rkt" blames-caller?))
+           (only-in "private/blame.rkt" blames-caller?)
+           (only-in "private/within.rkt" within))
 
   (define blames-this-test? (blames-caller? "checkpoint-shapes-test"))
 
@@ -59,7 +61,43 @@
                  "two betas")
     (check-false (optimizer-state? (hash "state" (hash) "param_groups"
                                          (list (hash-set sgd-group "dampening" 0))))
-                 "a fixed torch flag"))
+                 "a fixed torch flag")
+    (check-false (optimizer-state? (hash "state" (hasheq "weight" (hash "step" 1))
+                                         "param_groups" (list sgd-group)))
+                 "parameter states keyed by eq?")
+    (check-false (optimizer-state? (hash "state" (hash "weight" (hasheq "step" 1))
+                                         "param_groups" (list sgd-group)))
+                 "slots keyed by eq?")
+    (check-false (optimizer-state? (hash "state" (hash "weight" (make-hash (list (cons "step" 1))))
+                                         "param_groups" (list sgd-group)))
+                 "mutable slots")
+    (check-false (optimizer-state? (hash "state" (hash) "param_groups"
+                                         (list (make-hash (hash->list sgd-group)))))
+                 "a mutable group")
+    (check-false (optimizer-state? (hash "state" (hash) "param_groups"
+                                         (list (for/hasheqv ([(k v) (in-hash sgd-group)])
+                                                 (values k v)))))
+                 "a group keyed by eqv?"))
+
+  (test-case "the state shapes take exact rationals, and hold only checkpoint values"
+    (define exact-group (hash-set* sgd-group "lr" 1/10 "momentum" 9/10 "initial_lr" 1/10))
+    (define accepted
+      (list (list optimizer-state? (hash "state" (hash) "param_groups" (list exact-group)))
+            (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(1/10) "_last_lr" '(1/20)))
+            (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
+                                         "T_cur" 1/2 "T_i" 3))
+            (list grad-scaler-state? (hash "scale" 65536.0 "growth_factor" 2.0
+                                           "backoff_factor" 0.5 "growth_interval" 2000
+                                           "_growth_tracker" 0))))
+    (for ([a (in-list accepted)])
+      (match-define (list shape? v) a)
+      (check-true (shape? v) (format "~e" v))
+      (check-true (checkpoint-value? v) (format "~e" v)))
+    (check-false (scheduler-state?
+                  (hash "last_epoch" 0 "_last_lr" '(0.1)
+                        "_schedulers" (list (hasheq "last_epoch" 0 "base_lrs" '(0.1)
+                                                    "_last_lr" '(0.1)))))
+                 "an inner schedule keyed by eq?"))
 
   (test-case "scheduler-state/c: last_epoch, base_lrs, _last_lr, restarts and inner schedules"
     (define plain (hash "last_epoch" 3 "base_lrs" '(0.1) "_last_lr" '(0.05)))
@@ -74,7 +112,7 @@
     (check-false (scheduler-state? (hash-remove plain "base_lrs")))
     (check-false (scheduler-state? (hash-set plain "_last_lr" '(a))))
     (check-false (scheduler-state? (hash-set plain "step_size" 2)) "constructor arguments")
-    (check-false (scheduler-state? (hash-set plain "_schedulers" (list (hash)))))
+    (check-false (scheduler-state? (hash-set composite "_schedulers" (list (hash)))))
     (check-false (scheduler-state? (hash-copy plain)) "mutable"))
 
   (test-case "grad-scaler-state/c: empty, or torch's five keys in range"
@@ -96,16 +134,36 @@
     (for ([v (list #t #f 0 (expt 2 70) -3 1.5 +inf.0 -inf.0 +nan.0 -0.0 "" "π" 'sym '()
                    '(1 . 2) (list 1 "a" 'b) (zeros 0 3) (tensor 1.0) (ones 2 #:dtype 'uint8)
                    (ones 2 #:dtype 'bool) (ones 2 #:dtype 'bfloat16) (ones 2 #:dtype 'int64)
+                   1/2 -7/3 (hash "lr" 1/10)
                    (hash "a" 1) (hasheq 'a (list (zeros 1))) (hasheqv 1 2.0)
                    (make-hash (list (cons "k" (hash 1 'x)))) (hash '(1 2) "list key"))])
       (check-true (checkpoint-value? v) (format "~e" v)))
-    (for ([v (list (lambda () 1) (vector 1) #"bytes" #\c (void) 1/2 (string->uninterned-symbol "u")
+    (for ([v (list (lambda () 1) (vector 1) #"bytes" #\c (void) (string->uninterned-symbol "u")
                    (hash "$tensor" 1) (hash "ok" (hash "$float" 1.0)) (list 1 (vector))
                    (cons 1 (lambda () 1)) (hash (vector) 1))])
       (check-false (checkpoint-value? v) (format "~e" v)))
     (define cyclic (make-hasheq))
     (hash-set! cyclic 'self cyclic)
     (check-false (checkpoint-value? cyclic) "a hash that holds itself"))
+
+  (test-case "checkpoint-value/c: only eq?, eqv? and equal? hashes that hold their keys strongly"
+    (for ([v (list (hashalw "a" 1) (make-hashalw) (make-weak-hash) (make-weak-hasheq)
+                   (make-ephemeron-hash) (make-ephemeron-hasheqv) (hash "k" (make-weak-hash)))])
+      (check-false (checkpoint-value? v) (format "~e" v))))
+
+  (test-case "checkpoint-value/c: a cycle through pairs is refused, shared structure is walked once"
+    (define loop (read (open-input-string "#0=(1 . #0#)")))
+    (define car-loop (read (open-input-string "#0=(#0# . 1)")))
+    (define shared-dag (for/fold ([v '(1)]) ([_ (in-range 60)]) (cons v v)))
+    (within 10 (lambda ()
+                 (check-false (checkpoint-value? loop) "a list that is its own tail")
+                 (check-false (checkpoint-value? car-loop) "a pair that is its own car")
+                 (check-false (checkpoint-value? (hash "k" loop)) "a cycle inside a hash")
+                 (check-false (checkpoint-value? (let ([bad (list (vector))]) (cons bad bad)))
+                              "a refused node in two places")
+                 (check-true (checkpoint-value? shared-dag) "2^60 paths, 61 nodes")
+                 (check-true (checkpoint-value? (let ([h (hash "x" 1.0)]) (list h h h)))
+                             "one hash in three places"))))
 
   (test-case "checkpoint-filename/c: text with {name}, {name:.Nf} and {name:0Nd}"
     (for ([f '("{epoch}-{step}" "{epoch}-{val-loss:.2f}" "best" "{epoch:02d}" "split-{epoch}"

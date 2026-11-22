@@ -1,10 +1,11 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../main.rkt" backward! dtype make-generator randn to zeros)
            (only-in "../nn.rkt"
-                    Linear adam adamw layer-copy load-optimizer-state! mse-loss
+                    Linear adam adamw cosine-annealing-lr layer-copy load-optimizer-state! mse-loss
                     optimizer-state-dict parameters rmsprop sgd step!
                     weight-decay-param-groups zero-grads!)
            (only-in "private/blame.rkt" blames-caller?)
@@ -48,9 +49,7 @@
 
   (test-case "T3-L10: 3 steps, dict, load into a fresh optimizer, 2 more steps on both"
     (for* ([c (in-list cases)] [mode (in-list (list-ref c 3))])
-      (define name (car c))
-      (define make (cadr c))
-      (define kws (caddr c))
+      (match-define (list name make kws _modes) c)
       (define label (format "~a, ~a" name mode))
       (define net (fresh-net))
       (define opt (build make kws mode net))
@@ -72,8 +71,7 @@
     (for* ([c (in-list cases)]
            [from (in-list (list-ref c 3))]
            [to-mode (in-list (list-ref c 3))])
-      (define make (cadr c))
-      (define kws (caddr c))
+      (match-define (list name make kws _modes) c)
       (define net (fresh-net))
       (define opt (build make kws from net))
       (steps! opt net 3)
@@ -81,26 +79,39 @@
       (define other (build make kws to-mode net))
       (load-optimizer-state! other net saved)
       (check-equal? (comparable (optimizer-state-dict other net)) (comparable saved)
-                    (format "~a: ~a -> ~a" (car c) from to-mode))))
+                    (format "~a: ~a -> ~a" name from to-mode))))
 
   (test-case "T3-L10: the state of an optimizer that never stepped"
     (for ([c (in-list cases)])
+      (match-define (list name make kws _modes) c)
       (define net (fresh-net))
-      (define opt (build (cadr c) (caddr c) 'foreach net))
+      (define opt (build make kws 'foreach net))
       (define saved (optimizer-state-dict opt net))
-      (check-equal? (hash-ref saved "state") (hash) (car c))
-      (define twin-opt (build (cadr c) (caddr c) 'foreach net))
+      (check-equal? (hash-ref saved "state") (hash) name)
+      (define twin-opt (build make kws 'foreach net))
       (load-optimizer-state! twin-opt net saved)
-      (check-equal? (comparable (optimizer-state-dict twin-opt net)) (comparable saved) (car c))))
+      (check-equal? (comparable (optimizer-state-dict twin-opt net)) (comparable saved) name)))
 
   (test-case "T3-L10: two groups keep their own hyperparameters, initial_lr included"
     (define net (fresh-net))
     (define opt (adamw (weight-decay-param-groups net #:weight-decay 0.1) #:lr 0.01))
+    (void (cosine-annealing-lr opt #:t-max 6))
     (steps! opt net 3)
     (define saved (optimizer-state-dict opt net))
+    (define (group-values key state)
+      (map (lambda (grp) (hash-ref grp key #f)) (hash-ref state "param_groups")))
     (check-equal? (length (hash-ref saved "param_groups")) 2)
-    (check-equal? (map (lambda (grp) (hash-ref grp "weight_decay")) (hash-ref saved "param_groups"))
-                  '(0.1 0.0)))
+    (check-equal? (group-values "weight_decay" saved) '(0.1 0.0))
+    (check-equal? (group-values "initial_lr" saved) '(0.01 0.01) "the scheduler's initial_lr")
+    (define twin-opt (adamw (weight-decay-param-groups net #:weight-decay 0.1) #:lr 0.5))
+    (load-optimizer-state! twin-opt net saved)
+    (check-equal? (group-values "initial_lr" (optimizer-state-dict twin-opt net)) '(0.01 0.01)
+                  "initial_lr loads into an optimizer that had none"))
+
+  (test-case "T3-L10: a group hyperparameter given exact saves as a flonum"
+    (define net (fresh-net))
+    (define saved (optimizer-state-dict (sgd (parameters net) #:lr 1/10) net))
+    (check-eqv? (hash-ref (car (hash-ref saved "param_groups")) "lr") 0.1))
 
   (test-case "T3-B16: a model moved after its optimizer was built keeps its names"
     (define net (fresh-net))
@@ -122,7 +133,7 @@
 
   (define (check-refused label opt net state rx)
     (define before (comparable (optimizer-state-dict opt net)))
-    (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? rx (exn-message e))))
+    (check-exn rx
                (lambda () (load-optimizer-state! opt net state))
                label)
     (check-equal? (comparable (optimizer-state-dict opt net)) before
