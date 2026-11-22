@@ -2,8 +2,7 @@
 
 (require (only-in json jsexpr->string string->jsexpr)
          (only-in racket/file file->bytes make-temporary-file)
-         (only-in racket/match match match-define)
-         (only-in racket/path normalize-path)
+         (only-in racket/match match match-define match-lambda)
          (only-in "../foreign.rkt" bytes->tensor dtype tensor->bytes tensor-shape))
 
 (provide (struct-out safetensors)
@@ -21,7 +20,7 @@
     (int64 "I64" 8) (bool "BOOL" 1) (uint8 "U8" 1)))
 
 (define (tag-entry tag)
-  (for/first ([e (in-list tags)] #:when (match e [(list _ t _) (equal? t tag)])) e))
+  (findf (match-lambda [(list _ t _) (equal? t tag)]) tags))
 
 (define (tag-dtype tag)
   (match (tag-entry tag)
@@ -29,8 +28,9 @@
     [#f #f]))
 
 (define (tag-width tag)
-  (match-define (list _ _ width) (tag-entry tag))
-  width)
+  (match (tag-entry tag)
+    [(list _ _ width) width]
+    [#f (raise-arguments-error 'tag-width "not a safetensors dtype tag" "tag" tag)]))
 
 (define (encode who name t)
   (match (assq (dtype t) tags)
@@ -41,8 +41,22 @@
   (when (file-exists? path)
     (delete-file path)))
 
+(define link-hops 40)
+
+(define (link-target path)
+  (let follow ([p (path->complete-path path)] [hops 0])
+    (cond
+      [(not (link-exists? p)) p]
+      [(= hops link-hops)
+       (raise (exn:fail:filesystem
+               (format "call-with-atomic-output-file: too many levels of links\n  path: ~a" path)
+               (current-continuation-marks)))]
+      [else
+       (define-values (dir _name _must-be-dir?) (split-path p))
+       (follow (path->complete-path (resolve-path p) dir) (add1 hops))])))
+
 (define (call-with-atomic-output-file path write!)
-  (define target (normalize-path path))
+  (define target (link-target path))
   (define-values (dir name _) (split-path target))
   (define temporary
     (make-temporary-file (string-append "." (path->string name) ".~a.tmp") #:base-dir dir))
@@ -58,7 +72,8 @@
 
 (define (write-safetensors! who path entries #:metadata [metadata #f])
   (define-values (fields chunks)
-    (for/fold ([fields '()] [chunks '()] [offset 0] #:result (values fields chunks))
+    (for/fold ([fields '()] [chunks '()] [offset 0]
+               #:result (values (reverse fields) (reverse chunks)))
               ([e (in-list entries)])
       (match-define (cons name t) e)
       (define-values (tag bs) (encode who name t))
@@ -75,15 +90,15 @@
      (if metadata
          (cons (cons '__metadata__ (for/hasheq ([(k v) (in-hash metadata)])
                                      (values (string->symbol k) v)))
-               (reverse fields))
-         (reverse fields))))
+               fields)
+         fields)))
   (define header-bytes (string->bytes/utf-8 (jsexpr->string header)))
   (call-with-atomic-output-file
    path
    (lambda (out)
      (write-bytes (integer->integer-bytes (bytes-length header-bytes) 8 #f #f) out)
      (write-bytes header-bytes out)
-     (for ([bs (in-list (reverse chunks))])
+     (for ([bs (in-list chunks)])
        (write-bytes bs out)))))
 
 (struct safetensors (header metadata raw data-start))

@@ -16,15 +16,18 @@
 
   (define-runtime-path master-file "master-save-state.safetensors")
 
+  (define (fresh-model)
+    (Sequential (Linear 3 2) (BatchNorm1d 2)))
+
   (define (fixture-model)
-    (define net (Sequential (Linear 3 2) (BatchNorm1d 2)))
+    (define net (fresh-model))
     (with-no-grad
       (for ([e (in-list (state-dict net))] [k (in-naturals 1)])
         (copy! (cdr e) (full-like (cdr e) (if (~> (cdr e) dtype (eq? 'int64)) k (* 1.5 k))))))
     net)
 
   (test-case "a file written by master's save-state! loads"
-    (define net (Sequential (Linear 3 2) (BatchNorm1d 2)))
+    (define net (fresh-model))
     (load-state! net master-file)
     (check-equal? (layer-bytes net) (layer-bytes (fixture-model))))
 
@@ -43,7 +46,7 @@
       (check-equal? (safetensors-metadata file) meta)
       (check-false (hash-has-key? (safetensors-header file) '__metadata__))
       (check-false (safetensors-metadata (read-safetensors master-file)))
-      (define net (Sequential (Linear 3 2) (BatchNorm1d 2)))
+      (define net (fresh-model))
       (load-state! net path)
       (check-equal? (layer-bytes net) (layer-bytes (fixture-model)))))
 
@@ -94,6 +97,28 @@
       (check-equal? (file->bytes target) (file->bytes master-file))
       (check-equal? (directory-names (build-path dir "real")) '("m.safetensors"))))
 
+  (test-case "save-state! follows a dangling link, and a relative path, as master did"
+    (with-temporary-directory (dir #:template "save-state-~a")
+      (make-directory (build-path dir "real"))
+      (define link (build-path dir "dangling.safetensors"))
+      (make-file-or-directory-link (build-path "real" "new.safetensors") link)
+      (save-state! (fixture-model) link)
+      (check-true (link-exists? link) "the link is still a link")
+      (check-equal? (file->bytes (build-path dir "real" "new.safetensors")) (file->bytes master-file))
+      (parameterize ([current-directory dir])
+        (save-state! (fixture-model) "relative.safetensors"))
+      (check-equal? (file->bytes (build-path dir "relative.safetensors")) (file->bytes master-file))))
+
+  (test-case "a missing directory or a link loop raises a filesystem error, as master did"
+    (with-temporary-directory (dir #:template "save-state-~a")
+      (check-exn exn:fail:filesystem?
+                 (lambda () (save-state! (fixture-model) (build-path dir "nope" "m.safetensors"))))
+      (make-file-or-directory-link "loop2" (build-path dir "loop1"))
+      (make-file-or-directory-link "loop1" (build-path dir "loop2"))
+      (check-exn (lambda (e) (and (exn:fail:filesystem? e) (regexp-match? #rx"loop1" (exn-message e))))
+                 (lambda () (save-state! (fixture-model) (build-path dir "loop1"))))
+      (check-equal? (directory-names dir) '("loop1" "loop2"))))
+
   (define (with-metadata src dst metadata)
     (define raw (file->bytes src))
     (define start (+ 8 (integer-bytes->integer raw #f #f 0 8)))
@@ -112,6 +137,6 @@
         (define path (build-path dir (format "m~a.safetensors" k)))
         (with-metadata master-file path metadata)
         (check-false (safetensors-metadata (read-safetensors path)) (format "~s" metadata))
-        (define net (Sequential (Linear 3 2) (BatchNorm1d 2)))
+        (define net (fresh-model))
         (load-state! net path)
         (check-equal? (layer-bytes net) (layer-bytes (fixture-model)) (format "~s" metadata))))))
