@@ -9,9 +9,10 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  cpu-generator/c device device-type draw-seed index-select
-                  make-generator narrow gen:sized length randperm select shape
-                  tensor tensor? to)
+                  cpu-generator/c draw-seed gen:sized index-select length
+                  make-generator randperm select)
+         (only-in (submod "../foreign.rkt" unchecked)
+                  device device-type narrow shape tensor tensor? to)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt"
                   collate/c dataset-batch dataset-device dataset-length

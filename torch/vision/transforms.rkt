@@ -7,11 +7,12 @@
          (only-in racket/match match match-define)
          (only-in racket/math exact-round)
          (only-in threading ~>)
-         (only-in "../foreign.rkt"
-                  add arange clamp cpu-capability cpu-generator/c device
-                  device-type div draw-seed dtype flip masked-fill! mul narrow
-                  ne permute rand reshape select stack sub tensor tensor->list
-                  tensor-shape tensor? to to-dtype where zeros)
+         (only-in "../foreign.rkt" cpu-generator/c)
+         (only-in (submod "../foreign.rkt" unchecked)
+                  add arange clamp cpu-capability device device-type div
+                  draw-seed dtype flip masked-fill! mul narrow ne permute rand
+                  reshape select stack sub tensor tensor->list tensor-shape
+                  tensor? to to-dtype where zeros)
          (only-in "../generated.rkt"
                   constant-pad-nd index-tensor random-from! round-tensor
                   upsample-bilinear2d upsample-bilinear2d-aa)

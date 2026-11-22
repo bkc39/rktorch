@@ -7,14 +7,15 @@
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
                               contract-export ctor-formal init-formals))
+         (only-in racket/base [length list-length])
          (only-in racket/contract/base
                   -> ->i any any/c contract-out contract? flat-named-contract
                   non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
-         (only-in "../foreign.rkt"
-                  device device? dtype gen:sized length shape stack
-                  tensor->list tensor?)
+         (only-in "../foreign.rkt" gen:sized length)
+         (only-in (submod "../foreign.rkt" unchecked)
+                  device device? dtype shape stack tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -33,7 +34,7 @@
 (define (index-tensor? v)
   (and (tensor? v)
        (eq? (dtype v) 'int64)
-       (= 1 (length (shape v)))
+       (= 1 (list-length (shape v)))
        (positive? (car (shape v)))))
 
 (define index-tensor/c (flat-named-contract 'non-empty-int64-vector index-tensor?))
@@ -86,7 +87,7 @@
             (and (list? item) (pair? item) (andmap tensor? item)))
           (let ([lead (first v)])
             (for/and ([item (in-list v)])
-              (and (= (length item) (length lead))
+              (and (= (list-length item) (list-length lead))
                    (andmap (lambda (t u)
                              (and (equal? (shape t) (shape u))
                                   (equal? (device t) (device u))))
@@ -96,7 +97,7 @@
 (define/contract-out (default-collate items) ;; noqa
   (-> items/c any)
   (apply values
-         (for/list ([field (in-range (length (first items)))])
+         (for/list ([field (in-range (list-length (first items)))])
            (stack (for/list ([item (in-list items)]) (list-ref item field))))))
 
 ;; chaperone-of?, not eq?: every importer holds its own contract chaperone
