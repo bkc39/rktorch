@@ -73,6 +73,8 @@
       (normalize ,(lambda () (normalize 'image '(0.0 0.0 0.0) '(1.0 1.0 1.0))))
       (normalize ,(lambda () (normalize image "mean" '(1.0))))
       (normalize ,(lambda () (normalize image '(0.0) '(1.0) #:inplace? 'yes)))
+      (normalize ,(lambda () (normalize image '(0.0 0.0) '(1.0))))
+      (normalize ,(lambda () (normalize image '(0.0) '(0.0))))
       (imagenet-normalize ,(lambda () (imagenet-normalize (zeros 1 4 4))))
       (convert-image-dtype ,(lambda () (convert-image-dtype (zeros 3 2 2 #:dtype 'int64))))
       (imagenet-preprocess ,(lambda () (imagenet-preprocess "image")))
