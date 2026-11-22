@@ -3,9 +3,10 @@
 (module+ test
   (require (only-in racket/dict in-dict)
            (only-in racket/flonum flexp flsingle)
-           (only-in racket/list index-of last range shuffle take)
-           (only-in racket/match match-define)
+           (only-in racket/list count drop index-of last range shuffle take)
+           (only-in racket/match match-define match-lambda)
            (only-in racket/math nan?)
+           (only-in racket/sequence in-slice)
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
@@ -17,9 +18,10 @@
                     accuracy accuracy-metric confusion-matrix confusion-matrix-metric
                     cross-entropy metric-compute metric-reset! metric-update! metric? nll-loss
                     perplexity perplexity-metric)
+           (only-in (submod "../nn/metrics.rkt" private) tally-state)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/gradcheck.rkt" gradcheck)
-           (only-in "private/op-calls.rkt" op-calls-of)
+           (only-in "private/op-calls.rkt" op-calls-of tensor-crossings-of)
            (only-in "private/within.rkt" bounded-test))
 
   (define blames-this-test? (blames-caller? "nn-metrics-test"))
@@ -47,11 +49,11 @@
     (if (null? ys) (zeros 0 #:dtype 'int64 #:device on) (tensor ys #:dtype 'int64 #:device on)))
 
   (define (rank-hit? row y k)
-    (define score (list-ref row y))
-    (< (for/sum ([v (in-list row)]) (if (> v score) 1 0)) k))
+    (match-define (cons score _) (drop row y))
+    (< (count (lambda (v) (> v score)) row) k))
 
   (define (hits rows ys k)
-    (for/sum ([row (in-list rows)] [y (in-list ys)]) (if (rank-hit? row y k) 1 0)))
+    (count (lambda (row y) (rank-hit? row y k)) rows ys))
 
   (define (top-1 row)
     (index-of row (apply max row)))
@@ -59,9 +61,8 @@
   (define (single x)
     (flsingle (exact->inexact x)))
 
-  (define (acc rows ys k [ignore #f])
-    (item (accuracy (logits-of rows (length (car rows))) (labels-of ys)
-                    #:top-k k #:ignore-index ignore)))
+  (define (acc rows ys c k [ignore #f])
+    (item (accuracy (logits-of rows c) (labels-of ys) #:top-k k #:ignore-index ignore)))
 
   (bounded-test "M1: accuracy is the float32 share of rows whose label is in the top k"
     (for* ([n (in-list '(1 7 64))] [c (in-list '(2 5 10))] [k (in-range 1 (add1 c))])
@@ -75,9 +76,9 @@
   (bounded-test "M2: top-k at the class count is 1, and accuracy never falls as k grows"
     (for ([c (in-list '(2 5 10))])
       (define-values (rows ys) (fixture 64 c c))
-      (check-equal? (acc rows ys c) 1.0)
+      (check-equal? (acc rows ys c c) 1.0)
       (for ([k (in-range 1 c)])
-        (check-true (<= (acc rows ys k) (acc rows ys (add1 k))) (format "c ~a k ~a" c k)))))
+        (check-true (<= (acc rows ys c k) (acc rows ys c (add1 k))) (format "c ~a k ~a" c k)))))
 
   (bounded-test "M3: an all-equal row predicts class 0, and class indices match their logits"
     (define ys '(0 1 2 0 0 2))
@@ -106,8 +107,8 @@
       (define marked (for/list ([y (in-list ys)] [i (in-naturals)])
                        (if (and (= ignore -100) (zero? (modulo i 3))) -100 y)))
       (define-values (rs ks) (kept-rows rows marked ignore))
-      (check-equal? (acc rows marked k ignore) (acc rs ks k) (format "ignore ~a k ~a" ignore k)))
-    (check-true (nan? (acc rows (map (lambda (_) 3) ys) 1 3)))
+      (check-equal? (acc rows marked 5 k ignore) (acc rs ks 5 k) (format "ignore ~a k ~a" ignore k)))
+    (check-true (nan? (acc rows (map (lambda (_) 3) ys) 5 1 3)))
     (check-true (nan? (item (accuracy (zeros 0 5) (labels-of '()))))))
 
   (define (confusion-of rows ys c [ignore #f])
@@ -119,18 +120,20 @@
     (define ys (for/list ([y (in-list ys*)] [i (in-naturals)]) (if (zero? (modulo i 7)) -1 y)))
     (define preds (map top-1 rows))
     (define cm (confusion-of rows ys c -1))
-    (define (entry t p) (list-ref cm (+ (* t c) p)))
+    (define cm-rows (for/list ([row (in-slice c cm)]) row))
     (define kept (for/list ([y (in-list ys)] [p (in-list preds)] #:unless (= y -1)) (cons y p)))
-    (for* ([t (in-range c)] [p (in-range c)])
-      (check-equal? (entry t p) (for/sum ([tp (in-list kept)]) (if (equal? tp (cons t p)) 1 0))))
+    (define (kept-where keep?)
+      (count (match-lambda [(cons t p) (keep? t p)]) kept))
+    (check-equal? cm (for*/list ([t (in-range c)] [p (in-range c)])
+                       (kept-where (lambda (t* p*) (and (= t* t) (= p* p))))))
     (check-equal? (apply + cm) (length kept))
-    (for ([i (in-range c)])
-      (check-equal? (for/sum ([p (in-range c)]) (entry i p))
-                    (for/sum ([tp (in-list kept)]) (if (= (car tp) i) 1 0)))
-      (check-equal? (for/sum ([t (in-range c)]) (entry t i))
-                    (for/sum ([tp (in-list kept)]) (if (= (cdr tp) i) 1 0))))
-    (check-equal? (single (/ (for/sum ([i (in-range c)]) (entry i i)) (apply + cm)))
-                  (acc rows ys 1 -1))
+    (check-equal? (map (lambda (row) (apply + row)) cm-rows)
+                  (for/list ([i (in-range c)]) (kept-where (lambda (t _p) (= t i)))))
+    (check-equal? (apply map + cm-rows)
+                  (for/list ([i (in-range c)]) (kept-where (lambda (_t p) (= p i)))))
+    (define diagonal
+      (for/sum ([v (in-list cm)] [i (in-naturals)] #:when (zero? (modulo i (add1 c)))) v))
+    (check-equal? (single (/ diagonal (apply + cm))) (acc rows ys c 1 -1))
     (check-equal? (~> (confusion-matrix (argmax (logits-of rows c) 1) (labels-of ys)
                                         #:classes c #:ignore-index -1)
                       tensor->list)
@@ -159,7 +162,12 @@
       (check-equal? (dtype (perplexity ce)) 'float32)))
 
   (bounded-test "M9: the gradient of perplexity in its NLL is perplexity over the tokens"
-    (check-true (gradcheck (lambda (nll) (perplexity nll #:tokens 5)) (list (tensor 3.0)) #:eps 1e-3))
+    (check-true (gradcheck (lambda (nll) (perplexity nll #:tokens 5))
+                           (list (tensor 3.0 #:dtype 'float64))))
+    (check-equal? (dtype (perplexity (tensor 3.0 #:dtype 'float64) #:tokens 5)) 'float64)
+    (check-equal? (dtype (perplexity (tensor 3.0 #:dtype 'float64)
+                                     #:tokens (tensor 5 #:dtype 'int64)))
+                  'float64)
     (define nll (requires-grad! (tensor 3.0 #:dtype 'float64)))
     (define ppl (perplexity nll #:tokens 5))
     (backward! ppl)
@@ -205,11 +213,8 @@
                                             l y bounds))
                     (tensor->list (confusion-matrix l y #:classes 5 #:ignore-index -100)))
       (define-values (seq tgt) (sequence-fixture 6 7 11 seed))
-      (define ppl (perplexity-metric #:ignore-index 3))
-      (for ([from (in-list bounds)] [to* (in-list (cdr bounds))] #:when (< from 6))
-        (define len (- (min 6 to*) from))
-        (metric-update! ppl (narrow seq 0 from len) (narrow tgt 0 from len)))
-      (check-true (close? (item (metric-compute ppl)) (item (perplexity-of seq tgt 3)) 1e-6))
+      (define ppl (streamed (perplexity-metric #:ignore-index 3) seq tgt (cuts 6 seed)))
+      (check-true (close? (item ppl) (item (perplexity-of seq tgt 3)) 1e-6))
       (define flat (perplexity-metric))
       (metric-update! flat (reshape seq -1 11) (reshape tgt -1))
       (check-true (close? (item (metric-compute flat)) (item (perplexity-of seq tgt #f)) 1e-6))))
@@ -246,6 +251,10 @@
       (check-false (requires-grad? (metric-compute m))))
     (define ppl (perplexity-metric))
     (metric-update! ppl s tgt)
+    (metric-update! ppl s tgt)
+    (match-define (list nll tokens) (tally-state ppl))
+    (check-false (requires-grad? nll) "the summed NLL holds no graph")
+    (check-false (requires-grad? tokens))
     (check-false (requires-grad? (metric-compute ppl)))
     (check-false (has-grad? l))
     (check-false (has-grad? s)))
@@ -254,8 +263,11 @@
     (for/sum ([(place bytes) (in-dict (native-memory-use))] #:when (equal? place on)) bytes))
 
   (define (metric-cases validate?)
-    (list (list (lambda () (accuracy-metric #:top-k 2 #:validate-args? validate?)) 'class 16)
-          (list (lambda () (confusion-matrix-metric #:classes 5 #:validate-args? validate?)) 'class
+    (list (list (lambda () (accuracy-metric #:top-k 2 #:ignore-index -100 #:validate-args? validate?))
+                'class 16)
+          (list (lambda ()
+                  (confusion-matrix-metric #:classes 5 #:ignore-index -100 #:validate-args? validate?))
+                'class
                 (* 8 25))
           (list (lambda () (perplexity-metric #:validate-args? validate?)) 'sequence 8)))
 
@@ -265,7 +277,7 @@
         (values (logits-of rows 5) (labels-of ys))
         (values (randn n 5) (labels-of ys))))
 
-  (bounded-test "M13: an update's native calls do not grow with the batch, nor its memory with updates"
+  (bounded-test "M13: an update builds no host tensor, and its calls and memory do not grow"
     (for* ([validate? (in-list '(#t #f))] [c (in-list (metric-cases validate?))])
       (match-define (list make kind state-bytes) c)
       (define (calls n)
@@ -274,6 +286,14 @@
         (metric-update! m p y)
         (op-calls-of (lambda () (metric-update! m p y))))
       (check-equal? (calls 8) (calls 4096) (format "~a validate ~a" kind validate?))
+      (unless validate?
+        (define fresh (make))
+        (define-values (p y) (inputs kind 8))
+        (check-equal? (tensor-crossings-of (lambda ()
+                                             (metric-update! fresh p y)
+                                             (metric-update! fresh p y)))
+                      0
+                      (format "~a: an update builds no tensor from host data" kind)))
       (define m (make))
       (define-values (p y) (inputs kind 64))
       (reclaim-native-memory!)
@@ -310,6 +330,8 @@
                         (lambda () (metric-update! (perplexity-metric) (zeros 4 3) (zeros 4 2 #:dtype 'int64)))
                         (lambda () (metric-update! (perplexity-metric) (zeros 4) y))
                         (lambda () (metric-update! (accuracy-metric) l (labels-of '(0 1 7 0))))
+                        (lambda () (metric-update! (perplexity-metric) l (labels-of '(0 1 3 0))))
+                        (lambda () (confusion-matrix l (labels-of '(0 1 3 0)) #:classes 3))
                         (lambda () (metric-compute (accuracy-metric)))))]
           [i (in-naturals)])
       (check-exn blames-this-test? thunk (format "case ~a" i)))

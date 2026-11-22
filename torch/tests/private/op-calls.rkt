@@ -8,7 +8,8 @@
 
 (provide crossings-of
          faulted-at?
-         op-calls-of)
+         op-calls-of
+         tensor-crossings-of)
 
 (define ((uncounted reading) dev)
   (with-crossing-hook #f
@@ -71,3 +72,15 @@
                              void
                              thunk)
     #f))
+
+(define (in-tensor-constructor?)
+  (and (assq 'tensor (continuation-mark-set->context (current-continuation-marks))) #t))
+
+(define (tensor-crossings-of thunk)
+  (define n 0)
+  (call-with-own-crossings (lambda ()
+                             (when (in-tensor-constructor?)
+                               (set! n (add1 n))))
+                           void
+                           thunk)
+  n)

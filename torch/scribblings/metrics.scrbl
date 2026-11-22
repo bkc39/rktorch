@@ -48,6 +48,9 @@ The @racket['int64] @tt{[classes, classes]} matrix whose entry
 and columns predicted ones, as in torchmetrics'
 @tt{multiclass_confusion_matrix}. Scores are reduced by @racket[argmax]
 first. Its diagonal over its sum is the top-1 @racket[accuracy].
+@racket[validate-args?] checks the labels and, for class indices, the
+predicted classes; with @racket[#f], an out-of-range predicted class is
+counted in the wrong cell rather than reported.
 
 @examples[#:eval torch-eval
 (confusion-matrix (tensor '(0 2 1 1)) (tensor '(0 1 1 2)) #:classes 3)]
@@ -59,8 +62,10 @@ first. Its diagonal over its sum is the top-1 @racket[accuracy].
 The exponential of the mean negative log-likelihood per token: @racket[nll]
 summed over @racket[tokens] tokens, which is what a strided evaluation
 accumulates, or a mean cross-entropy when @racket[tokens] is @racket[#f].
-A real answers a flonum; a tensor answers a scalar on its device, and
-gradients flow through it.
+A real answers a flonum. A tensor @racket[nll] is a floating-point scalar,
+and @racket[tokens] then may be a 0-d @racket['int64] tensor on its device;
+the answer is a scalar of @racket[nll]'s dtype on its device, as
+@racket[exp]'s is, and gradients flow through it.
 
 @examples[#:eval torch-eval
 (perplexity (cross-entropy (zeros 4 10) (tensor '(0 1 2 3))))
@@ -104,7 +109,8 @@ builds no graph.
 @defproc[(metric-compute [m metric?]) tensor?]{
 The figure over every update since construction or the last
 @racket[metric-reset!]: the functional form applied to all of them at
-once. It is a fresh tensor, so later updates leave it alone.
+once. It is a fresh tensor, so later updates leave it alone. A metric with
+no update since then is a contract error.
 }
 
 @defproc[(metric-reset! [m metric?]) void?]{

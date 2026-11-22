@@ -4,24 +4,25 @@
                   -> ->* ->i any/c contract-out flat-contract-predicate flat-named-contract
                   or/c)
          (only-in racket/flonum fl/ flexp)
+         (only-in racket/generic define-generics)
          (only-in racket/list drop-right last)
-         (only-in racket/match match-define)
+         (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  * + / argmax copy! device dtype eq exp index-add! log-softmax max min ne numel
-                  ones-like reshape shape stack sum tensor tensor->list tensor? to-dtype topk unsqueeze
-                  where with-no-grad zeros)
+                  * + / argmax copy! device dtype eq exp full index-add! log-softmax ne ones-like
+                  reshape shape sum tensor? to-dtype topk unsqueeze with-no-grad zeros)
          (prefix-in g: (only-in "../generated.rkt" nll-loss sum-dim-intlist))
-         (only-in "../private/contract.rkt" define/contract-out supplied-or))
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in "private/tensor-checks.rkt"
+                  in-range? rank-of same-device? same-rows? tensor-of?))
+
+(provide (contract-out [metric? (-> any/c boolean?)]))
+
+(module+ private
+  (provide tally-state))
 
 (define (float-dtype? dt)
   (and (memq dt '(float16 bfloat16 float32 float64)) #t))
-
-(define (rank-of v)
-  (length (shape v)))
-
-(define (tensor-of? v ranks dtype?)
-  (and (tensor? v) (memv (rank-of v) ranks) (dtype? (dtype v)) #t))
 
 (define (int64? dt)
   (eq? dt 'int64))
@@ -44,6 +45,10 @@
 (define float32-scalar/c
   (flat-named-contract 'float32-scalar (lambda (v) (tensor-of? v '(0) float32?))))
 
+(define (scalar-of/c dt)
+  (flat-named-contract (string->symbol (format "~a-scalar" dt))
+                       (lambda (v) (tensor-of? v '(0) (lambda (d) (eq? d dt))))))
+
 (define (confusion/c classes)
   (flat-named-contract 'confusion-matrix
                        (lambda (v)
@@ -63,17 +68,10 @@
 (define sequence-targets/c
   (flat-named-contract 'sequence-targets (lambda (v) (tensor-of? v '(1 2) int64?))))
 
-(define (rows v)
-  (car (shape v)))
-
 (define (classes-of predictions)
-  (and (= 2 (rank-of predictions)) (cadr (shape predictions))))
-
-(define (same-rows? predictions labels)
-  (= (rows predictions) (rows labels)))
-
-(define (same-device? a b)
-  (equal? (device a) (device b)))
+  (match (shape predictions)
+    [(list _ classes) classes]
+    [_ #f]))
 
 (define (top-k-fits? predictions top-k)
   (define classes (classes-of predictions))
@@ -83,19 +81,12 @@
   (define width (classes-of predictions))
   (or (not width) (= width classes)))
 
-;; one host read: the extremes of t with the ignored entries read as 0
-(define (in-range? t bound ignore-index)
-  (or (zero? (numel t))
-      (let ([kept (if ignore-index (where (eq t ignore-index) 0 t) t)])
-        (match-define (list lo hi) (tensor->list (stack (list (min kept) (max kept)))))
-        (and (<= 0 lo) (< hi bound)))))
-
 (define (labels-in-range? predictions labels ignore-index)
   (in-range? labels (or (classes-of predictions) +inf.0) ignore-index))
 
 (define (indices-in-range? predictions labels classes ignore-index)
   (and (in-range? labels classes ignore-index)
-       (or (classes-of predictions) (in-range? predictions classes #f))))
+       (or (classes-of predictions) (in-range? predictions classes))))
 
 (define (tokens-match? nll tokens)
   (or (not (tensor? tokens))
@@ -111,8 +102,14 @@
      (define-values (_top indices) (topk predictions top-k #:dim 1))
      (g:sum-dim-intlist (eq indices (unsqueeze labels 1)) '(1) #f 'int64)]))
 
+(define (int64-scalar v on)
+  (full v #:dtype 'int64 #:device on))
+
+(define (kept targets ignore-index)
+  (ne targets (int64-scalar ignore-index (device targets))))
+
 (define (counted labels ignore-index)
-  (if ignore-index (to-dtype (ne labels ignore-index) 'int64) (ones-like labels)))
+  (if ignore-index (to-dtype (kept labels ignore-index) 'int64) (ones-like labels)))
 
 (define (accuracy-counts predictions labels top-k ignore-index)
   (define weights (counted labels ignore-index))
@@ -125,9 +122,11 @@
 ;; an ignored row adds its zero weight at cell 0, whatever its label
 (define (confusion-add! counts predictions labels classes ignore-index)
   (define weights (counted labels ignore-index))
-  (define width (tensor classes #:dtype 'int64 #:device (device labels)))
-  (define cells (+ (* labels width) (predicted-classes predictions)))
-  (index-add! counts 0 (if ignore-index (where (eq weights 0) 0 cells) cells) weights))
+  (define cells (+ (* labels (int64-scalar classes (device labels))) (predicted-classes predictions)))
+  (index-add! counts 0 (if ignore-index (* cells weights) cells) weights))
+
+(define (fresh-counts classes on)
+  (zeros (* classes classes) #:dtype 'int64 #:device on))
 
 (define sum-reduction 2)
 
@@ -138,7 +137,7 @@
     (~> (reshape logits -1 (last (shape logits)))
         (log-softmax -1)
         (g:nll-loss flat-targets #f sum-reduction ignored)))
-  (list (to-dtype nll 'float32) (~> (ne flat-targets ignored) (to-dtype 'float32) sum)))
+  (list (to-dtype nll 'float32) (~> (kept flat-targets ignored) (to-dtype 'float32) sum)))
 
 (define/contract-out (accuracy predictions labels ;; noqa
                                #:top-k [top-k 1]
@@ -179,7 +178,7 @@
            (indices-in-range? predictions labels classes (supplied-or ignore-index #f)))
        [result (classes) (confusion/c classes)])
   (with-no-grad
-    (define counts (zeros (* classes classes) #:dtype 'int64 #:device (device labels)))
+    (define counts (fresh-counts classes (device labels)))
     (confusion-add! counts predictions labels classes ignore-index)
     (reshape counts classes classes)))
 
@@ -188,63 +187,91 @@
        (#:tokens [tokens tokens/c])
        #:pre/name (nll tokens) "a token tensor needs an NLL tensor on its device"
        (tokens-match? nll (supplied-or tokens #f))
-       [result (nll) (if (tensor? nll) float32-scalar/c flonum?)])
+       [result (nll) (if (tensor? nll) (scalar-of/c (dtype nll)) flonum?)])
   (if (tensor? nll)
-      (to-dtype (exp (if tokens (/ nll tokens) nll)) 'float32)
+      (exp (if tokens (/ nll tokens) nll))
       (flexp (if tokens (fl/ (real->double-flonum nll) (real->double-flonum tokens))
                  (real->double-flonum nll)))))
 
-(struct metric (kind config [state #:mutable]))
+(define-generics metric
+  (predictions-of metric)
+  (targets-of metric)
+  (rows-fit? metric predictions targets)
+  (width-fits? metric predictions)
+  (targets-in-range? metric predictions targets)
+  (tally-add metric state predictions targets)
+  (tally-figure metric state)
+  #:fallbacks
+  [(define (predictions-of _m) predictions/c)
+   (define (targets-of _m) labels/c)
+   (define (rows-fit? _m predictions labels) (same-rows? predictions labels))])
 
-(provide (contract-out [metric? (-> any/c boolean?)]))
+(struct tally (ignore-index validate-args? [state #:mutable]))
 
-(define (config-ref m key)
-  (hash-ref (metric-config m) key))
+(define (summed sums counts)
+  (if sums (map + sums counts) counts))
 
-(define (perplexity-metric? m)
-  (eq? (metric-kind m) 'perplexity))
+(struct accuracy-tally tally (top-k)
+  #:methods gen:metric
+  [(define (width-fits? m predictions)
+     (top-k-fits? predictions (accuracy-tally-top-k m)))
+   (define (targets-in-range? m predictions labels)
+     (labels-in-range? predictions labels (tally-ignore-index m)))
+   (define (tally-add m sums predictions labels)
+     (summed sums (accuracy-counts predictions labels (accuracy-tally-top-k m)
+                                   (tally-ignore-index m))))
+   (define (tally-figure _m sums)
+     (ratio sums))])
 
-(define (metric-predictions/c m)
-  (if (perplexity-metric? m) sequence-logits/c predictions/c))
+(struct confusion-tally tally (classes)
+  #:methods gen:metric
+  [(define (width-fits? m predictions)
+     (width-is? predictions (confusion-tally-classes m)))
+   (define (targets-in-range? m predictions labels)
+     (indices-in-range? predictions labels (confusion-tally-classes m) (tally-ignore-index m)))
+   (define (tally-add m counts predictions labels)
+     (define classes (confusion-tally-classes m))
+     (define into (or counts (fresh-counts classes (device labels))))
+     (confusion-add! into predictions labels classes (tally-ignore-index m))
+     into)
+   (define (tally-figure m counts)
+     (define classes (confusion-tally-classes m))
+     (define fresh (zeros classes classes #:dtype 'int64 #:device (device counts)))
+     (copy! fresh (reshape counts classes classes))
+     fresh)])
 
-(define (metric-targets/c m)
-  (if (perplexity-metric? m) sequence-targets/c labels/c))
-
-(define (rows-match? m predictions targets)
-  (if (perplexity-metric? m)
-      (equal? (drop-right (shape predictions) 1) (shape targets))
-      (same-rows? predictions targets)))
-
-(define (width-fits? m predictions)
-  (case (metric-kind m)
-    [(accuracy) (top-k-fits? predictions (config-ref m 'top-k))]
-    [(confusion-matrix) (width-is? predictions (config-ref m 'classes))]
-    [else #t]))
+(struct perplexity-tally tally ()
+  #:methods gen:metric
+  [(define (predictions-of _m) sequence-logits/c)
+   (define (targets-of _m) sequence-targets/c)
+   (define (rows-fit? _m logits targets)
+     (equal? (drop-right (shape logits) 1) (shape targets)))
+   (define (width-fits? _m _logits) #t)
+   (define (targets-in-range? m logits targets)
+     (in-range? targets (last (shape logits)) (tally-ignore-index m)))
+   (define (tally-add m sums logits targets)
+     (summed sums (perplexity-counts logits targets (tally-ignore-index m))))
+   (define (tally-figure _m sums)
+     (match-define (list nll tokens) sums)
+     (exp (/ nll tokens)))])
 
 (define (device-fits? m predictions)
-  (define state (metric-state m))
-  (or (not state) (same-device? (car state) predictions)))
+  (match (tally-state m)
+    [#f #t]
+    [(or (list on _) on) (same-device? on predictions)]))
 
 (define (range-fits? m predictions targets)
-  (define ignore-index (config-ref m 'ignore-index))
-  (or (not (config-ref m 'validate-args?))
-      (case (metric-kind m)
-        [(accuracy) (labels-in-range? predictions targets ignore-index)]
-        [(confusion-matrix)
-         (indices-in-range? predictions targets (config-ref m 'classes) ignore-index)]
-        [else (in-range? targets (last (shape predictions)) ignore-index)])))
+  (or (not (tally-validate-args? m)) (targets-in-range? m predictions targets)))
 
 (define (metric-updated? m)
-  (and (metric-state m) #t))
+  (and (tally-state m) #t))
 
 (define/contract-out (accuracy-metric #:top-k [top-k 1] ;; noqa
                                       #:ignore-index [ignore-index #f]
                                       #:validate-args? [validate-args? #t])
   (->* [] [#:top-k exact-positive-integer? #:ignore-index ignore-index/c #:validate-args? boolean?]
        metric?)
-  (metric 'accuracy
-          (hasheq 'top-k top-k 'ignore-index ignore-index 'validate-args? validate-args?)
-          #f))
+  (accuracy-tally ignore-index validate-args? #f top-k))
 
 (define/contract-out (confusion-matrix-metric #:classes classes ;; noqa
                                               #:ignore-index [ignore-index #f]
@@ -252,21 +279,19 @@
   (->* [#:classes exact-positive-integer?]
        [#:ignore-index ignore-index/c #:validate-args? boolean?]
        metric?)
-  (metric 'confusion-matrix
-          (hasheq 'classes classes 'ignore-index ignore-index 'validate-args? validate-args?)
-          #f))
+  (confusion-tally ignore-index validate-args? #f classes))
 
 (define/contract-out (perplexity-metric #:ignore-index [ignore-index #f] ;; noqa
                                         #:validate-args? [validate-args? #t])
   (->* [] [#:ignore-index ignore-index/c #:validate-args? boolean?] metric?)
-  (metric 'perplexity (hasheq 'ignore-index ignore-index 'validate-args? validate-args?) #f))
+  (perplexity-tally ignore-index validate-args? #f))
 
 (define/contract-out (metric-update! m predictions targets) ;; noqa
   (->i ([m metric?]
-        [predictions (m) (metric-predictions/c m)]
-        [targets (m) (metric-targets/c m)])
+        [predictions (m) (predictions-of m)]
+        [targets (m) (targets-of m)])
        #:pre/name (m predictions targets) "one target per prediction row"
-       (rows-match? m predictions targets)
+       (rows-fit? m predictions targets)
        #:pre/name (m predictions) "logits of the metric's class count, top-k within it"
        (width-fits? m predictions)
        #:pre/name (predictions targets) "predictions and targets on one device"
@@ -277,42 +302,15 @@
        (range-fits? m predictions targets)
        [result void?])
   (with-no-grad
-    (define ignore-index (config-ref m 'ignore-index))
-    (define state (metric-state m))
-    (case (metric-kind m)
-      [(confusion-matrix)
-       (define classes (config-ref m 'classes))
-       (define counts
-         (if state
-             (car state)
-             (zeros (* classes classes) #:dtype 'int64 #:device (device targets))))
-       (confusion-add! counts predictions targets classes ignore-index)
-       (set-metric-state! m (list counts))]
-      [else
-       (define counts
-         (if (perplexity-metric? m)
-             (perplexity-counts predictions targets ignore-index)
-             (accuracy-counts predictions targets (config-ref m 'top-k) ignore-index)))
-       (set-metric-state! m (if state (map + state counts) counts))])))
+    (set-tally-state! m (tally-add m (tally-state m) predictions targets))))
 
 (define/contract-out (metric-compute m) ;; noqa
   (->i ([m metric?])
        #:pre/name (m) "updated since construction or the last reset"
        (metric-updated? m)
        [result tensor?])
-  (with-no-grad
-    (define state (metric-state m))
-    (case (metric-kind m)
-      [(accuracy) (ratio state)]
-      [(confusion-matrix)
-       (define classes (config-ref m 'classes))
-       (define fresh (zeros classes classes #:dtype 'int64 #:device (device (car state))))
-       (copy! fresh (reshape (car state) classes classes))
-       fresh]
-      [else
-       (match-define (list nll tokens) state)
-       (exp (/ nll tokens))])))
+  (with-no-grad (tally-figure m (tally-state m))))
 
 (define/contract-out (metric-reset! m) ;; noqa
   (-> metric? void?)
-  (set-metric-state! m #f))
+  (set-tally-state! m #f))

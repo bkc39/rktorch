@@ -931,8 +931,10 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`,
   `torch/nn/metrics.rkt` = torchmetrics' micro accuracy, confusion matrix and
-  perplexity, functional and as `metric?` accumulators whose state lives on the
-  first update's device, updated under `with-no-grad`; #215).
+  perplexity, functional and as `metric?` accumulators (`gen:metric`, one
+  struct per metric) whose state lives on the first update's device, updated
+  under `with-no-grad`; #215; its shape and range checks are
+  `torch/nn/private/tensor-checks.rkt`).
 - `torch/train.rkt` — pure re-export facade over `torch/train/trainer.rkt`
   (`define-trainer`, `define-callback` and their body forms),
   `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),

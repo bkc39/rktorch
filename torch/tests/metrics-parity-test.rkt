@@ -2,9 +2,11 @@
 
 (module+ test
   (require rackunit
-           (only-in "../main.rkt" item narrow tensor->list)
+           (only-in threading ~>)
+           (only-in "../main.rkt" argmax item narrow tensor->list)
            (only-in "../nn.rkt"
-                    accuracy confusion-matrix metric-compute metric-update! perplexity-metric)
+                    accuracy accuracy-metric confusion-matrix confusion-matrix-metric metric-compute
+                    metric-update! perplexity-metric)
            (only-in "private/python-env.rkt" python-check python-module-available? unpack))
 
   (define (check-metrics j)
@@ -20,6 +22,29 @@
     (check-equal? (tensor->list (confusion-matrix logits labels #:classes 10 #:ignore-index -100))
                   (tensor->list (unpack (hash-ref j 'cm) 'int64))
                   "M16: multiclass_confusion_matrix")
+    (define clean (unpack (hash-ref j 'clean) 'int64))
+    (for ([ignore (in-list '(#f 0))] [key (in-list '(None |0|))])
+      (check-equal? (item (accuracy logits clean #:ignore-index ignore))
+                    (hash-ref (hash-ref j 'acc_by_ignore) key)
+                    (format "M16: multiclass_accuracy ignore_index ~a" key))
+      (check-equal? (tensor->list (confusion-matrix logits clean #:classes 10 #:ignore-index ignore))
+                    (tensor->list (unpack (hash-ref (hash-ref j 'cm_by_ignore) key) 'int64))
+                    (format "M16: multiclass_confusion_matrix ignore_index ~a" key)))
+    (check-equal? (item (accuracy (argmax logits 1) labels #:ignore-index -100))
+                  (hash-ref j 'acc_indices)
+                  "M16: multiclass_accuracy on int64 predictions")
+    (define cut (hash-ref j 'cut))
+    (define (streamed m)
+      (metric-update! m (narrow logits 0 0 cut) (narrow labels 0 0 cut))
+      (metric-update! m (narrow logits 0 cut (- 257 cut)) (narrow labels 0 cut (- 257 cut)))
+      (metric-compute m))
+    (for ([k (in-list '(1 3))])
+      (check-equal? (item (streamed (accuracy-metric #:top-k k #:ignore-index -100)))
+                    (hash-ref (hash-ref j 'acc_streamed) (string->symbol (number->string k)))
+                    (format "M16: MulticlassAccuracy top_k ~a over two updates" k)))
+    (check-equal? (~> (confusion-matrix-metric #:classes 10 #:ignore-index -100) streamed tensor->list)
+                  (tensor->list (unpack (hash-ref j 'cm_streamed) 'int64))
+                  "M16: MulticlassConfusionMatrix over two updates")
     (define seq (unpack (hash-ref j 'seq) 'float32))
     (define tgt (unpack (hash-ref j 'tgt) 'int64))
     (define ppl (perplexity-metric #:ignore-index -100))
