@@ -45,7 +45,7 @@
   (define (steps! opt net n)
     (for ([_ (in-range n)])
       (zero-grads! opt)
-      (backward! (mse-loss (net x) y))
+      (~> (net x) (mse-loss y) backward!)
       (step! opt)))
 
   (test-case "T3-L10: 3 steps, dict, load into a fresh optimizer, 2 more steps on both"
@@ -157,7 +157,7 @@
 
   (test-case "T3-L10: a group hyperparameter given exact saves as a flonum"
     (define net (fresh-net))
-    (define saved (optimizer-state-dict (sgd (parameters net) #:lr 1/10) net))
+    (define saved (~> (parameters net) (sgd #:lr 1/10) (optimizer-state-dict net)))
     (check-eqv? (hash-ref (car (hash-ref saved "param_groups")) "lr") 0.1))
 
   (test-case "T3-B16: a model moved after its optimizer was built keeps its names"
@@ -197,7 +197,7 @@
     (define net (fresh-net))
     (define-values (opt saved) (adam-after-steps net))
     (define two-groups
-      (optimizer-state-dict (adam (weight-decay-param-groups net #:weight-decay 0.1)) net))
+      (~> (weight-decay-param-groups net #:weight-decay 0.1) adam (optimizer-state-dict net)))
     (check-refused "group count" opt net two-groups #rx"param_groups")
     (check-refused "a missing name" opt net
                    (update-group saved (lambda (grp) (hash-set grp "params" '("weight"))))
@@ -217,7 +217,9 @@
       (chaperone-hash slots
                       (lambda (h k)
                         (values k (lambda (h k v)
-                                    (if (grad-enabled?) v (error 'placing "injected failure")))))
+                                    (unless (grad-enabled?)
+                                      (error 'placing "injected failure"))
+                                    v)))
                       (lambda (h k v) (values k v))
                       (lambda (h k) k)
                       (lambda (h k) k)))
@@ -237,7 +239,7 @@
   (test-case "T3-L10: an integer slot takes its floating parameter's dtype, as torch's load does"
     (define net (fresh-net))
     (define-values (opt saved) (adam-after-steps net))
-    (define (exp-avg state) (hash-ref (hash-ref (hash-ref state "state") "weight") "exp_avg"))
+    (define (exp-avg state) (~> (hash-ref state "state") (hash-ref "weight") (hash-ref "exp_avg")))
     (define as-integers
       (update-slot saved "weight" "exp_avg" (lambda (t) (to (* t 1000) 'int64))))
     (load-optimizer-state! opt net as-integers)

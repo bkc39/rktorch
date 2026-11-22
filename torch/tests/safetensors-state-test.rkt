@@ -20,7 +20,7 @@
     (define net (Sequential (Linear 3 2) (BatchNorm1d 2)))
     (with-no-grad
       (for ([e (in-list (state-dict net))] [k (in-naturals 1)])
-        (copy! (cdr e) (full-like (cdr e) (if (eq? (dtype (cdr e)) 'int64) k (* 1.5 k))))))
+        (copy! (cdr e) (full-like (cdr e) (if (~> (cdr e) dtype (eq? 'int64)) k (* 1.5 k))))))
     net)
 
   (test-case "a file written by master's save-state! loads"
@@ -102,7 +102,7 @@
           (hash-set '__metadata__ metadata) jsexpr->string string->bytes/utf-8))
     (call-with-output-file dst
       (lambda (out)
-        (write-bytes (integer->integer-bytes (bytes-length header) 8 #f #f) out)
+        (~> (bytes-length header) (integer->integer-bytes 8 #f #f) (write-bytes out))
         (write-bytes header out)
         (write-bytes (subbytes raw start) out))))
 

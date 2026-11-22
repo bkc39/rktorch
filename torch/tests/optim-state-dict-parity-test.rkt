@@ -26,8 +26,9 @@
         ['nesterov (cons (cons '#:nesterov? v) kws)]
         ['alpha (cons (cons '#:alpha v) kws)]
         ['eps (cons (cons '#:eps v) kws)]
-        ['betas (match v
-                  [(list beta1 beta2) (list* (cons '#:beta1 beta1) (cons '#:beta2 beta2) kws)])])))
+        ['betas
+         (match-define (list beta1 beta2) v)
+         (list* (cons '#:beta1 beta1) (cons '#:beta2 beta2) kws)])))
 
   (define (build j net)
     (define params (make-immutable-hash (named-parameters net)))
