@@ -82,3 +82,11 @@ libvorbis.0.dylib, libvorbisenc.2.dylib
 libopus.0.dylib
   Opus 1.5.2. BSD-3-Clause: licenses/opus-COPYING.
   https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz
+
+libjpeg.62.dylib
+  libjpeg-turbo 3.1.4, the libjpeg API library, which decodes JPEG. The
+  IJG License, with SIMD code under the zlib License that the IJG terms
+  subsume: licenses/libjpeg-turbo-LICENSE.md and
+  licenses/libjpeg-turbo-README.ijg. This software is based in part on the
+  work of the Independent JPEG Group.
+  https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.4/libjpeg-turbo-3.1.4.tar.gz

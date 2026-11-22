@@ -13,6 +13,7 @@ codec_ldflags=""
 # shellcheck source=scripts/platform/build-common.sh
 . /src/scripts/platform/build-common.sh
 configure_flags["mpg123-1.33.4.tar.bz2"]+=" --with-cpu=x86-64"
+jpeg_flags+=(-DCMAKE_ASM_NASM_COMPILER=yasm)
 
 fetch_sources
 unpack_libtorch

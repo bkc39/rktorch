@@ -8,6 +8,7 @@ f2c1c76592a82ffff8413ba3c4a1299b6c7ab06c734dee03fd88630485c2b920  flac-1.5.0.tar
 3ae8c9ff80a97bfc0e22e89fbcd74687eca4fc1db315b12607f27f01cb5a47d9  mpg123-1.33.4.tar.bz2  https://www.mpg123.de/download/mpg123-1.33.4.tar.bz2
 ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e  lame-3.100.tar.gz  https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
 3799ca9924d3125038880367bf1468e53a1b7e3686a934f098b7e1d286cdb80e  libsndfile-1.2.2.tar.xz  https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz
+e23d3ebb2c6ee4d0e2a5823dbb55b614845df5ea3435c956fed5cf04041a87ad  libjpeg-turbo-3.1.4.tar.gz  https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.4/libjpeg-turbo-3.1.4.tar.gz
 38e08c1c5ab8869ae8d605ddaefa85ad3fea24a2964fd63a099c0c0f79c70bcc  stb_image.h  https://raw.githubusercontent.com/nothings/stb/5736b15f7ea0ffb08dd38af21067c314d6a3aae9/stb_image.h
 65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c  googletest-1.17.0.tar.gz  https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
 999cc8f63a666959083eeaba040530e2ffccab3a2e9bdebeb2496b1455622b26  racket-9.1-aarch64-macosx-cs.dmg  https://download.racket-lang.org/installers/9.1/racket-9.1-aarch64-macosx-cs.dmg
