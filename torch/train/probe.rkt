@@ -22,18 +22,14 @@
          (only-in "../nn/loss.rkt" cross-entropy)
          (only-in "../nn/metrics.rkt" accuracy)
          (only-in "../nn/mode.rkt" call-with-eval-mode)
+         (only-in "../nn/private/tensor-checks.rkt"
+                  float-dtype? in-range? labels/c rank-of rows same-device? same-rows?)
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "private/copy.rkt" copy-of)
          (only-in "private/lbfgs.rkt" lbfgs-minimize!)
          (only-in "private/types.rkt" define-named-contract))
 
 (define-named-contract probe-pool/c (or/c 'cls 'mean 'cls+mean #f))
-
-(define (rank-of v)
-  (length (shape v)))
-
-(define (float-dtype? dt)
-  (and (memq dt '(float16 bfloat16 float32 float64)) #t))
 
 (define (integer-dtype? dt)
   (and (memq dt '(uint8 int8 int16 int32 int64)) #t))
@@ -45,11 +41,6 @@
                               (= 2 (rank-of v))
                               (memq (dtype v) '(float32 float64))
                               (positive? (rows v))))))
-
-(define labels/c
-  (flat-named-contract 'labels
-                       (lambda (v)
-                         (and (tensor? v) (= 1 (rank-of v)) (eq? 'int64 (dtype v))))))
 
 (define weight-decays/c (non-empty-listof (>=/c 0)))
 
@@ -75,28 +66,9 @@
           [probe-dataset-classes (-> probe-dataset? exact-positive-integer?)]
           [probe-dataset-indices (-> probe-dataset? (or/c #f tensor?))]))
 
-(define (rows v)
-  (match-define (cons n _) (shape v))
-  n)
-
 (define (width v)
   (match-define (list _ d) (shape v))
   d)
-
-(define (same-rows? features labels)
-  (= (rows features) (rows labels)))
-
-(define (same-device? a b)
-  (equal? (device a) (device b)))
-
-(define (label-extremes labels)
-  (tensor->list (stack (list (min labels) (max labels)))))
-
-(define (labels-in-range? labels classes)
-  (or (zero? (numel labels))
-      (let ()
-        (match-define (list lo hi) (label-extremes labels))
-        (and (<= 0 lo) (or (not classes) (< hi classes))))))
 
 (define (same-features? fit other)
   (define (features-of ds) (probe-dataset-features ds))
@@ -191,8 +163,8 @@
     (raise-arguments-error 'probe-dataset "the dataset has no items" "dataset" dataset))
   (define all-labels (cat labels))
   (define class-count (or classes (+ 1 (item (max all-labels)))))
-  (unless (labels-in-range? all-labels class-count)
-    (match-define (list lo hi) (label-extremes all-labels))
+  (unless (in-range? all-labels class-count)
+    (match-define (list lo hi) (tensor->list (stack (list (min all-labels) (max all-labels)))))
     (raise-arguments-error 'probe-dataset "a label is outside [0, classes)"
                            "classes" class-count
                            "smallest" lo
@@ -207,7 +179,7 @@
        #:pre/name (features labels) "features and labels on one device"
        (same-device? features labels)
        #:pre/name (labels classes) "labels in [0, classes)"
-       (labels-in-range? labels (supplied-or classes #f))
+       (in-range? labels (or (supplied-or classes #f) +inf.0))
        [result probe-dataset?])
   (cached features labels (or classes (+ 1 (item (max labels)))) #f))
 

@@ -934,7 +934,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   perplexity, functional and as `metric?` accumulators (`gen:metric`, one
   struct per metric) whose state lives on the first update's device, updated
   under `with-no-grad`; #215; its shape and range checks are
-  `torch/nn/private/tensor-checks.rkt`).
+  `torch/nn/private/tensor-checks.rkt`, shared with `torch/train/probe.rkt`).
 - `torch/train.rkt` — pure re-export facade over `torch/train/trainer.rkt`
   (`define-trainer`, `define-callback` and their body forms),
   `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),

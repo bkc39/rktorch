@@ -285,6 +285,22 @@
     (check-true (andmap values (unbox modes)))
     (check-true (< 1 (length (unbox modes)))))
 
+  (bounded-test "P14: a closure that raises leaves grad mode as the caller had it"
+    (define x (requires-grad! (zeros 6 #:dtype 'float64)))
+    (define quadratic (quadratic-closure x (box 0)))
+    (define calls (box 0))
+    (define (closure)
+      (set-box! calls (+ 1 (unbox calls)))
+      (when (< 2 (unbox calls))
+        (raise 'closure-failed))
+      (quadratic))
+    (with-no-grad
+      (check-equal? (with-handlers ([symbol? values])
+                      (lbfgs-minimize! (list x) closure #:max-iter 5 #:line-search 'strong-wolfe))
+                    'closure-failed)
+      (check-false (grad-enabled?)))
+    (check-true (grad-enabled?)))
+
   (bounded-test "P14: the saved parameters do not require grad"
     (define x (requires-grad! (tensor '(1.0 2.0) #:dtype 'float64)))
     (define saved (copy-of x))
