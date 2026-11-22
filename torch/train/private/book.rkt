@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list remove-duplicates)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match-define match-lambda)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   * + cat detach device dtype max min reshape tensor->list tensor? to
@@ -10,6 +10,7 @@
 (provide accumulators
          book-metric
          book-metrics
+         book-state
          epoch-end-reached!
          host-reads
          make-book
@@ -18,7 +19,7 @@
          read-epoch!
          read-groups
          read-steps!
-         restore-host-metrics!)
+         restore-book-state!)
 
 (struct logged (logger? both?))
 
@@ -173,8 +174,51 @@
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
 
-(define (restore-host-metrics! b metrics)
-  (define host (book-host b))
-  (hash-clear! host)
-  (for ([(k v) (in-hash metrics)])
-    (hash-set! host (string->symbol k) v)))
+(define (frozen table state-of)
+  (for/hasheq ([(k v) (in-hash table)]) (values k (state-of v))))
+
+(define (pending-state p)
+  (hash "value" (pending-value p) "logger" (logged-logger? p) "both" (logged-both? p)))
+
+(define (entry-state e)
+  (hash "value" (entry-value e) "weight" (entry-weight e) "reduce" (entry-reduce e)
+        "logger" (logged-logger? e) "both" (logged-both? e)))
+
+(define (ledger-state l)
+  (hash "steps" (frozen (ledger-steps l) pending-state)
+        "epoch" (frozen (ledger-epoch l) entry-state)
+        "stepped" (sort (hash-keys (ledger-stepped l)) symbol<?)
+        "latest" (frozen (ledger-latest l) values)
+        "closed" (frozen (ledger-closed l) values)))
+
+(define (book-state b)
+  (hash "train" (ledger-state (book-train b)) "eval" (ledger-state (book-eval b))))
+
+(define (refill! table saved [make values])
+  (hash-clear! table)
+  (for ([(k v) (in-hash saved)])
+    (hash-set! table k (make v))))
+
+(define (restore-ledger! l saved)
+  (match-define (hash-table ("steps" steps) ("epoch" epoch) ("stepped" stepped)
+                            ("latest" latest) ("closed" closed))
+    saved)
+  (refill! (ledger-steps l) steps
+           (match-lambda
+             [(hash-table ("value" v) ("logger" logger?) ("both" both?)) (pending logger? both? v)]))
+  (refill! (ledger-epoch l) epoch
+           (match-lambda
+             [(hash-table ("value" v) ("weight" w) ("reduce" reduce) ("logger" logger?)
+                          ("both" both?))
+              (entry logger? both? v w reduce)]))
+  (refill! (ledger-stepped l) (for/hasheq ([k (in-list stepped)]) (values k #t)))
+  (refill! (ledger-latest l) latest)
+  (refill! (ledger-closed l) closed))
+
+(define (restore-book-state! b metrics saved #:close-train-epoch? close?)
+  (refill! (book-host b) (for/hasheq ([(k v) (in-hash metrics)]) (values (string->symbol k) v)))
+  (when saved
+    (restore-ledger! (book-train b) (hash-ref saved "train"))
+    (restore-ledger! (book-eval b) (hash-ref saved "eval")))
+  (when close?
+    (void (read-epoch! b 'train))))

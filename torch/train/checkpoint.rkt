@@ -11,7 +11,7 @@
          (only-in "../nn/state-dict.rkt" load-state! state-dict)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optimization.rkt" set-hparam! trainer-hparams)
-         (only-in "private/book.rkt" book-metrics)
+         (only-in "private/book.rkt" book-metrics book-state)
          (only-in "private/checks.rkt"
                   formal-name init-capture-shapes init-capture-values)
          (only-in "private/dispatch.rkt" call-callback call-hooks call-trainer trainer-device)
@@ -111,6 +111,7 @@
 (define (add-training-state! r tree)
   (define tr (run-trainer r))
   (hash-set! tree "callbacks" (callback-states r))
+  (hash-set! tree "metric_book" (book-state (run-book r)))
   (hash-set! tree "optimizer_states"
              (for/list ([opt (in-list (run-optimizers r))]) (optimizer-state-dict opt tr)))
   (hash-set! tree "lr_schedulers"
