@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match)
+  (require (only-in racket/match match match*)
            rackunit
            (only-in "../main.rkt"
                     * + - abs backward! copy! item max sum with-no-grad)
@@ -49,6 +49,13 @@
       (step! opt)))
 
   (define (gap a b) (item (max (abs (- a b)))))
+
+  ;; torch's defaults are Python ints (`weight_decay: float = 0`), rktorch's store flonums
+  (define (same-setting? mine theirs)
+    (match* (mine theirs)
+      [((? real?) (? real?)) (= mine theirs)]
+      [((list a ...) (list b ...)) (and (= (length a) (length b)) (andmap same-setting? a b))]
+      [(_ _) (equal? mine theirs)]))
 
   (define fixed-flags
     (hash 'dampening 0 'maximize #f 'amsgrad #f 'centered #f 'capturable #f
@@ -105,7 +112,7 @@
          (for ([mine (in-list (hash-ref ours "param_groups"))]
                [theirs (in-list (hash-ref torch "param_groups"))])
            (for ([(key v) (in-hash theirs)])
-             (check-equal? (hash-ref mine key) v (format "~a: group ~a" case key))))))
+             (check-true (same-setting? (hash-ref mine key) v) (format "~a: group ~a" case key))))))
 
      (test-case "T3-L29: torch's state loaded into rktorch steps as torch does"
        (for ([case (in-list cases)])
