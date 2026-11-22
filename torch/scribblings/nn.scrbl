@@ -1182,9 +1182,10 @@ anything is copied.
               @defthing[optimizer-state/c flat-contract?])]{
 @tt{Optimizer.state_dict} and @tt{load_state_dict}, keyed by @racket[model]'s
 parameter names rather than positions, so a reordered model fails loudly. The
-state tensors are copies taken when the dict is built, so a dict held across a
-step still describes the step it was taken at; torch's dict aliases the live
-tensors, step count included. @racket["step"] is an integer in every mode, so a
+state tensors are host copies taken when the dict is built, so a dict held
+across a step still describes the step it was taken at and saving needs no
+second buffer on the device; torch's dict aliases the live device tensors, step
+count included. @racket["step"] is an integer in every mode, so a
 state moves between @racket['loop], @racket['foreach] and @racket['fused]. Every
 hash in a state is an immutable @racket[equal?] hash. Numeric group
 hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as
@@ -1197,9 +1198,17 @@ momentum is now: sgd may keep a @tt{momentum_buffer}; rmsprop keeps a
 @tt{square_avg} and may keep a @tt{momentum_buffer}; adam and adamw keep
 @tt{exp_avg}, @tt{exp_avg_sq} and @tt{step}. A buffer kept while momentum was
 changed to 0 is loaded and used again when it rises, and a missing sgd buffer
-starts as a copy of the next gradient, as in torch. Loading checks everything
-first, then replaces each group's hyperparameters and the slots together, so a
-load that raises or is broken leaves the optimizer unchanged. Slot tensors are
+starts as a copy of the next gradient, as in torch. Torch's per-parameter
+rmsprop @tt{step} loads and is ignored; rktorch does not write one.
+
+Loading checks the state's shape, as torch does: the keys, the slots and their
+tensor shapes must fit the optimizer. Any hyperparameter the optimizer can
+reach loads, such as nesterov with a momentum of 0 or a negative rate from a
+schedule; the only values refused are a negative momentum, weight decay or
+@racket[alpha] and a negative rmsprop @racket[eps], which no write to the
+optimizer can produce. Loading checks everything first, then replaces each
+group's hyperparameters and the slots together, so a load that raises or is
+broken leaves the optimizer unchanged. Slot tensors are
 copied to their parameter's device, and to its dtype when the parameter is
 floating, an integer slot included, as torch casts them, so the loaded state
 shares no tensor with @racket[state]. A load must not overlap a step of the
@@ -1230,8 +1239,9 @@ an exact count, as torch's is when stepped without an epoch. A chained or
 sequential scheduler keeps @tt{_last_lr} and each inner scheduler's state under
 @tt{_schedulers}, and no @tt{base_lrs}, as torch's do. Both keep
 @tt{last_epoch}, which torch's @tt{ChainedScheduler} does not have, because a
-chain has its own @racket[scheduler-step-count]. The constructor's arguments are not saved. Loading leaves the optimizer's
-rates alone, as torch does; load the optimizer's state first.
+chain has its own @racket[scheduler-step-count]. The constructor's arguments
+are not saved. Loading leaves the optimizer's rates alone, as torch does; load
+the optimizer's state first.
 
 @torch-examples[
 (define halving (step-lr (sgd (parameters (Linear 2 1)) #:lr 0.1) #:step-size 2 #:gamma 0.5))

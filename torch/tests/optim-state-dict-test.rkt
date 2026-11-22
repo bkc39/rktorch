@@ -1,13 +1,17 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/list remove-duplicates)
+           (only-in racket/match match-define)
            rackunit
            (only-in threading ~>)
-           (only-in "../main.rkt" * backward! dtype grad-enabled? make-generator randn to zeros)
+           (only-in "../main.rkt"
+                    * backward! cpu-device cuda-available? device dtype grad-enabled? make-generator
+                    randn tensor? to zeros)
            (only-in "../nn.rkt"
-                    Linear adam adamw cosine-annealing-lr layer-copy load-optimizer-state! mse-loss
-                    optimizer-state-dict param-group-set! parameters rmsprop sgd step!
+                    Linear adam adamw cosine-annealing-lr lambda-lr layer-copy learning-rate
+                    load-optimizer-state! mse-loss optimizer-state-dict param-group-set! parameters
+                    rmsprop sgd step!
                     weight-decay-param-groups zero-grads!)
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/comparable.rkt" comparable layer-bytes)
@@ -20,6 +24,9 @@
   (define y (randn 4 2 #:generator g))
 
   (define (fresh-net) (Linear 3 2))
+
+  (define (exp-avg state)
+    (~> (hash-ref state "state") (hash-ref "weight") (hash-ref "exp_avg")))
 
   (define cases
     `(("sgd" ,sgd ((#:lr . 0.1)) (loop foreach fused))
@@ -49,8 +56,9 @@
       (step! opt)))
 
   (test-case "T3-L10: 3 steps, dict, load into a fresh optimizer, 2 more steps on both"
-    (for* ([c (in-list cases)] [mode (in-list (list-ref c 3))])
-      (match-define (list name make kws _modes) c)
+    (for* ([c (in-list cases)]
+           #:do [(match-define (list name make kws modes) c)]
+           [mode (in-list modes)])
       (define label (format "~a, ~a" name mode))
       (define net (fresh-net))
       (define opt (build make kws mode net))
@@ -70,9 +78,9 @@
 
   (test-case "T3-L10: a state moves between modes and reads back exactly"
     (for* ([c (in-list cases)]
-           [from (in-list (list-ref c 3))]
-           [to-mode (in-list (list-ref c 3))])
-      (match-define (list name make kws _modes) c)
+           #:do [(match-define (list name make kws modes) c)]
+           [from (in-list modes)]
+           [to-mode (in-list modes)])
       (define net (fresh-net))
       (define opt (build make kws from net))
       (steps! opt net 3)
@@ -89,8 +97,10 @@
       ("rmsprop 0 -> 0.9" ,rmsprop ((#:lr . 0.01)) 0.9 0.0 (loop foreach))))
 
   (test-case "T3-L10: a momentum changed before the save, in either direction"
-    (for* ([c (in-list momentum-changes)] [mode (in-list (list-ref c 5))] [after (in-range 2)])
-      (match-define (list name make kws changed back _modes) c)
+    (for* ([c (in-list momentum-changes)]
+           #:do [(match-define (list name make kws changed back modes) c)]
+           [mode (in-list modes)]
+           [after (in-range 2)])
       (define label (format "~a, ~a, ~a step(s) after the change" name mode after))
       (define net (fresh-net))
       (define opt (build make kws mode net))
@@ -112,8 +122,9 @@
                     (format "~a: dicts after the steps" label))))
 
   (test-case "T3-L10: a dict held across a step is the state when it was taken"
-    (for* ([c (in-list cases)] [mode (in-list (list-ref c 3))])
-      (match-define (list name make kws _modes) c)
+    (for* ([c (in-list cases)]
+           #:do [(match-define (list name make kws modes) c)]
+           [mode (in-list modes)])
       (define label (format "~a, ~a" name mode))
       (define net (fresh-net))
       (define opt (build make kws mode net))
@@ -166,12 +177,39 @@
     (steps! opt net 1)
     (to net 'float64)
     (zero-grads! opt)
-    (backward! (mse-loss (net (to x 'float64)) (to y 'float64)))
+    (~> (net (to x 'float64)) (mse-loss (to y 'float64)) backward!)
     (step! opt)
     (define saved (optimizer-state-dict opt net))
     (check-equal? (sort (hash-keys (hash-ref saved "state")) string<?) '("bias" "weight"))
-    (check-equal? (dtype (hash-ref (hash-ref (hash-ref saved "state") "weight") "exp_avg"))
-                  'float64))
+    (check-equal? (dtype (exp-avg saved)) 'float64))
+
+  (define (slot-devices state)
+    (for*/list ([slots (in-hash-values (hash-ref state "state"))]
+                [v (in-hash-values slots)]
+                #:when (tensor? v))
+      (device v)))
+
+  (test-case "T3-L10: the dict's slots are host copies, and a load puts them back on the device"
+    (define net (fresh-net))
+    (define opt (adam (parameters net) #:lr 0.01))
+    (steps! opt net 1)
+    (check-equal? (remove-duplicates (slot-devices (optimizer-state-dict opt net))) (list (cpu-device)))
+    (when (cuda-available?)
+      (define on-gpu (to (fresh-net) 'cuda))
+      (define gpu-opt (adam (parameters on-gpu) #:lr 0.01))
+      (define (gpu-steps! o n)
+        (zero-grads! o)
+        (~> (n (to x 'cuda)) (mse-loss (to y 'cuda)) backward!)
+        (step! o))
+      (gpu-steps! gpu-opt on-gpu)
+      (define saved (optimizer-state-dict gpu-opt on-gpu))
+      (check-equal? (remove-duplicates (slot-devices saved)) (list (cpu-device)))
+      (define twin (layer-copy on-gpu))
+      (define twin-opt (adam (parameters twin) #:lr 0.01))
+      (load-optimizer-state! twin-opt twin saved)
+      (gpu-steps! gpu-opt on-gpu)
+      (gpu-steps! twin-opt twin)
+      (check-equal? (layer-bytes twin) (layer-bytes on-gpu))))
 
   (define (adam-after-steps net)
     (define opt (adam (parameters net) #:lr 0.01))
@@ -239,7 +277,6 @@
   (test-case "T3-L10: an integer slot takes its floating parameter's dtype, as torch's load does"
     (define net (fresh-net))
     (define-values (opt saved) (adam-after-steps net))
-    (define (exp-avg state) (~> (hash-ref state "state") (hash-ref "weight") (hash-ref "exp_avg")))
     (define as-integers
       (update-slot saved "weight" "exp_avg" (lambda (t) (to (* t 1000) 'int64))))
     (load-optimizer-state! opt net as-integers)
@@ -253,9 +290,6 @@
     (check-refused "a key another optimizer has" opt net
                    (update-group saved (lambda (grp) (hash-set grp "alpha" 0.9)))
                    #rx"alpha")
-    (check-refused "a negative rate" opt net
-                   (update-group saved (lambda (grp) (hash-set grp "lr" -1.0)))
-                   #rx"lr.*negative")
     (check-refused "a duplicated name" opt net
                    (update-group saved
                                  (lambda (grp) (hash-set grp "params" '("weight" "bias" "bias"))))
@@ -269,20 +303,99 @@
                    (hash-update saved "state" (lambda (st) (hash-set st "ghost" (hash))))
                    #rx"ghost"))
 
-  (test-case "T3-L11: an sgd or rmsprop group's own constraints"
+  (test-case "T3-L11: an rmsprop eps below zero, which no write path allows, raises"
     (define net (fresh-net))
-    (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
-    (steps! opt net 1)
-    (define saved (optimizer-state-dict opt net))
-    (check-refused "nesterov without momentum" opt net
-                   (update-group saved (lambda (grp) (hash-set* grp "nesterov" #t "momentum" 0.0)))
-                   #rx"nesterov")
     (define r (rmsprop (parameters net) #:lr 0.1))
     (steps! r net 1)
     (check-refused "a negative eps" r net
                    (update-group (optimizer-state-dict r net)
                                  (lambda (grp) (hash-set grp "eps" -1.0)))
                    #rx"eps"))
+
+  (define (check-reloads label opt net rebuild)
+    (define saved (optimizer-state-dict opt net))
+    (define twin (layer-copy net))
+    (define twin-opt (rebuild twin))
+    (load-optimizer-state! twin-opt twin saved)
+    (check-equal? (comparable (optimizer-state-dict twin-opt twin)) (comparable saved) label)
+    (steps! opt net 1)
+    (steps! twin-opt twin 1)
+    (check-equal? (layer-bytes twin) (layer-bytes net) (format "~a: parameters" label)))
+
+  (define ((builder make kws mode) net)
+    (build make kws mode net))
+
+  (test-case "T3-L10: a group state the optimizer reached itself loads, as torch's does"
+    (for ([mode (in-list '(loop foreach fused))])
+      (define nesterov (builder sgd '((#:lr . 0.1) (#:momentum . 0.9) (#:nesterov? . #t)) mode))
+      (define net (fresh-net))
+      (define opt (nesterov net))
+      (steps! opt net 2)
+      (param-group-set! opt 0 'momentum 0.0)
+      (steps! opt net 1)
+      (check-reloads (format "nesterov, momentum set to 0, ~a" mode) opt net nesterov)
+      (define plain (builder sgd '((#:lr . 0.1)) mode))
+      (define turned-on (plain net))
+      (param-group-set! turned-on 0 'nesterov? #t)
+      (steps! turned-on net 1)
+      (check-reloads (format "nesterov turned on without momentum, ~a" mode) turned-on net plain))
+    (define plain (builder sgd '((#:lr . 0.1)) 'foreach))
+    (define net (fresh-net))
+    (define cosine (plain net))
+    (define annealing (cosine-annealing-lr cosine #:t-max 4 #:eta-min -0.2))
+    (for ([_ (in-range 3)]) (step! annealing))
+    (check-true (negative? (learning-rate cosine)))
+    (check-reloads "a negative rate from cosine-annealing-lr" cosine net plain)
+    (define by-lambda (plain net))
+    (define falling (lambda-lr by-lambda (lambda (t) (- 1 t))))
+    (for ([_ (in-range 2)]) (step! falling))
+    (check-true (negative? (learning-rate by-lambda)))
+    (check-reloads "a negative rate from lambda-lr" by-lambda net plain))
+
+  (define settable
+    `((,sgd ((#:lr . 0.1)) (loop foreach fused)
+            ((lr 0.0 0.05 0.2) (momentum 0.0 0.5 0.9) (nesterov? #f #t) (weight-decay 0.0 0.01)))
+      (,adam ((#:lr . 0.01)) (loop foreach fused)
+             ((lr 0.0 0.01) (beta1 0.0 0.5 0.9) (beta2 0.5 0.999) (eps 0.0 1e-8 1e-3)
+                            (weight-decay 0.0 0.01)))
+      (,rmsprop ((#:lr . 0.01)) (loop foreach)
+                ((lr 0.0 0.01) (alpha 0.0 0.5 0.99) (eps 0.0 1e-8) (momentum 0.0 0.9)
+                               (weight-decay 0.0 0.01)))))
+
+  (test-case "T3-L10: any state reached through param-group-set! and steps loads into its own optimizer"
+    (define rng (make-pseudo-random-generator))
+    (parameterize ([current-pseudo-random-generator rng])
+      (random-seed 386)
+      (for* ([c (in-list settable)]
+             #:do [(match-define (list make kws modes keys) c)]
+             [mode (in-list modes)]
+             [_ (in-range 4)])
+        (define net (fresh-net))
+        (define opt (build make kws mode net))
+        (define writes
+          (for/list ([_ (in-range 6)])
+            (match-define (cons key vs) (list-ref keys (random (length keys))))
+            (define v (list-ref vs (random (length vs))))
+            (param-group-set! opt 0 key v)
+            (steps! opt net (random 2))
+            (cons key v)))
+        (check-reloads (format "~a ~a after ~s" (object-name make) mode writes) opt net
+                       (builder make kws mode)))))
+
+  (test-case "T3-L10: torch's per-parameter rmsprop step loads and is ignored"
+    (for ([mode (in-list '(loop foreach))])
+      (define net (fresh-net))
+      (define opt (build rmsprop '((#:lr . 0.01) (#:momentum . 0.9)) mode net))
+      (steps! opt net 2)
+      (define saved (optimizer-state-dict opt net))
+      (define with-step
+        (hash-update saved "state"
+                     (lambda (st)
+                       (for/hash ([(name slots) (in-hash st)])
+                         (values name (hash-set slots "step" 2))))))
+      (load-optimizer-state! opt net with-step)
+      (check-equal? (comparable (optimizer-state-dict opt net)) (comparable saved)
+                    (format "rmsprop, ~a" mode))))
 
   (test-case "T3-L11: a malformed state, or a parameter outside the model, blames the caller"
     (define net (fresh-net))

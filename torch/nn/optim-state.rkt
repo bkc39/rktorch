@@ -66,6 +66,9 @@
     ['rmsprop (values '("square_avg") '("momentum_buffer"))]
     [#f (values '() '())]))
 
+(define (ignored-slots kind)
+  (if (eq? kind 'rmsprop) '("step") '()))
+
 (define (torch-settings h)
   (for/fold ([out (hash)]) ([(k v) (in-hash h)])
     (match k
@@ -88,8 +91,8 @@
     (match-define (cons name p) entry)
     (values p name)))
 
-(define (copied like v)
-  (define fresh (zeros-like like))
+(define (copied v #:device to-device #:dtype to-dtype)
+  (define fresh (zeros-like v #:device to-device #:dtype to-dtype))
   (copy! fresh v)
   fresh)
 
@@ -97,7 +100,7 @@
   (cond
     [(not (tensor? v)) v]
     [(equal? name "step") (inexact->exact (item v))]
-    [else (copied v v)]))
+    [else (copied v #:device 'cpu #:dtype (dtype v))]))
 
 (define (parameter-slots state p)
   (for*/hash ([(table name) (in-dict slot-tables)]
@@ -146,20 +149,18 @@
   (equal? (sort (remove* '("params" "initial_lr") (hash-keys h)) string<?)
           (sort (group-keys kind) string<?)))
 
-(define (hyperparameter-defect kind h key)
-  (match key
-    [(or "lr" "momentum" "weight_decay" "alpha" "initial_lr")
-     (and (negative? (hash-ref h key)) "is negative")]
-    ["eps" (and (eq? kind 'rmsprop) (negative? (hash-ref h key)) "is negative")]
-    ["nesterov" (and (hash-ref h key) (not (positive? (hash-ref h "momentum"))) "needs a momentum")]
-    [_ #f]))
+(define (hyperparameter-defect kind key v)
+  (match* (kind key)
+    [(_ (or "momentum" "weight_decay" "alpha")) (and (negative? v) "is negative")]
+    [('rmsprop "eps") (and (negative? v) "is negative")]
+    [(_ _) #f]))
 
 (define (hyperparameter-problems kind i h)
   (if (keys-fit? kind h)
-      (for*/list ([key (in-list (sort (hash-keys h) string<?))]
-                  [why (in-value (hyperparameter-defect kind h key))]
+      (for*/list ([(key v) (in-hash h)]
+                  [why (in-value (hyperparameter-defect kind key v))]
                   #:when why)
-        (cons "hyperparameter" (format "group ~a: ~a ~e ~a" i key (hash-ref h key) why)))
+        (cons "hyperparameter" (format "group ~a: ~a ~e ~a" i key v why)))
       (list (cons "hyperparameters"
                   (format "group ~a has ~s, the optimizer takes ~s" i
                           (sort (remove* '("params") (hash-keys h)) string<?)
@@ -182,7 +183,8 @@
 (define (slot-problems kind name slots p)
   (define-values (required optional) (kept-slots kind))
   (define held (hash-keys slots))
-  (if (and (null? (remove* held required)) (null? (remove* (append required optional) held)))
+  (if (and (null? (remove* held required))
+           (null? (remove* (append required optional (ignored-slots kind)) held)))
       (for*/list ([(slot v) (in-hash slots)]
                   #:when (tensor? v)
                   [why (in-value (slot-defect p v))]
@@ -192,13 +194,12 @@
                                   name (sort held string<?) required optional)))))
 
 (define (state-problems kind saved owned)
-  (for*/list ([(name slots) (in-hash saved)]
-              [problem (in-list
-                        (match (hash-ref owned name #f)
-                          [#f (list (cons "state" (format "~s is not a parameter of the optimizer"
-                                                          name)))]
-                          [p (slot-problems kind name slots p)]))])
-    problem))
+  (append-map (match-lambda
+                [(cons name slots)
+                 (match (hash-ref owned name #f)
+                   [#f (list (cons "state" (format "~s is not a parameter of the optimizer" name)))]
+                   [p (slot-problems kind name slots p)])])
+              (hash->list saved)))
 
 (define (load-problems kind groups saved names owned)
   (define saved-groups (hash-ref saved "param_groups"))
@@ -209,16 +210,18 @@
                                          (length saved-groups) (length groups))))))
 
 (define (placed-slot fused? p v)
-  (match v
-    [(? tensor?) (if (floating? p) (copied p v) (copied (zeros-like p #:dtype (dtype v)) v))]
-    [n (if fused? (full (exact->inexact n) #:device (device p) #:dtype 'float32) n)]))
+  (cond
+    [(tensor? v) (copied v #:device (device p) #:dtype (if (floating? p) (dtype p) (dtype v)))]
+    [fused? (full (exact->inexact v) #:device (device p) #:dtype 'float32)]
+    [else v]))
 
-(define (loaded-tables fused? saved owned)
+(define (loaded-tables kind fused? saved owned)
   (define tables (make-hasheq))
   (with-no-grad
     (for* ([(name slots) (in-hash saved)]
            [p (in-value (hash-ref owned name))]
            [(table torch-name) (in-dict slot-tables)]
+           #:unless (member torch-name (ignored-slots kind))
            [v (in-value (hash-ref slots torch-name #f))]
            #:when v)
       (hash-set! (hash-ref! tables table make-hasheq) p (placed-slot fused? p v))))
@@ -251,7 +254,7 @@
   (define initial-lrs (map (lambda (h) (hash-ref h "initial_lr" #f)) saved-groups))
   (define tables
     (and (tracked? root)
-         (loaded-tables (and (eq? kind 'adam) (eq? (optimizer-mode root) 'fused))
+         (loaded-tables kind (and (eq? kind 'adam) (eq? (optimizer-mode root) 'fused))
                         (hash-ref state "state") owned)))
   (parameterize-break #f
     (store-load! st settings initial-lrs)

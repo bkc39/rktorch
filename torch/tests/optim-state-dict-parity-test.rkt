@@ -90,14 +90,15 @@
     (for/hash ([(key v) (in-hash grp)] #:unless (torch-only? key))
       (values (symbol->string key) v)))
 
-  (define (rktorch-state j tensors)
+  (define (rktorch-state j tensors #:rmsprop-step? [rmsprop-step? #f])
     (define optimizer (hash-ref j 'optimizer))
     (define sd (hash-ref j 'state_dict))
     (hash "state"
           (for/hash ([(name slots) (in-hash (hash-ref sd 'state))])
             (values (symbol->string name)
                     (for/hash ([(slot v) (in-hash slots)]
-                               #:unless (and (equal? optimizer "rmsprop") (eq? slot 'step)))
+                               #:unless (and (not rmsprop-step?) (equal? optimizer "rmsprop")
+                                             (eq? slot 'step)))
                       (values (symbol->string slot) (if (string? v) (hash-ref tensors v) v)))))
           "param_groups"
           (for/list ([grp (in-list (hash-ref sd 'param_groups))])
@@ -143,7 +144,12 @@
          (define net (Linear 3 2))
          (load-parameters! net tensors "after3.")
          (define opt (build j net))
-         (load-optimizer-state! opt net (rktorch-state j tensors))
+         (define theirs (rktorch-state j tensors #:rmsprop-step? #t))
+         (when (equal? (hash-ref j 'optimizer) "rmsprop")
+           (check-true (for/and ([slots (in-hash-values (hash-ref theirs "state"))])
+                         (hash-has-key? slots "step"))
+                       (format "~a: torch's rmsprop state keeps a step" case)))
+         (load-optimizer-state! opt net theirs)
          (gradient-steps! opt net j tensors 3 5)
          (for ([e (in-list (named-parameters net))])
            (check-true (< (gap (cdr e) (hash-ref tensors (string-append "after5." (car e)))) 1e-6)
