@@ -186,10 +186,9 @@ libjpeg-turbo as separate shared libraries, and finds them all beside itself.
 
 Their skeletons live in `pkgs/`: the `pkgs/*/info.rkt`, a `THIRD-PARTY-NOTICES`,
 and the licences only that platform bundles. The licences both packages carry
-(PyTorch's and its third-party code's, stb's, the codecs' and
-libjpeg-turbo's) live once, in
-`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them,
-with `torch/LICENSE`, when it builds a package. The Nix build and the
+(PyTorch's and its third-party code's, stb's, the codecs' and libjpeg-turbo's)
+live once, in `scripts/platform/licenses/`, and `scripts/platform/assemble.sh`
+adds them, with `torch/LICENSE`, when it builds a package. The Nix build and the
 shells install the host's skeleton, with no libraries in it, so `torch`'s
 dependency is met without a download; the staged `torch/native-libs/`
 still supplies the shim.
@@ -211,13 +210,11 @@ Both builds share `scripts/platform/build-common.sh`, which fetches every
 source, checks it against the sha256 that `scripts/platform/sources.txt` pins
 (the libtorch zips, the codecs, libsndfile, libjpeg-turbo, stb, GoogleTest
 and the Racket installers the macOS and `rockylinux:8` smokes use), builds
-the codecs, libsndfile and libjpeg-turbo (with its SIMD code, which on
-x86_64 the image's yasm assembles) as shared libraries, then GoogleTest and
-the shim, and runs the
-shim's gtests against the finished bundle. The work directory keeps the
-downloads and builds, so a second run rebuilds only the shim; the unpacked
-libtorch, the codecs and GoogleTest are rebuilt when the sha256 pinned for
-them changes.
+the codecs, libsndfile and libjpeg-turbo as shared libraries, then GoogleTest
+and the shim, and runs the shim's gtests against the finished bundle. The
+work directory keeps the downloads and builds, so a second run rebuilds only
+the shim; the unpacked libtorch, the codecs and GoogleTest are rebuilt when
+the sha256 pinned for them changes.
 
 ### x86_64 Linux
 

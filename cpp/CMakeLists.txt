@@ -140,6 +140,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche11_test.cpp
     tests/torchrkt/generated_tranche12_test.cpp
     tests/torchrkt/generated_tranche13_test.cpp
+    tests/torchrkt/image_golden_test.cpp
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
@@ -151,9 +152,16 @@ if(BUILD_TESTING)
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
+  file(GLOB TORCHRKT_TEST_DATA CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/torchrkt/data/*.jpg
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/torchrkt/data/*.txt)
+  torchrkt_embed_files(
+    ${CMAKE_CURRENT_BINARY_DIR}/test-data/test_data.hpp
+    ${TORCHRKT_TEST_DATA})
   target_include_directories(torchrkt_tests
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests
+      ${CMAKE_CURRENT_BINARY_DIR}/test-data
       # finalizer_death_test is deliberately white-box: it builds a real
       # tr_tensor around a throwing from_blob deleter, so it needs the
       # private handle header and the torch headers other tests don't.
@@ -182,28 +190,6 @@ if(BUILD_TESTING)
   # before ctest ever runs. At ctest time discovery shares the test
   # timeout and failures come with real output.
   gtest_discover_tests(torchrkt_tests DISCOVERY_MODE PRE_TEST)
-endif()
-
-option(TORCHRKT_BUILD_BENCH "Build image_decode_bench (never a gate)" OFF)
-if(TORCHRKT_BUILD_BENCH)
-  pkg_check_modules(SPNG QUIET IMPORTED_TARGET spng)
-  pkg_check_modules(LIBPNG QUIET IMPORTED_TARGET libpng)
-  pkg_check_modules(TURBOJPEG REQUIRED IMPORTED_TARGET libturbojpeg)
-  add_executable(image_decode_bench
-    bench/image_decode_bench.cpp
-    bench/stb_image.c
-  )
-  target_link_libraries(image_decode_bench PRIVATE torchrkt PkgConfig::STB
-    PkgConfig::TURBOJPEG PkgConfig::LIBJPEG)
-  if(SPNG_FOUND)
-    target_compile_definitions(image_decode_bench PRIVATE TORCHRKT_BENCH_SPNG)
-    target_link_libraries(image_decode_bench PRIVATE PkgConfig::SPNG)
-  endif()
-  if(LIBPNG_FOUND)
-    target_compile_definitions(image_decode_bench PRIVATE TORCHRKT_BENCH_LIBPNG)
-    target_link_libraries(image_decode_bench PRIVATE PkgConfig::LIBPNG)
-  endif()
-  torchrkt_apply_nix_cflags(image_decode_bench)
 endif()
 
 install(TARGETS torchrkt

@@ -43,19 +43,6 @@ line per case goes to standard error.
 CUDA runs need the CUDA shell, `env -u LD_LIBRARY_PATH nix develop .#cuda`.
 A CPU run with one thread sets `OMP_NUM_THREADS=1`; `taskset -c` pins it.
 
-The decoders alone (#459) are a C++ target, `image_decode_bench`, built only
-with `-DTORCHRKT_BUILD_BENCH=ON`. It times stb_image, libjpeg-turbo's
-TurboJPEG and libjpeg APIs and `tr_image_decode` on the JPEGs it is given,
-and stb, libspng and libpng (each only where pkg-config finds it) and
-`tr_image_decode` on the PNGs, one thread, HWC RGB out, and reports how far
-each arm's pixels are from stb's:
-
-```bash
-cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTORCHRKT_BUILD_BENCH=ON
-cmake --build cpp/build --target image_decode_bench
-taskset -c 6 cpp/build/image_decode_bench --reps 9 path/to/*.jpg path/to/*.png
-```
-
 `--max-load` samples the busy cores from `/proc/stat` over one second
 (the 1-minute load average where there is no `/proc/stat`). The load
 average would still count the previous example's child for a minute after

@@ -1,0 +1,6 @@
+smooth.jpg unchanged 3 64 96 11288f5546bfe6492d1b539f0eb17c5bc90810f537b0dcc968af8bca247ff6d7
+smooth.jpg gray 1 64 96 a67fb9349dae8321740d8673a298cad78e289225f8c21a78157ccfe0d0f99a71
+smooth-cmyk.jpg unchanged 4 64 96 cfb1ebb16947d0c665c1ce9e63065e5653d7f8abddf52461a4e170d53dbea21b
+smooth-cmyk.jpg rgb 3 64 96 b62dbca6c0895cbe88c3794abcce066a96e119286794d71366a7e57baa579f5d
+smooth-cmyk.jpg gray 1 64 96 0920778d8da3b2fc46f06eebbe0f4e3d3bbce1d0fdfa7189d2ef69e193aa7dfd
+smooth-arithmetic.jpg unchanged 3 64 96 11288f5546bfe6492d1b539f0eb17c5bc90810f537b0dcc968af8bca247ff6d7

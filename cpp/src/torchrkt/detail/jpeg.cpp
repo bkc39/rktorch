@@ -1,15 +1,11 @@
 #include "torchrkt/detail/jpeg.hpp"
 
-// jpeglib.h uses FILE and size_t without including their headers
-// clang-format off
-#include <cstddef>
-#include <cstdio>
 #include <jpeglib.h>
-// clang-format on
 
 #include <algorithm>
 #include <array>
 #include <csetjmp>
+#include <cstddef>
 #include <cstring>
 #include <vector>
 
@@ -35,8 +31,7 @@ ErrorManager& manager_of(j_common_ptr cinfo) {
 
 void silent(j_common_ptr /*cinfo*/) {}
 
-// torchvision's source manager: running out of bytes is an error, where
-// libjpeg's own pads the image with a fake EOI and a warning
+// torchvision errs on running out of bytes; libjpeg pads with a fake EOI
 [[noreturn]] boolean truncated(j_decompress_ptr cinfo) {
   ErrorManager& err = manager_of(reinterpret_cast<j_common_ptr>(cinfo));
   constexpr const char* why = "Image is incomplete or truncated";
@@ -63,8 +58,7 @@ class Decompressor {
     return cinfo_;
   }
 
-  // A libjpeg error longjmps back here, over f's frame and libjpeg's: f
-  // may hold nothing with a destructor
+  // a libjpeg error longjmps over f's frame: f may hold no destructors
   template <typename F>
   void run(F&& f) {
     if (setjmp(err_.jump) != 0) {
@@ -79,21 +73,17 @@ class Decompressor {
   ErrorManager err_{};
 };
 
-// torchvision's CMYK to RGB, after Pillow's: k - k * (255 - c) / 255
 uint8_t from_cmyk(int k, int cmy) {
   int v = (k * (255 - cmy)) + 128;
   v = ((v >> 8) + v) >> 8;
   return static_cast<uint8_t>(std::clamp(k - v, 0, 255));
 }
 
-// torchvision's RGB to gray for CMYK, after Pillow's ITU-R 601-2 luma
 uint8_t luma(int r, int g, int b) {
   return static_cast<uint8_t>(
       ((r * 19595) + (g * 38470) + (b * 7471) + 0x8000) >> 16);
 }
 
-// A row libjpeg cannot write directly: CMYK to gray or RGB, or gray with an
-// opaque alpha, the alpha 255 in every case
 void convert_row(const uint8_t* in, int in_channels, uint8_t* out,
                  int out_channels, size_t width) {
   for (size_t x = 0; x < width; ++x) {
@@ -116,6 +106,13 @@ void convert_row(const uint8_t* in, int in_channels, uint8_t* out,
   }
 }
 
+int stored_channels(const jpeg_decompress_struct& info, bool cmyk) {
+  if (cmyk) {
+    return 4;
+  }
+  return info.num_components == 1 ? 1 : 3;
+}
+
 }  // namespace
 
 torch::Tensor decode_jpeg(const uint8_t* data, size_t len, int32_t channels) {
@@ -130,10 +127,9 @@ torch::Tensor decode_jpeg(const uint8_t* data, size_t len, int32_t channels) {
   check_pixels(info.image_width, info.image_height);
   const bool cmyk =
       info.jpeg_color_space == JCS_CMYK || info.jpeg_color_space == JCS_YCCK;
-  const int stored = info.num_components == 1 ? 1 : 3;
-  const int kept = channels != 0 ? channels : stored;
+  const int kept = channels != 0 ? channels : stored_channels(info, cmyk);
   const bool gray = kept <= 2;
-  const bool direct = !cmyk && kept != 2;
+  const bool direct = cmyk ? channels == 0 : kept != 2;
   if (cmyk) {
     info.out_color_space = JCS_CMYK;
   } else if (gray) {

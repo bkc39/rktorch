@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/runtime-path #%datum define-runtime-path)
+  (require (only-in racket/dict dict-keys in-dict)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-true)
            (only-in "../main.rkt"
                     abs bytes->tensor cpu-capability item max mean mul permute
@@ -13,6 +14,7 @@
            (only-in (submod "../vision/transforms.rkt" private)
                     native-uint8-resize? resize/path resized-crop)
            (only-in "private/within.rkt" bounded-test)
+           (only-in threading ~>)
            "private/python-env.rkt")
 
   (define-runtime-path fixtures "../vision/fixtures/images")
@@ -31,7 +33,19 @@
 
   (define (fixture name) (build-path fixtures name))
 
-  (define (jpeg? name) (regexp-match? #rx"[.]jpg$" name))
+  (define byte-exact
+    '(("gradient-gray.png" unchanged rgb gray)
+      ("gradient-rgba.png" unchanged rgb)
+      ("gradient.png" unchanged rgb)
+      ;; torchvision 0.27's unchanged palette PNG is uninitialized memory
+      ("palette.png" rgb)
+      ("smooth-401x299.jpg" unchanged rgb gray)
+      ("smooth-444.jpg" unchanged rgb gray)
+      ("smooth-arithmetic.jpg" unchanged rgb gray)
+      ("smooth-cmyk.jpg" unchanged rgb gray)
+      ("smooth-gray.jpg" unchanged rgb gray)
+      ("smooth-progressive.jpg" unchanged rgb gray)
+      ("smooth.jpg" unchanged rgb gray)))
 
   (define (check-transform label ours theirs tolerance [dtype 'float32])
     (check-equal? (tensor-shape ours) (hash-ref theirs 'shape)
@@ -63,21 +77,17 @@
                    (sort (remove "NOTICE" (map path->string (directory-list fixtures)))
                          string<?)
                    "image_parity.py decodes every image fixture")
+     (check-equal? (sort (dict-keys byte-exact) string<?)
+                   (sort (map symbol->string (hash-keys (hash-ref j 'decoded)))
+                         string<?)
+                   "every image fixture is checked byte for byte")
 
-     (for* ([(key modes) (in-hash (hash-ref j 'decoded))]
-            [mode (in-list '(unchanged rgb gray))]
-            #:when (or (jpeg? (symbol->string key)) (not (eq? mode 'gray)))
-            ;; torchvision 0.27 answers a palette PNG's unchanged mode with
-            ;; one channel of uninitialized memory, different on every
-            ;; decode; stb expands the palette, as the rgb mode does
-            #:unless (and (eq? key 'palette.png) (eq? mode 'unchanged))
-            ;; torchvision keeps a CMYK JPEG's four inverted channels where
-            ;; read-image converts them to RGB, as the rgb mode does
-            #:unless (and (eq? key 'smooth-cmyk.jpg) (eq? mode 'unchanged)))
-       (define name (symbol->string key))
+     (for* ([(name modes) (in-dict byte-exact)]
+            [mode (in-list modes)])
        (check-bytes (format "read-image ~a #:mode '~a" name mode)
                     (read-image (fixture name) #:mode mode)
-                    (hash-ref modes mode)))
+                    (~> j (hash-ref 'decoded) (hash-ref (string->symbol name))
+                        (hash-ref mode))))
      (check-equal? (tensor->bytes (read-image (fixture "palette.png")))
                    (tensor->bytes (read-image (fixture "palette.png")
                                               #:mode 'rgb))
@@ -112,7 +122,7 @@
      (check-transform "resize 256, center-crop 224, imagenet-normalize"
                       (chain their-pixels) (hash-ref j 'chain) 1e-5)
      (check-transform "the chain from our own decode"
-                      (chain (read-image (fixture "smooth-401x299.jpg")))
+                      (~> (fixture "smooth-401x299.jpg") read-image chain)
                       (hash-ref j 'chain) 1e-5)
 
      (define (channels-last image)

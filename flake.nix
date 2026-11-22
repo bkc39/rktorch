@@ -520,7 +520,13 @@
           racket-linters =
             pkgs.callPackage ./nix/racket-linters.nix { racket = racketPkg; };
 
-          cppCommonInputs = [ torch pkgs.gtest pkgs.libjpeg_turbo pkgs.libsndfile pkgs.stb ];
+          cppCommonInputs = [
+            torch
+            pkgs.gtest
+            pkgs.libjpeg_turbo
+            pkgs.libsndfile
+            pkgs.stb
+          ];
           cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja pkgs.pkg-config ];
           cppCmakeFlags = [
             "-DBUILD_TESTING=ON"

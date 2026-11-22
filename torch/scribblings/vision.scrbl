@@ -967,16 +967,16 @@ group share one size.
 JPEG and PNG decoding into a @racket['uint8] tensor of shape
 @tt{[C H W]}, torchvision's @tt{decode_image} layout. JPEGs decode
 through @hyperlink["https://libjpeg-turbo.org"]{libjpeg-turbo} with
-torchvision's settings, the accurate integer inverse transform and fancy
-chroma upsampling, to exactly the pixels torchvision's decoder returns.
-PNGs decode through
-@hyperlink["https://github.com/nothings/stb"]{stb_image}, compiled into
-the native library, also to exactly torchvision's pixels.
+torchvision's settings, to exactly torchvision's pixels. PNGs decode
+through @hyperlink["https://github.com/nothings/stb"]{stb_image}, to
+exactly torchvision's pixels in the @racket['unchanged] and
+@racket['rgb] modes.
 
 Baseline, progressive and arithmetic-coded JPEGs decode; 12-bit ones do
-not. A CMYK JPEG converts to RGB as torchvision's does. A 16-bit PNG is
-reduced to 8 bits. EXIF orientation is ignored, as it is by
-@tt{decode_image} by default.
+not. A CMYK JPEG keeps its four channels as stored in
+@racket['unchanged] mode, as torchvision's does, and the other modes
+convert them. A 16-bit PNG is reduced to 8 bits. EXIF orientation is
+ignored, as it is by @tt{decode_image} by default.
 
 @defproc[(decode-image [bs bytes?]
                        [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
