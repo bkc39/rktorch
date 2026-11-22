@@ -7,9 +7,9 @@ checked pixel for pixel without a decoder:
     nix develop --command python3 scripts/gen-image-fixtures.py
 
 The PNGs are the gradients below, exactly. The JPEGs encode a smooth
-field through Pillow's libjpeg, so their bytes depend on its version but
-any two decoders agree on them to within a count or two; the reader's
-parity test measures by how much.
+field through Pillow's libjpeg, so their bytes depend on its version; the
+reader's parity test holds its decode of them to torchvision's, byte for
+byte. smooth-cmyk.jpg is the same field as Adobe CMYK, with a varying K.
 """
 import math
 import os
@@ -66,6 +66,17 @@ small.save(os.path.join(out, "smooth-444.jpg"), quality=90, subsampling=0)
 small.save(os.path.join(out, "smooth-progressive.jpg"), quality=90,
            subsampling=2, progressive=True)
 small.convert("L").save(os.path.join(out, "smooth-gray.jpg"), quality=90)
+
+
+def smooth_cmyk(x, y):
+    r, g, b = smooth(x, y)
+    return (255 - r, 255 - g, 255 - b, round(60 + 50 * math.sin(x / 17)))
+
+
+cmyk = Image.new("CMYK", small.size)
+cmyk.putdata([smooth_cmyk(x, y) for y in range(small.height)
+              for x in range(small.width)])
+cmyk.save(os.path.join(out, "smooth-cmyk.jpg"), quality=90)
 smooth_image(401, 299).save(os.path.join(out, "smooth-401x299.jpg"),
                             quality=90, subsampling=2)
 

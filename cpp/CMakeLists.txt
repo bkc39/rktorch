@@ -19,6 +19,7 @@ find_package(Torch CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 pkg_check_modules(STB REQUIRED IMPORTED_TARGET stb)
+pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
 
 # Torch's bundled Caffe2 config leaks MKL stub link directories
 # ("/lib;/lib/intel64;...") into the RPATH CMake expects to rewrite at
@@ -39,6 +40,7 @@ target_sources(torchrkt
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
+    src/torchrkt/detail/jpeg.cpp
     src/torchrkt/detail/stb_image.c
     src/torchrkt/device.cpp
     src/torchrkt/elementwise.cpp
@@ -84,8 +86,8 @@ endif()
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
 # only our own code, not ATen's.
 target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
-target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE
-  PkgConfig::STB)
+target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::LIBJPEG
+  PkgConfig::SNDFILE PkgConfig::STB)
 
 # libtorch ships ABI flags (notably -D_GLIBCXX_USE_CXX11_ABI=...) that our TUs
 # including ATen headers must match, or std::string symbols won't link.
@@ -180,6 +182,28 @@ if(BUILD_TESTING)
   # before ctest ever runs. At ctest time discovery shares the test
   # timeout and failures come with real output.
   gtest_discover_tests(torchrkt_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
+option(TORCHRKT_BUILD_BENCH "Build image_decode_bench (never a gate)" OFF)
+if(TORCHRKT_BUILD_BENCH)
+  pkg_check_modules(SPNG QUIET IMPORTED_TARGET spng)
+  pkg_check_modules(LIBPNG QUIET IMPORTED_TARGET libpng)
+  pkg_check_modules(TURBOJPEG REQUIRED IMPORTED_TARGET libturbojpeg)
+  add_executable(image_decode_bench
+    bench/image_decode_bench.cpp
+    bench/stb_image.c
+  )
+  target_link_libraries(image_decode_bench PRIVATE torchrkt PkgConfig::STB
+    PkgConfig::TURBOJPEG PkgConfig::LIBJPEG)
+  if(SPNG_FOUND)
+    target_compile_definitions(image_decode_bench PRIVATE TORCHRKT_BENCH_SPNG)
+    target_link_libraries(image_decode_bench PRIVATE PkgConfig::SPNG)
+  endif()
+  if(LIBPNG_FOUND)
+    target_compile_definitions(image_decode_bench PRIVATE TORCHRKT_BENCH_LIBPNG)
+    target_link_libraries(image_decode_bench PRIVATE PkgConfig::LIBPNG)
+  endif()
+  torchrkt_apply_nix_cflags(image_decode_bench)
 endif()
 
 install(TARGETS torchrkt

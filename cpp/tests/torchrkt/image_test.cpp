@@ -118,6 +118,52 @@ TEST(ImageDecode, SolidJpegDecodesToItsValue) {
   EXPECT_EQ(bytes_of(rgb.t), std::vector<uint8_t>(192, 100));
 }
 
+TEST(ImageDecode, JpegAlphaIsOpaque) {
+  const Handle gray_alpha(decode(kJpegGray8x8, 2));
+  ASSERT_NE(gray_alpha.t, nullptr) << tr_last_error();
+  EXPECT_EQ(shape_of(gray_alpha.t), (std::vector<int64_t>{2, 8, 8}));
+  std::vector<uint8_t> want(64, 100);
+  want.insert(want.end(), 64, 255);
+  EXPECT_EQ(bytes_of(gray_alpha.t), want);
+  const Handle rgba(decode(kJpegGray8x8, 4));
+  ASSERT_NE(rgba.t, nullptr) << tr_last_error();
+  EXPECT_EQ(shape_of(rgba.t), (std::vector<int64_t>{4, 8, 8}));
+  want.assign(192, 100);
+  want.insert(want.end(), 64, 255);
+  EXPECT_EQ(bytes_of(rgba.t), want);
+}
+
+TEST(ImageDecode, TruncatedAndCorruptJpegsAreErrors) {
+  for (const size_t keep : {kJpegGray8x8.size() - 2, kJpegGray8x8.size() - 9,
+                            size_t{200}, size_t{3}}) {
+    const std::vector<uint8_t> cut(kJpegGray8x8.begin(),
+                                   kJpegGray8x8.begin() + keep);
+    EXPECT_EQ(decode(cut, 0), nullptr) << keep << " bytes";
+    EXPECT_NE(std::string(tr_last_error()).find("cannot decode image"),
+              std::string::npos)
+        << tr_last_error();
+  }
+  std::vector<uint8_t> corrupt = kJpegGray8x8;
+  corrupt[93] = 13;
+  EXPECT_EQ(decode(corrupt, 0), nullptr);
+  EXPECT_NE(std::string(tr_last_error()).find("cannot decode image"),
+            std::string::npos)
+      << tr_last_error();
+}
+
+TEST(ImageDecode, OversizedJpegsAreRefusedFromTheHeader) {
+  std::vector<uint8_t> huge = kJpegGray8x8;
+  for (const size_t at : {94, 96}) {
+    huge[at] = 16000 >> 8;
+    huge[at + 1] = 16000 & 0xff;
+  }
+  EXPECT_EQ(decode(huge, 0), nullptr);
+  EXPECT_NE(std::string(tr_last_error())
+                .find("16000 x 16000 pixels is over the 178956970-pixel limit"),
+            std::string::npos)
+      << tr_last_error();
+}
+
 std::vector<uint8_t> png_header(uint32_t width, uint32_t height) {
   std::vector<uint8_t> bytes = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n',
                                 0,    0,   0,   13,  'I',  'H',  'D',  'R'};

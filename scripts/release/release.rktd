@@ -17,6 +17,7 @@
 (natives-inputs-exclude
  "cpp/.clang-format"
  "cpp/.clang-tidy"
+ "cpp/bench/"
  "cpp/cmake/tidy-parallel.sh"
  "cpp/tests/"
  "scripts/platform/catalog-entry.rkt"

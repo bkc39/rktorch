@@ -965,17 +965,18 @@ group share one size.
 @defmodule[torch/vision/image]
 
 JPEG and PNG decoding into a @racket['uint8] tensor of shape
-@tt{[C H W]}, torchvision's @tt{decode_image} layout. The decoder is
-@hyperlink["https://github.com/nothings/stb"]{stb_image}, a header-only
-library compiled into the native library with only those two formats, so
-reading an image needs no library at run time.
+@tt{[C H W]}, torchvision's @tt{decode_image} layout. JPEGs decode
+through @hyperlink["https://libjpeg-turbo.org"]{libjpeg-turbo} with
+torchvision's settings, the accurate integer inverse transform and fancy
+chroma upsampling, to exactly the pixels torchvision's decoder returns.
+PNGs decode through
+@hyperlink["https://github.com/nothings/stb"]{stb_image}, compiled into
+the native library, also to exactly torchvision's pixels.
 
-A PNG decodes to exactly the pixels torchvision's decoder returns. A
-JPEG differs from libjpeg-turbo's decoding by a count or two in places,
-because the two decoders use different inverse transforms and chroma
-upsampling. Baseline and progressive JPEGs decode; arithmetic-coded and
-12-bit ones do not. A 16-bit PNG is reduced to 8 bits. EXIF orientation
-is ignored, as it is by @tt{decode_image} by default.
+Baseline, progressive and arithmetic-coded JPEGs decode; 12-bit ones do
+not. A CMYK JPEG converts to RGB as torchvision's does. A 16-bit PNG is
+reduced to 8 bits. EXIF orientation is ignored, as it is by
+@tt{decode_image} by default.
 
 @defproc[(decode-image [bs bytes?]
                        [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
@@ -988,8 +989,9 @@ CPU and moves it to @racket[device], or else to the default device.
 @racket['unchanged] keeps the channels the file stores, except that a
 palette PNG comes back as RGB, or RGBA with a transparency chunk; the
 other modes convert to one, two, three or four channels, the way
-torchvision's @tt{ImageReadMode} does, gray as stb's integer luma
-@tt{(77r + 150g + 29b) >> 8}. What is not a JPEG or a PNG, or is
+torchvision's @tt{ImageReadMode} does: a JPEG's gray is its luma
+channel, a PNG's stb's integer luma @tt{(77r + 150g + 29b) >> 8}, and
+alpha is opaque where the file has none. What is not a JPEG or a PNG, or is
 truncated, is an error naming the reason. So is an image of more than
 178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
 from its header before any pixel is decoded, so a small file cannot

@@ -1,6 +1,7 @@
 function(torchrkt_add_format_target target)
   find_program(CLANG_FORMAT_EXECUTABLE NAMES clang-format)
   file(GLOB_RECURSE TORCHRKT_FORMAT_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/bench/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"

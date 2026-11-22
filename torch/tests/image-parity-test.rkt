@@ -65,27 +65,19 @@
                    "image_parity.py decodes every image fixture")
 
      (for* ([(key modes) (in-hash (hash-ref j 'decoded))]
-            [mode (in-list '(unchanged rgb))]
+            [mode (in-list '(unchanged rgb gray))]
+            #:when (or (jpeg? (symbol->string key)) (not (eq? mode 'gray)))
             ;; torchvision 0.27 answers a palette PNG's unchanged mode with
             ;; one channel of uninitialized memory, different on every
             ;; decode; stb expands the palette, as the rgb mode does
-            #:unless (and (eq? key 'palette.png) (eq? mode 'unchanged)))
+            #:unless (and (eq? key 'palette.png) (eq? mode 'unchanged))
+            ;; torchvision keeps a CMYK JPEG's four inverted channels where
+            ;; read-image converts them to RGB, as the rgb mode does
+            #:unless (and (eq? key 'smooth-cmyk.jpg) (eq? mode 'unchanged)))
        (define name (symbol->string key))
-       (define theirs (hash-ref modes mode))
-       (define ours (read-image (fixture name) #:mode mode))
-       (define label (format "read-image ~a #:mode '~a" name mode))
-       (check-equal? (tensor-shape ours) (hash-ref theirs 'shape)
-                     (format "~a: shape" label))
-       (cond
-         [(jpeg? name)
-          ;; stb and libjpeg-turbo differ in the IDCT and in chroma
-          ;; upsampling, by a count or two
-          (define-values (worst typical) (gap ours (unpack theirs 'uint8)))
-          (check-true (and (<= worst 3) (<= typical 0.25))
-                      (format "~a: max ~a mean ~a" label worst typical))]
-         [else
-          (check-equal? (tensor->bytes ours) (hex->bytes (hash-ref theirs 'hex))
-                        (format "~a: every byte" label))]))
+       (check-bytes (format "read-image ~a #:mode '~a" name mode)
+                    (read-image (fixture name) #:mode mode)
+                    (hash-ref modes mode)))
      (check-equal? (tensor->bytes (read-image (fixture "palette.png")))
                    (tensor->bytes (read-image (fixture "palette.png")
                                               #:mode 'rgb))
@@ -119,12 +111,9 @@
                'uint8))
      (check-transform "resize 256, center-crop 224, imagenet-normalize"
                       (chain their-pixels) (hash-ref j 'chain) 1e-5)
-     (define-values (worst typical)
-       (gap (chain (read-image (fixture "smooth-401x299.jpg")))
-            (unpack (hash-ref j 'chain) 'float32)))
-     (check-true (and (<= worst 0.05) (<= typical 0.005))
-                 (format "the chain from our own decode: max ~a mean ~a"
-                         worst typical))
+     (check-transform "the chain from our own decode"
+                      (chain (read-image (fixture "smooth-401x299.jpg")))
+                      (hash-ref j 'chain) 1e-5)
 
      (define (channels-last image)
        (define hwc (permute image 1 2 0))

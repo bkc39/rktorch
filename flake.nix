@@ -520,7 +520,7 @@
           racket-linters =
             pkgs.callPackage ./nix/racket-linters.nix { racket = racketPkg; };
 
-          cppCommonInputs = [ torch pkgs.gtest pkgs.libsndfile pkgs.stb ];
+          cppCommonInputs = [ torch pkgs.gtest pkgs.libjpeg_turbo pkgs.libsndfile pkgs.stb ];
           cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja pkgs.pkg-config ];
           cppCmakeFlags = [
             "-DBUILD_TESTING=ON"
@@ -546,7 +546,7 @@
               src = ./cpp;
               nativeBuildInputs = [ p.cmake p.clang-tools p.ninja p.pkg-config ]
                 ++ p.lib.optional cuda p.cudaPackages_13.cuda_nvcc;
-              buildInputs = [ torch p.gtest p.libsndfile p.stb ]
+              buildInputs = [ torch p.gtest p.libjpeg_turbo p.libsndfile p.stb ]
                 ++ p.lib.optional cuda cudaTk;
               cmakeFlags = cppCmakeFlags ++ p.lib.optionals cuda [
                 "-DCUDA_TOOLKIT_ROOT_DIR=${cudaTk}"
@@ -1032,6 +1032,7 @@
             pkgs.cmake
             pkgs.clang-tools
             pkgs.gtest
+            pkgs.libjpeg_turbo
             pkgs.libsndfile
             pkgs.ninja
             pkgs.stb

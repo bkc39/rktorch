@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
-           (only-in racket/list append*)
+           (only-in racket/list append* remove-duplicates)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
@@ -93,6 +93,16 @@
                   (tensor->bytes (read-image (fixture "smooth-progressive.jpg")))
                   "one encoder's coefficients, two scan orders"))
 
+  (test-case "a CMYK JPEG comes back as RGB unless gray is asked for"
+    (define path (fixture "smooth-cmyk.jpg"))
+    (define stored (read-image path))
+    (check-equal? (tensor-shape stored) '(3 64 96))
+    (check-equal? (tensor->bytes stored) (tensor->bytes (read-image path #:mode 'rgb)))
+    (check-equal? (tensor-shape (read-image path #:mode 'gray)) '(1 64 96))
+    (define rgba (read-image path #:mode 'rgba))
+    (check-equal? (tensor->bytes (narrow rgba 0 0 3)) (tensor->bytes stored))
+    (check-equal? (remove-duplicates (plane rgba 3)) '(255)))
+
   (test-case "decode-image reads bytes the way read-image reads a file"
     (define path (fixture "smooth.jpg"))
     (define from-bytes (decode-image (file->bytes path) #:device 'cpu))
@@ -118,6 +128,16 @@
     (check-exn #rx"read-image: .*cannot decode image"
                (lambda ()
                  (read-image (build-path fixtures 'up "cifar10-256.bin"))))
+    (define jpeg (file->bytes (fixture "smooth.jpg")))
+    (for ([keep (in-list (list (- (bytes-length jpeg) 2) 600 3))])
+      (check-exn #rx"decode-image: .*cannot decode image"
+                 (lambda () (decode-image (subbytes jpeg 0 keep)))
+                 (format "the first ~a bytes of a JPEG" keep)))
+    (define corrupt (bytes-copy jpeg))
+    (define frame (caar (regexp-match-positions #rx#"\377\300" jpeg)))
+    (bytes-set! corrupt (+ frame 4) 13)
+    (check-exn #rx"decode-image: .*cannot decode image"
+               (lambda () (decode-image corrupt)))
     (check-exn exn:fail:contract? (lambda () (decode-image #"")))
     (check-exn exn:fail:contract?
                (lambda () (read-image (fixture "smooth.jpg") #:mode 'cmyk)))))
