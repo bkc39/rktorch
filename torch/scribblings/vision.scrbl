@@ -420,7 +420,7 @@ same seed picks different ones.
 
 @defproc[(random-horizontal-flip [x tensor?]
                                  [#:p p (real-in 0 1) 0.5]
-                                 [#:generator generator (or/c cpu-generator/c #f) #f])
+                                 [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 Mirrors the image @racket[x], or each image of the batch @racket[x], along
 its width with probability @racket[p]; the rest pass through unchanged. Each image draws
@@ -429,7 +429,7 @@ one @tt{torch.rand} from @racket[generator] and flips when it is below
 for one image. The answer is @racket[x] itself when no image flips, and
 one @racket[flip] of it when all do.
 With @racket[generator] @racket[#f], the draws come from
-@racket[(current-generator)].
+@racket[(current-generator)]; either way the generator lives on the CPU.
 }
 
 @defproc[(random-resized-crop [x tensor?]
@@ -441,7 +441,7 @@ With @racket[generator] @racket[#f], the draws come from
                                                      (and/c real? positive?))
                                        '(3/4 4/3)]
                               [#:antialias? antialias? boolean? #t]
-                              [#:generator generator (or/c cpu-generator/c #f) #f])
+                              [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
 a window covering a random share of the image's area, drawn from
@@ -451,7 +451,7 @@ a window covering a random share of the image's area, drawn from
 the central window at the nearest admissible ratio, as torchvision does.
 Both pairs are ascending.
 With @racket[generator] @racket[#f], the batch seed comes from
-@racket[(current-generator)].
+@racket[(current-generator)]; either way the generator lives on the CPU.
 
 @racket[x] is a @racket['uint8] or float image, or a batch whose images each
 get their own window; the window is a view, and only it is resampled, by
@@ -473,7 +473,7 @@ decoded bytes and converts only the crop, as torchvision's does:
                                     (and (positive? h) (positive? w))]
                                    [_ #f])))]
                       [#:padding padding exact-nonnegative-integer? 4]
-                      [#:generator generator (or/c cpu-generator/c #f) #f])
+                      [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 Pads the image @racket[x], or every image of the batch @racket[x], whose
 height and width are positive, with @racket[padding] zero pixels on each side and cuts a
@@ -485,7 +485,7 @@ as a view of the window; a larger batch is cut in a number of native calls indep
 of its size. With @racket[padding] 0 it answers @racket[x] and draws
 nothing.
 With @racket[generator] @racket[#f], the draws come from
-@racket[(current-generator)].
+@racket[(current-generator)]; either way the generator lives on the CPU.
 }
 
 @section{ResNet}

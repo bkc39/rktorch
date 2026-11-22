@@ -32,6 +32,9 @@ The Racket package is the `torch` collection:
 - `(require (submod torch/foreign unsafe))` — adds `tensor-free!` for
   deterministic release. Idempotent: a second free raises `exn:fail:contract`
   at the contract boundary instead of double-freeing.
+- `(require (submod torch/foreign unchecked))` — library-internal: the same
+  names without contracts, for hot paths whose arguments the library has
+  already checked (see "Validating arguments"). Not a user entry point.
 - `(require torch/foreign/raw/*)` — the direct C FFI layer.
 
 The native bridge is a C++ shared library, `libtorchrkt`, built with CMake and
@@ -1092,6 +1095,14 @@ Which form to use is decidable, not a judgement call: **does a module under
 asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.  The same rule and
 the same test cover `torch/nn/`, with `torch/nn.rkt` as the facade.
+
+Both forms also provide the plain definition from an `unchecked` submodule,
+gathered by `torch/foreign.rkt`'s.  A hot-path module imports from
+`(submod "../foreign.rkt" unchecked)` only names whose arguments the library
+guarantees; `torch/tests/internal-unchecked-test.rkt` lists what each still
+imports from the facade.  Racket 9.3's `#:unprotected-submodule` drops its
+names when a same-named `module+` precedes the `contract-out`, so the
+submodule is a hand-written `module+`.
 
 A layer built with `define-layer` carries its constructor contract in a
 `#:contract` clause.  The clause is the export: it provides the constructor

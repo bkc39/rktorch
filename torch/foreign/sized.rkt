@@ -12,6 +12,9 @@
           [sized? (-> any/c boolean?)]
           [length (-> sized? exact-nonnegative-integer?)])) ;; noqa
 
+(module+ unchecked
+  (provide length sized?))
+
 ;; Python's len: one generic over the core containers, tensors along
 ;; their first dimension, and whatever else answers gen:sized
 (define-generics sized

@@ -15,6 +15,9 @@
 (module+ checked
   (provide (contract-out [exn:fail:rktorch:oom? (-> any/c boolean?)])))
 
+(module+ unchecked
+  (provide exn:fail:rktorch:oom?))
+
 (define (last-failure)
   (with-uninterruptible
     (values (tr-last-error/raw) (tr-last-error-kind/raw))))

@@ -12,9 +12,9 @@
                   non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
-         (only-in "../foreign.rkt"
-                  device device? dtype gen:sized length shape stack
-                  tensor->list tensor?)
+         (only-in "../foreign.rkt" gen:sized)
+         (only-in (submod "../foreign.rkt" unchecked)
+                  device device? dtype length shape stack tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see

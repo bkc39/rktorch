@@ -6,9 +6,10 @@
            (only-in "../main.rkt"
                     + > ~> arange cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype
-                    make-generator mps-available? mps-device native-memory-use
-                    narrow randn reclaim-native-memory! reshape tensor
-                    tensor->list tensor-shape to to-dtype transpose zeros)
+                    generator-device make-generator mps-available? mps-device
+                    native-memory-use narrow randn reclaim-native-memory!
+                    reshape tensor tensor->list tensor-shape to to-dtype
+                    transpose zeros)
            (only-in "../generated.rkt" constant-pad-nd random-from!)
            (only-in "../vision/transforms.rkt" random-crop)
            (only-in "private/op-calls.rkt" op-calls-of)
@@ -165,8 +166,10 @@
                          (~> (zeros 1 2 #:device 'cpu #:dtype 'int64)
                              (random-from! 0 9 #f)
                              tensor->list))))
+        (define device-calls
+          (op-calls-of (lambda () (generator-device (current-generator)))))
         (check-equal? (op-calls-of (lambda () (random-crop x)))
-                      (+ window-calls draw-calls)
+                      (+ window-calls draw-calls device-calls)
                       (format "~a" on)))))
 
   (bounded-test "random-crop takes a batch without images or channels"
