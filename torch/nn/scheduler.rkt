@@ -6,8 +6,8 @@
                   unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
-         (only-in racket/list append-map count)
-         (only-in racket/match match match-define match-lambda struct*)
+         (only-in racket/list append* append-map count)
+         (only-in racket/match match match* match-define match-lambda struct*)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optim-groups.rkt"
@@ -322,8 +322,6 @@
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
 
-;; torch's ChainedScheduler and SequentialLR keep no base_lrs
-;; (optim/lr_scheduler.py:1155-1171, 1534-1537)
 (define (bases-unless-chained? v)
   (not (eq? (hash-has-key? v "base_lrs") (hash-has-key? v "_schedulers"))))
 
@@ -336,7 +334,7 @@
    (and/c (record/c (hash "last_epoch" exact-integer?
                           "base_lrs" (listof state-real/c)
                           "_last_lr" (listof state-real/c)
-                          "T_cur" state-real/c
+                          "T_cur" exact-nonnegative-integer?
                           "T_i" exact-positive-integer?
                           "_schedulers" (listof (recursive-contract scheduler-state/c #:flat)))
                     #:required '("last_epoch" "_last_lr"))
@@ -382,10 +380,8 @@
    (count-problems "_last_lr")
    (cond
      [(and subs saved-subs (= (length subs) (length saved-subs)))
-      (for*/list ([(sub i) (in-indexed subs)]
-                  [pr (in-list (state-problems sub (list-ref saved-subs i)
-                                               (format "~a._schedulers[~a]" where i)))])
-        pr)]
+      (append* (for/list ([sub (in-list subs)] [saved (in-list saved-subs)] [i (in-naturals)])
+                 (state-problems sub saved (format "~a._schedulers[~a]" where i))))]
      [(or subs saved-subs)
       (problem (format "the state wraps ~a schedules, the scheduler ~a"
                        (if saved-subs (length saved-subs) 0) (if subs (length subs) 0)))]
@@ -397,15 +393,17 @@
 
 (define (restore! s state)
   (define rule (scheduler-rule s))
-  (settle! s (hash-ref state "last_epoch") (map real->double-flonum (hash-ref state "_last_lr")))
-  (match rule
-    [(app inner-schedulers (? list? subs)) (for-each restore! subs (hash-ref state "_schedulers"))]
-    [(? shape?) (set-shape-bases! rule (hash-ref state "base_lrs"))]
-    [(? rated?) (set-rated-bases! rule (hash-ref state "base_lrs"))]
-    [(? restarts?)
-     (set-restarts-bases! rule (hash-ref state "base_lrs"))
-     (set-restarts-t-cur! rule (hash-ref state "T_cur"))
-     (set-restarts-t-i! rule (hash-ref state "T_i"))]))
+  (match-define (hash* ["last_epoch" last] ["_last_lr" rates]) state)
+  (settle! s last (map real->double-flonum rates))
+  (match* (rule state)
+    [((app inner-schedulers (? list? subs)) (hash* ["_schedulers" saved]))
+     (for-each restore! subs saved)]
+    [((? shape?) (hash* ["base_lrs" bases])) (set-shape-bases! rule bases)]
+    [((? rated?) (hash* ["base_lrs" bases])) (set-rated-bases! rule bases)]
+    [((? restarts?) (hash* ["base_lrs" bases] ["T_cur" t-cur] ["T_i" t-i]))
+     (set-restarts-bases! rule bases)
+     (set-restarts-t-cur! rule t-cur)
+     (set-restarts-t-i! rule t-i)]))
 
 (define/contract-out (load-scheduler-state! s state) ;; noqa
   (-> scheduler? scheduler-state/c void?)

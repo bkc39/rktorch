@@ -36,6 +36,21 @@
     (define twin-opt (sgd (list q) #:lr 0.1))
     (check-equal? (scaled-steps! twin twin-opt q 6 4) (scaled-steps! s opt p 6 4)))
 
+  (test-case "T3-L13: a growth tracker loaded into a scaler that has not scaled yet carries over"
+    (define p (Parameter (tensor '(1.0 -1.0))))
+    (define opt (sgd (list p) #:lr 0.1))
+    (define s (scaler))
+    (void (scaled-steps! s opt p 0 1))
+    (define saved (grad-scaler-state-dict s))
+    (check-equal? (hash-ref saved "_growth_tracker") 1 "one step into a growth interval of 2")
+    (define twin (scaler #:init-scale 8.0))
+    (load-grad-scaler-state! twin saved)
+    (check-equal? (grad-scaler-state-dict twin) saved)
+    (define q (Parameter (tensor '(1.0 -1.0))))
+    (define twin-opt (sgd (list q) #:lr 0.1))
+    (check-equal? (scaled-steps! twin twin-opt q 1 3) (scaled-steps! s opt p 1 3)
+                  "the first step after the load reaches the growth boundary"))
+
   (test-case "T3-L13: loading into a scaler that has scaled overwrites its scale and tracker"
     (define p (Parameter (tensor '(1.0 -1.0))))
     (define opt (sgd (list p) #:lr 0.1))

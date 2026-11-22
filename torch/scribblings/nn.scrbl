@@ -1224,10 +1224,12 @@ same optimizer in another thread, as in torch.
               @defproc[(load-scheduler-state! [s scheduler?] [state scheduler-state/c]) void?]
               @defthing[scheduler-state/c flat-contract?])]{
 @tt{LRScheduler.state_dict}'s progress: @tt{last_epoch}, @tt{base_lrs} and
-@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts. A chained or
-sequential scheduler keeps @tt{last_epoch}, @tt{_last_lr} and each inner
-scheduler's state under @tt{_schedulers}, and no @tt{base_lrs}, as torch's
-do. The constructor's arguments are not saved. Loading leaves the optimizer's
+@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts; @tt{T_cur} is
+an exact count, as torch's is when stepped without an epoch. A chained or
+sequential scheduler keeps @tt{_last_lr} and each inner scheduler's state under
+@tt{_schedulers}, and no @tt{base_lrs}, as torch's do. Both keep
+@tt{last_epoch}, which torch's @tt{ChainedScheduler} does not have, because a
+chain has its own @racket[scheduler-step-count]. The constructor's arguments are not saved. Loading leaves the optimizer's
 rates alone, as torch does; load the optimizer's state first.
 
 @torch-examples[
