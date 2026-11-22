@@ -397,14 +397,13 @@
 
 (define (restore! s state)
   (define rule (scheduler-rule s))
-  (define (rates key) (map real->double-flonum (hash-ref state key)))
-  (settle! s (hash-ref state "last_epoch") (rates "_last_lr"))
+  (settle! s (hash-ref state "last_epoch") (map real->double-flonum (hash-ref state "_last_lr")))
   (match rule
     [(app inner-schedulers (? list? subs)) (for-each restore! subs (hash-ref state "_schedulers"))]
-    [(? shape?) (set-shape-bases! rule (rates "base_lrs"))]
-    [(? rated?) (set-rated-bases! rule (rates "base_lrs"))]
+    [(? shape?) (set-shape-bases! rule (hash-ref state "base_lrs"))]
+    [(? rated?) (set-rated-bases! rule (hash-ref state "base_lrs"))]
     [(? restarts?)
-     (set-restarts-bases! rule (rates "base_lrs"))
+     (set-restarts-bases! rule (hash-ref state "base_lrs"))
      (set-restarts-t-cur! rule (hash-ref state "T_cur"))
      (set-restarts-t-i! rule (hash-ref state "T_i"))]))
 
