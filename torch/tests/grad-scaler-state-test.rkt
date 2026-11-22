@@ -36,6 +36,20 @@
     (define twin-opt (sgd (list q) #:lr 0.1))
     (check-equal? (scaled-steps! twin twin-opt q 6 4) (scaled-steps! s opt p 6 4)))
 
+  (test-case "T3-L13: loading into a scaler that has already scaled overwrites its scale and tracker"
+    (define p (Parameter (tensor '(1.0 -1.0))))
+    (define opt (sgd (list p) #:lr 0.1))
+    (define s (scaler))
+    (void (scaled-steps! s opt p 0 3))
+    (define saved (grad-scaler-state-dict s))
+    (define q (Parameter (tensor '(1.0 -1.0))))
+    (define twin-opt (sgd (list q) #:lr 0.1))
+    (define twin (scaler #:init-scale 8.0 #:growth-factor 4.0))
+    (void (scaled-steps! twin twin-opt q 0 1))
+    (load-grad-scaler-state! twin saved)
+    (check-equal? (grad-scaler-state-dict twin) saved)
+    (check-equal? (scaled-steps! twin twin-opt q 3 4) (scaled-steps! s opt p 3 4)))
+
   (test-case "T3-L13: a disabled scaler's state is empty, and loading into one does nothing"
     (define off (grad-scaler #:device 'cpu #:enabled? #f))
     (check-equal? (grad-scaler-state-dict off) (hash))

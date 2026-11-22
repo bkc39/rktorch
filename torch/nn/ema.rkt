@@ -58,8 +58,8 @@
 
 (define/contract-out (ema-n-averaged e) ;; noqa
   (-> ema? exact-nonnegative-integer?)
-  (error 'unimplemented))
+  (unbox (ema-count e)))
 
 (define/contract-out (set-ema-n-averaged! e n) ;; noqa
   (-> ema? exact-nonnegative-integer? void?)
-  (error 'unimplemented))
+  (set-box! (ema-count e) n))

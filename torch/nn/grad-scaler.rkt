@@ -32,7 +32,9 @@
 (struct device-state (factor tracker unit inverse home
                              [spares #:mutable] [stages #:mutable]))
 
-(struct grad-scaler (active? init growth backoff interval [state #:auto #:mutable])
+(struct grad-scaler (active? [init #:mutable] [growth #:mutable] [backoff #:mutable]
+                             [interval #:mutable] [state #:auto #:mutable]
+                             [initial-tracker #:auto #:mutable])
   #:auto-value #f
   #:constructor-name make-grad-scaler ;; noqa
   #:name grad-scaler-struct) ;; noqa
@@ -106,7 +108,9 @@
 
 (define (fresh-state s dev)
   (device-state (full (grad-scaler-init s) #:device dev #:dtype 'float32)
-                (g:sum-dim-intlist (full 0.0 #:device dev) #f #f 'int32)
+                (g:sum-dim-intlist (full (exact->inexact (or (grad-scaler-initial-tracker s) 0))
+                                         #:device dev)
+                                   #f #f 'int32)
                 (full 1.0 #:device dev #:dtype 'float32)
                 (full 0.0 #:device dev #:dtype 'float32)
                 dev '() #hasheq()))
@@ -277,10 +281,38 @@
   contract?
   (flat-named-contract 'grad-scaler-state/c grad-scaler-state-shape?))
 
+(define (growth-tracker s)
+  (match (grad-scaler-state s)
+    [#f (or (grad-scaler-initial-tracker s) 0)]
+    [st (inexact->exact (host-read (device-state-tracker st)))]))
+
 (define/contract-out (grad-scaler-state-dict s) ;; noqa
   (-> grad-scaler? grad-scaler-state/c)
-  (error 'unimplemented))
+  (if (grad-scaler-active? s)
+      (hash "scale" (grad-scaler-scale s)
+            "growth_factor" (grad-scaler-growth s)
+            "backoff_factor" (grad-scaler-backoff s)
+            "growth_interval" (grad-scaler-interval s)
+            "_growth_tracker" (growth-tracker s))
+      (hash)))
 
 (define/contract-out (load-grad-scaler-state! s state) ;; noqa
   (-> grad-scaler? grad-scaler-state/c void?)
-  (error 'unimplemented))
+  (when (grad-scaler-active? s)
+    (when (hash-empty? state)
+      (raise-arguments-error
+       'load-grad-scaler-state!
+       "the state is empty, possibly because it was saved from a disabled grad-scaler"))
+    (define scale (hash-ref state "scale"))
+    (define tracker (hash-ref state "_growth_tracker"))
+    (set-grad-scaler-init! s scale)
+    (set-grad-scaler-growth! s (hash-ref state "growth_factor"))
+    (set-grad-scaler-backoff! s (hash-ref state "backoff_factor"))
+    (set-grad-scaler-interval! s (hash-ref state "growth_interval"))
+    (set-grad-scaler-initial-tracker! s tracker)
+    (match (grad-scaler-state s)
+      [#f (void)]
+      [st
+       (g:fill-scalar! (device-state-factor st) scale)
+       (g:fill-scalar! (device-state-tracker st) (exact->inexact tracker))
+       (void)])))
