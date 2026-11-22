@@ -16,9 +16,10 @@
 @defmodule[torch/train]
 
 A trainer is a layer whose body forms are a method's steps and hooks, and
-@racket[fit] runs it in Lightning 2.6.5's loop order. The checkpoints of
-@secref["train-checkpoints"] and resuming with @racket[#:ckpt-path] are not
-implemented yet: they raise @racket[exn:fail:unsupported].
+@racket[fit] runs it in Lightning 2.6.5's loop order. The checkpoint callbacks
+of @secref["train-checkpoints"], @racket[#:ckpt-path] @racket['last] and
+@racket['best], and resuming from a mid-epoch checkpoint are not implemented
+yet: they raise @racket[exn:fail:unsupported].
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
@@ -210,16 +211,6 @@ parameters after @racket[on-before-optimizer-step], by
 under a scaler, clipping with a fused optimizer raises before the first batch,
 where Lightning raises at the clip.
 
-@racket[#:ckpt-path] resumes from a checkpoint; @secref["train-hooks"] says
-what is restored at which hook. @racket['best] is the one
-@racket[model-checkpoint]'s best path. @racket['last] is the newest @tt{last}
-file or exception checkpoint; with none, it warns and trains from the start, as
-Lightning does. The file is read and its format checked before any hook runs.
-The RNG states and loader generators are restored too, so a resumed fit draws
-what the uninterrupted one would have, which Lightning does not do. A fit
-resumed at epoch @italic{e} runs from @italic{e} to @racket[#:max-epochs]; a
-restored epoch above @racket[#:max-epochs] raises.
-
 @examples[#:eval train-eval
 (define-trainer Mixed (net)
   (define-init () (set! net (Linear 2 1)))
@@ -229,6 +220,41 @@ restored epoch above @racket[#:max-epochs] raises.
                    #:max-epochs 1 #:logger #f #:precision 'auto-mixed
                    #:gradient-clip-val 0.5))
 (list (run-precision mixed) (run-grad-scaler mixed))
+]
+
+@racket[#:ckpt-path] resumes from a checkpoint; @secref["train-hooks"] says
+what is restored at which hook. The file is read and its format checked before
+any hook runs, and a checkpoint taken outside an epoch end and the fit's end
+raises there. The trainer must hold the checkpoint's parameters and buffers,
+strictly, and as many optimizers and schedulers; a @racket[#:weights-only?]
+checkpoint raises when the optimizers are restored, with Lightning's message. A
+saved hyperparameter the trainer does not define and a callback state no
+callback claims are skipped with a warning on the @racket['rktorch-train] topic
+and stderr. The default streams, @racket[current-generator]'s and Racket's
+@racket[current-pseudo-random-generator] are restored too, so a resumed fit
+draws what the uninterrupted one would have, which Lightning does not do; a
+checkpoint saved under a @racket[current-generator] needs one on the same
+device. A loader's own @racket[#:generator] is not saved: a callback whose
+@tt{state-dict} answers its @racket[generator-state] and whose
+@tt{load-state!} calls @racket[set-generator-state!] carries it. A checkpoint
+from an epoch end resumes at the next epoch and one from the fit's end at the
+epoch it ended on; the fit then runs to @racket[#:max-epochs], and a restored
+epoch above @racket[#:max-epochs] raises.
+
+@examples[#:eval train-eval
+(define-trainer Resumed (net)
+  (define-init () (set! net (Linear 2 1)))
+  (define-optimizers (sgd (parameters net) #:lr 0.1))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(define resume-path (build-path (find-system-path 'temp-dir) "resumed.ckpt"))
+(define resume-data (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 4))
+(define (save-each-epoch r) (save-checkpoint! r resume-path))
+(void (fit (Resumed) resume-data #:max-epochs 2 #:logger #f
+           #:callbacks (list (lambda-callback #:on-train-epoch-end save-each-epoch))))
+(define resumed (fit (Resumed) resume-data #:max-epochs 3 #:logger #f
+                     #:ckpt-path resume-path))
+(list (run-epoch resumed) (run-global-step resumed))
+(delete-file resume-path)
 ]
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
@@ -285,8 +311,8 @@ Lightning's @tt{Trainer.save_checkpoint}. It writes:
  @item{every callback's @tt{state-dict} under its state key;}
  @item{the RNG states: the CPU stream, the run's device stream,
        @racket[current-generator]'s, Racket's
-       @racket[current-pseudo-random-generator] and the train and validation
-       loaders' generators.}]
+       @racket[current-pseudo-random-generator]. A loader's own
+       @racket[#:generator] is not among them.}]
 
 The file is safetensors with Lightning's key names; @racket[load-state!] reads
 the model out of it with @racket[#:rename]. The callbacks' @tt{state-dict}

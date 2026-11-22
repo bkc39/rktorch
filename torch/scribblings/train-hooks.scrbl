@@ -81,9 +81,10 @@ The order of one @racket[fit], after Lightning 2.6.5, with
  @item{With @racket[#:ckpt-path]: after @tt{setup} and before the device move,
        the hyperparameters, the trainer's @tt{on-load-checkpoint}, the
        parameters, each callback's @tt{on-load-checkpoint} and then
-       @tt{load-state!}; after @tt{on-fit-start}, the training state (the
-       optimizers, schedulers, scaler, counters and metrics); after
-       @tt{on-train-start}, the RNG states and loader generators.
+       @tt{load-state!}, the last two only when the checkpoint holds callback
+       states, as Lightning; after @tt{on-fit-start}, the training state (the
+       scaler, counters and metrics, optimizers and schedulers), for
+       @racket[fit] only; after @tt{on-train-start}, the RNG states.
        @racket[save-checkpoint!] runs the callbacks' @tt{state-dict}, then
        @tt{on-save-checkpoint} for the callbacks and then the trainer.}
  @item{A validation loop runs in eval mode with gradients off:
