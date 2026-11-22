@@ -12,7 +12,7 @@
     (check-resume fixture-world #:split-step 3 #:total 4 #:fit-args fixture-fit-args))
 
   (test-case "T3-L3: a split at a validation-end save equals straight"
-    (check-resume fixture-world #:split 2 #:total 4
+    (check-resume fixture-world #:split '(2) #:total 4
                   #:fit-args (cons '(#:check-val-every-n-epoch . 2) fixture-fit-args)))
 
   (test-case "T3-L4: a mid-epoch checkpoint with a #:workers loader raises before any hook"
