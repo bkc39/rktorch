@@ -4,7 +4,7 @@
   (require (only-in racket/match match-define)
            rackunit
            (only-in threading ~>)
-           (only-in "../main.rkt" backward! dtype grad-enabled? make-generator randn to zeros)
+           (only-in "../main.rkt" * backward! dtype grad-enabled? make-generator randn to zeros)
            (only-in "../nn.rkt"
                     Linear adam adamw cosine-annealing-lr layer-copy load-optimizer-state! mse-loss
                     optimizer-state-dict param-group-set! parameters rmsprop sgd step!
@@ -208,9 +208,6 @@
                    #rx"ghost")
     (check-refused "a slot's shape" opt net
                    (update-slot saved "weight" "exp_avg" (lambda (_) (zeros 3)))
-                   #rx"weight.*exp_avg|exp_avg.*weight")
-    (check-refused "a slot's dtype" opt net
-                   (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'int64)))
                    #rx"weight.*exp_avg|exp_avg.*weight"))
 
   (test-case "T3-L11: a load that fails while placing the slots leaves the optimizer unchanged"
@@ -236,6 +233,17 @@
     (load-optimizer-state! opt net
                            (update-slot saved "weight" "exp_avg" (lambda (t) (to t 'float64))))
     (check-equal? (comparable (optimizer-state-dict opt net)) (comparable saved)))
+
+  (test-case "T3-L10: an integer slot takes its floating parameter's dtype, as torch's load does"
+    (define net (fresh-net))
+    (define-values (opt saved) (adam-after-steps net))
+    (define (exp-avg state) (hash-ref (hash-ref (hash-ref state "state") "weight") "exp_avg"))
+    (define as-integers
+      (update-slot saved "weight" "exp_avg" (lambda (t) (to (* t 1000) 'int64))))
+    (load-optimizer-state! opt net as-integers)
+    (define loaded (exp-avg (optimizer-state-dict opt net)))
+    (check-equal? (dtype loaded) 'float32)
+    (check-equal? (comparable loaded) (comparable (to (exp-avg as-integers) 'float32))))
 
   (test-case "T3-L11: hyperparameters and slots that do not fit the optimizer raise"
     (define net (fresh-net))

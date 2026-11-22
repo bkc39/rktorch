@@ -1199,9 +1199,10 @@ momentum is now: sgd may keep a @tt{momentum_buffer}; rmsprop keeps a
 changed to 0 is loaded and used again when it rises, and a missing sgd buffer
 starts as a copy of the next gradient, as in torch. Loading checks everything
 first, then replaces each group's hyperparameters and the slots together, so a
-load that raises or is broken leaves the optimizer unchanged. Floating tensors are
-copied to their parameter's device and dtype, as torch casts them, so the loaded
-state shares no tensor with @racket[state]. A load must not overlap a step of the
+load that raises or is broken leaves the optimizer unchanged. Slot tensors are
+copied to their parameter's device, and to its dtype when the parameter is
+floating, an integer slot included, as torch casts them, so the loaded state
+shares no tensor with @racket[state]. A load must not overlap a step of the
 same optimizer in another thread, as in torch.
 
 @torch-examples[

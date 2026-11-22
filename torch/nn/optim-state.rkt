@@ -176,11 +176,8 @@
   (and (memq (dtype t) '(float32 float64 float16 bfloat16)) #t))
 
 (define (slot-defect p v)
-  (cond
-    [(not (equal? (tensor-shape v) (tensor-shape p)))
-     (format "shape ~s, not the parameter's ~s" (tensor-shape v) (tensor-shape p))]
-    [(not (floating? v)) (format "dtype ~a, not a floating one" (dtype v))]
-    [else #f]))
+  (and (not (equal? (tensor-shape v) (tensor-shape p)))
+       (format "shape ~s, not the parameter's ~s" (tensor-shape v) (tensor-shape p))))
 
 (define (slot-problems kind name slots p)
   (define-values (required optional) (kept-slots kind))
@@ -213,7 +210,7 @@
 
 (define (placed-slot fused? p v)
   (match v
-    [(? tensor?) (copied p v)]
+    [(? tensor?) (if (floating? p) (copied p v) (copied (zeros-like p #:dtype (dtype v)) v))]
     [n (if fused? (full (exact->inexact n) #:device (device p) #:dtype 'float32) n)]))
 
 (define (loaded-tables fused? saved owned)
