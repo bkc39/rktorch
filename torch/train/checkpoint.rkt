@@ -150,12 +150,6 @@
       [else (raise-arguments-error 'load-from-checkpoint
                                    "the checkpoint did not save this init argument; pass it in #:init-args"
                                    "formal" name)]))
-  (define ids (map (lambda (f) (string->symbol (match f [(list _ ... id) id]))) formals))
-  (for ([name (in-list (sort (hash-keys overrides) symbol<?))])
-    (unless (memq name ids)
-      (raise-arguments-error 'load-from-checkpoint "#:init-args names no init formal"
-                             "name" name
-                             "formals" ids)))
   (for/fold ([positional '()] [keywords '()]
              #:result (let ([kws (sort keywords keyword<? #:key car)])
                         (values (map car kws) (map cdr kws) (reverse positional))))
