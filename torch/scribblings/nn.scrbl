@@ -1176,6 +1176,9 @@ anything is copied.
 ]
 }
 
+The state functions below are not implemented yet: they raise
+@racket[exn:fail:unsupported].
+
 @deftogether[(@defproc[(optimizer-state-dict [opt optimizer?] [model layer?]) optimizer-state/c]
               @defproc[(load-optimizer-state! [opt optimizer?] [model layer?]
                                               [state optimizer-state/c]) void?]
@@ -1184,7 +1187,9 @@ anything is copied.
 parameter names rather than positions, so a reordered model fails loudly. The
 state tensors are the optimizer's own, as in torch, and @racket["step"] is an
 integer in every mode, so a state moves between @racket['loop], @racket['foreach]
-and @racket['fused]. Loading checks everything first and replaces each group's
+and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash, and a
+hyperparameter keeps the exactness it was given, so @racket[#:lr 1/10] saves as
+@racket[1/10]. Loading checks everything first and replaces each group's
 hyperparameters; floating tensors go to their parameter's device and dtype, as
 torch does.}
 

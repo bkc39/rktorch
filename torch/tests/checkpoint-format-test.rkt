@@ -42,17 +42,6 @@
     (define-training-step (x y) (mse-loss (net x) y))
     (define-hook (on-save-checkpoint ckpt) (set-box! seen (decoded-form ckpt))))
 
-  (define (immutable-form form)
-    (cond
-      [(vector? form)
-       (vector (vector-ref form 0)
-               (if (hash? (vector-ref form 1))
-                   (for/hash ([(k v) (in-hash (vector-ref form 1))])
-                     (values (immutable-form k) (immutable-form v)))
-                   (vector-ref form 1)))]
-      [(pair? form) (cons (immutable-form (car form)) (immutable-form (cdr form)))]
-      [else form]))
-
   (test-case "T3-L7: load-state! reads the model, read-checkpoint the tree the hooks saw"
     (with-temporary-directory (dir #:template "format-~a")
       (define path (build-path dir "w.ckpt"))
@@ -64,7 +53,7 @@
                                          (and (string-prefix? name "state_dict.net.")
                                               (substring name (string-length "state_dict.net.")))))
       (check-equal? (layer-bytes fresh) (layer-bytes (Linear 2 1)) "a fresh layer differs")
-      (check-equal? (decoded-form (read-checkpoint path)) (immutable-form (unbox seen)))
+      (check-equal? (decoded-form (read-checkpoint path)) (unbox seen))
       (for ([key '("epoch" "global_step" "state_dict" "loops" "callbacks" "optimizer_states"
                    "lr_schedulers" "trainer_hparams" "hyper_parameters" "init_formals"
                    "init_dropped" "callback_metrics" "rng")])

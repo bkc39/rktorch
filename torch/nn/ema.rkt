@@ -5,6 +5,7 @@
          (prefix-in g: (only-in "../generated.rkt"
                                 foreach-copy! foreach-lerp-scalar!))
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "layer.rkt" layer? parameters))
 
 (struct ema (model average decay count) ;; noqa
@@ -58,8 +59,8 @@
 
 (define/contract-out (ema-n-averaged e) ;; noqa
   (-> ema? exact-nonnegative-integer?)
-  (error 'unimplemented))
+  (not-implemented 'ema-n-averaged 'T3))
 
 (define/contract-out (set-ema-n-averaged! e n) ;; noqa
   (-> ema? exact-nonnegative-integer? void?)
-  (error 'unimplemented))
+  (not-implemented 'set-ema-n-averaged! 'T3))

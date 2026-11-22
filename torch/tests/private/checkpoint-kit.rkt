@@ -1,10 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/match match)
-         (only-in "../../main.rkt" tensor?)
-         (only-in "../../nn.rkt" Linear mse-loss parameters sgd)
+(require (only-in "../../nn.rkt" Linear mse-loss parameters sgd)
          "../../train.rkt"
-         (only-in "comparable.rkt" host-bytes)
+         (only-in "comparable.rkt" comparable)
          (only-in "trainer-kit.rkt" toy-loader))
 
 (provide call-with-live-run
@@ -34,17 +32,5 @@
                    #:on-train-epoch-end
                    (lambda (r) (save-checkpoint! r (path-of r) #:weights-only? weights-only?))))
 
-(define (hash-kind h)
-  (cond
-    [(hash-eq? h) 'eq]
-    [(hash-eqv? h) 'eqv]
-    [else 'equal]))
-
 (define (decoded-form v)
-  (match v
-    [(? tensor?) (vector 'tensor (host-bytes v))]
-    [(? hash?)
-     (vector (hash-kind v)
-             (for/hash ([(k x) (in-hash v)]) (values (decoded-form k) (decoded-form x))))]
-    [(cons a d) (cons (decoded-form a) (decoded-form d))]
-    [_ v]))
+  (comparable v #:hash-kinds? #t))

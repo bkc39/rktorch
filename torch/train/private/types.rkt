@@ -5,7 +5,8 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../nn/layer.rkt" layer?)
          (only-in (submod "../../nn/layer.rkt" private) layer-method)
-         (only-in "../../private/contract.rkt" define/contract-out))
+         (only-in "../../private/contract.rkt" define/contract-out)
+         (only-in "../../private/not-implemented.rkt" not-implemented))
 
 (provide callback-hook
          callback-kind
@@ -76,9 +77,3 @@
 (define (callback-state-key cb)
   ((callback-info-state-key (callback-info-of cb)) cb))
 
-(define legs #hasheq((T1 . "T1 (#384)") (T2 . "T2 (#385)") (T3 . "T3 (#386)")))
-
-(define (not-implemented who leg)
-  (raise (exn:fail:unsupported
-          (format "~a: not implemented until ~a" who (hash-ref legs leg))
-          (current-continuation-marks))))

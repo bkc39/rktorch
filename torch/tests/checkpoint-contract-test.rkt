@@ -2,7 +2,9 @@
 
 (module+ test
   (require rackunit
-           (only-in "../nn.rkt" Linear mse-loss parameters sgd)
+           (only-in "../nn.rkt"
+                    Linear ema ema-n-averaged grad-scaler grad-scaler-state-dict mse-loss
+                    optimizer-state-dict parameters scheduler-state-dict sgd step-lr)
            "../train.rkt"
            (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/trainer-kit.rkt" apply-keywords toy-loader))
@@ -65,8 +67,23 @@
     (for ([kws (list '((#:every-n-train-steps . 0) (#:every-n-epochs . 1))
                      '((#:every-n-train-steps . 2) (#:every-n-epochs . 0))
                      '((#:every-n-train-steps . #f) (#:every-n-epochs . 3)))])
-      (check-exn #rx"unimplemented"
+      (check-exn exn:fail:unsupported?
                  (lambda () (apply-keywords model-checkpoint (cons '(#:dirpath . "ck") kws)))
                  (format "~s" kws)))
-    (check-exn #rx"unimplemented"
-               (lambda () (model-checkpoint #:dirpath "ck" #:monitor 'val-loss #:save-top-k 3)))))
+    (check-exn exn:fail:unsupported?
+               (lambda () (model-checkpoint #:dirpath "ck" #:monitor 'val-loss #:save-top-k 3))))
+
+  (test-case "the checkpoint functions and state accessors raise exn:fail:unsupported until T3"
+    (define net (Linear 2 1))
+    (define opt (sgd (parameters net) #:lr 0.1))
+    (for ([call (list (lambda () (read-checkpoint "a.ckpt"))
+                      (lambda () (load-from-checkpoint Tiny "a.ckpt"))
+                      (lambda () (on-exception-checkpoint #:dirpath "ck"))
+                      (lambda () (optimizer-state-dict opt net))
+                      (lambda () (scheduler-state-dict (step-lr opt #:step-size 2)))
+                      (lambda () (grad-scaler-state-dict (grad-scaler #:device 'cpu #:enabled? #f)))
+                      (lambda () (ema-n-averaged (ema net (Linear 2 1)))))])
+      (check-exn (lambda (e) (and (exn:fail:unsupported? e)
+                                  (regexp-match? #rx"not implemented until T3 \\(#386\\)"
+                                                 (exn-message e))))
+                 call))))

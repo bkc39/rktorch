@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in racket/contract/base flat-contract-predicate)
+           (only-in racket/match match-define)
            rackunit
            (only-in "../main.rkt" ones tensor zeros)
            (only-in "../nn.rkt"
@@ -60,7 +61,41 @@
                  "two betas")
     (check-false (optimizer-state? (hash "state" (hash) "param_groups"
                                          (list (hash-set sgd-group "dampening" 0))))
-                 "a fixed torch flag"))
+                 "a fixed torch flag")
+    (check-false (optimizer-state? (hash "state" (hasheq "weight" (hash "step" 1))
+                                         "param_groups" (list sgd-group)))
+                 "parameter states keyed by eq?")
+    (check-false (optimizer-state? (hash "state" (hash "weight" (hasheq "step" 1))
+                                         "param_groups" (list sgd-group)))
+                 "slots keyed by eq?")
+    (check-false (optimizer-state? (hash "state" (hash "weight" (make-hash (list (cons "step" 1))))
+                                         "param_groups" (list sgd-group)))
+                 "mutable slots")
+    (check-false (optimizer-state? (hash "state" (hash) "param_groups"
+                                         (list (make-hash (hash->list sgd-group)))))
+                 "a mutable group")
+    (check-false (optimizer-state? (hash "state" (hash) "param_groups"
+                                         (list (for/hasheqv ([(k v) (in-hash sgd-group)])
+                                                 (values k v)))))
+                 "a group keyed by eqv?"))
+
+  (test-case "the state shapes take exact rationals, and hold only checkpoint values"
+    (define exact-group (hash-set* sgd-group "lr" 1/10 "momentum" 9/10 "initial_lr" 1/10))
+    (define accepted
+      (list (list optimizer-state? (hash "state" (hash) "param_groups" (list exact-group)))
+            (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(1/10) "_last_lr" '(1/20)))
+            (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
+                                         "T_cur" 1/2 "T_i" 3))
+            (list grad-scaler-state? (hash "scale" 65536.0 "growth_factor" 2.0
+                                           "backoff_factor" 0.5 "growth_interval" 2000
+                                           "_growth_tracker" 0))))
+    (for ([a (in-list accepted)])
+      (match-define (list shape? v) a)
+      (check-true (shape? v) (format "~e" v))
+      (check-true (checkpoint-value? v) (format "~e" v)))
+    (check-false (scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
+                                         "_schedulers" (list (hasheq "last_epoch" 0))))
+                 "an inner schedule keyed by eq?"))
 
   (test-case "scheduler-state/c: last_epoch, base_lrs, _last_lr, restarts and inner schedules"
     (define plain (hash "last_epoch" 3 "base_lrs" '(0.1) "_last_lr" '(0.05)))
@@ -145,7 +180,7 @@
   (test-case "optimizer-state-dict's precondition: the model names every parameter"
     (define net (Linear 2 1))
     (define opt (sgd (parameters net) #:lr 0.1))
-    (check-exn #rx"unimplemented" (lambda () (optimizer-state-dict opt net))
+    (check-exn exn:fail:unsupported? (lambda () (optimizer-state-dict opt net))
                "parameters of the model reach the body")
     (check-exn blames-this-test? (lambda () (optimizer-state-dict opt (Linear 2 1))))
     (check-exn blames-this-test?

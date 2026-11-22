@@ -1,53 +1,25 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->i contract? flat-named-contract)
-         (only-in racket/match match)
+(require (only-in racket/contract/base
+                  ->i contract? list/c listof non-empty-listof rename-contract)
          (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "layer.rkt" layer? named-parameters)
-         (only-in "optim.rkt" optimizer-parameters optimizer?))
+         (only-in "optim.rkt" optimizer-parameters optimizer?)
+         (only-in "private/state-shape.rkt" record/c state-real/c string-keyed/c))
 
-(define slot-names '("momentum_buffer" "exp_avg" "exp_avg_sq" "square_avg" "step"))
+(define slots/c
+  (record/c (hash "momentum_buffer" tensor? "exp_avg" tensor? "exp_avg_sq" tensor?
+                  "square_avg" tensor? "step" exact-nonnegative-integer?)
+            #:required '()))
 
-(define (string-keyed? v)
-  (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))
-
-(define (slot-value? name v)
-  (if (equal? name "step") (exact-nonnegative-integer? v) (tensor? v)))
-
-(define (slots? v)
-  (and (string-keyed? v)
-       (for/and ([(name x) (in-hash v)])
-         (and (member name slot-names) (slot-value? name x)))))
-
-(define (parameter-states? v)
-  (and (string-keyed? v) (for/and ([slots (in-hash-values v)]) (slots? slots))))
-
-(define (betas? v)
-  (match v
-    [(list (? real?) (? real?)) #t]
-    [_ #f]))
-
-(define (group-value? key v)
-  (match key
-    ["params" (and (list? v) (andmap string? v))]
-    ["nesterov" (boolean? v)]
-    ["betas" (betas? v)]
-    [(or "lr" "momentum" "weight_decay" "eps" "alpha" "initial_lr") (real? v)]
-    [_ #f]))
-
-(define (param-group-state? v)
-  (and (string-keyed? v)
-       (hash-has-key? v "params")
-       (for/and ([(key x) (in-hash v)]) (group-value? key x))))
-
-(define (optimizer-state-shape? v)
-  (and (hash? v) (immutable? v) (hash-equal? v)
-       (= 2 (hash-count v))
-       (parameter-states? (hash-ref v "state" #f))
-       (match (hash-ref v "param_groups" #f)
-         [(list (? param-group-state?) ..1) #t]
-         [_ #f])))
+(define param-group/c
+  (record/c (hash "params" (listof string?) "nesterov" boolean?
+                  "betas" (list/c state-real/c state-real/c)
+                  "lr" state-real/c "momentum" state-real/c "weight_decay" state-real/c
+                  "eps" state-real/c "alpha" state-real/c "initial_lr" state-real/c)
+            #:required '("params")))
 
 (define (parameters-named? opt model)
   (define named
@@ -58,18 +30,20 @@
 
 (define/contract-out optimizer-state/c ;; noqa
   contract?
-  (flat-named-contract 'optimizer-state/c optimizer-state-shape?))
+  (rename-contract (record/c (hash "state" (string-keyed/c slots/c)
+                                  "param_groups" (non-empty-listof param-group/c)))
+                   'optimizer-state/c))
 
 (define/contract-out (optimizer-state-dict opt model) ;; noqa
   (->i ([opt optimizer?] [model layer?])
        #:pre/name (opt model) "every parameter of the optimizer is a named parameter of the model"
        (parameters-named? opt model)
        [_ optimizer-state/c])
-  (error 'unimplemented))
+  (not-implemented 'optimizer-state-dict 'T3))
 
 (define/contract-out (load-optimizer-state! opt model state) ;; noqa
   (->i ([opt optimizer?] [model layer?] [state optimizer-state/c])
        #:pre/name (opt model) "every parameter of the optimizer is a named parameter of the model"
        (parameters-named? opt model)
        [_ void?])
-  (error 'unimplemented))
+  (not-implemented 'load-optimizer-state! 'T3))

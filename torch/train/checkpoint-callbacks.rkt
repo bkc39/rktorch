@@ -3,6 +3,7 @@
 (require (only-in racket/contract/base
                   -> ->* ->i and/c any/c contract-out hash/c not/c or/c)
          (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "private/types.rkt"
                   callback-property callback? define-named-contract prop:callback))
 
@@ -12,7 +13,7 @@
   #:property prop:callback
   (callback-property 'checkpoint 'model-checkpoint
                      #:hook-ref (lambda (_cb _name) #f)
-                     #:state-key (lambda (_cb) (error 'unimplemented))))
+                     #:state-key (lambda (_cb) (not-implemented 'model-checkpoint 'T3))))
 
 (provide (contract-out [model-checkpoint? (-> any/c boolean?)]))
 
@@ -61,25 +62,25 @@
        "without #:monitor, #:save-top-k must be -1, 0 or 1"
        (or (supplied-or monitor) (memv (supplied-or save-top-k 1) '(-1 0 1)))
        [_ model-checkpoint?])
-  (error 'unimplemented))
+  (not-implemented 'model-checkpoint 'T3))
 
 (define/contract-out (model-checkpoint-best-model-path cb) ;; noqa
   (-> model-checkpoint? (or/c #f string?))
-  (error 'unimplemented))
+  (not-implemented 'model-checkpoint-best-model-path 'T3))
 
 (define/contract-out (model-checkpoint-best-model-score cb) ;; noqa
   (-> model-checkpoint? (or/c #f flonum?))
-  (error 'unimplemented))
+  (not-implemented 'model-checkpoint-best-model-score 'T3))
 
 (define/contract-out (model-checkpoint-best-k-models cb) ;; noqa
   (-> model-checkpoint? (hash/c string? flonum? #:immutable #t))
-  (error 'unimplemented))
+  (not-implemented 'model-checkpoint-best-k-models 'T3))
 
 (define/contract-out (model-checkpoint-last-model-path cb) ;; noqa
   (-> model-checkpoint? (or/c #f string?))
-  (error 'unimplemented))
+  (not-implemented 'model-checkpoint-last-model-path 'T3))
 
 (define/contract-out (on-exception-checkpoint #:dirpath dirpath ;; noqa
                                               #:filename [filename "on_exception"])
   (->* (#:dirpath path-string?) (#:filename (and/c string? (not/c ""))) callback?)
-  (error 'unimplemented))
+  (not-implemented 'on-exception-checkpoint 'T3))
