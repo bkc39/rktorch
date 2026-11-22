@@ -13,7 +13,7 @@ workers and 29 s with @racket[#:workers 4], and the network reaches
 The model, the device and @tt{accuracy} come from the MNIST chapter.
 
 @chunk[<r17-require>
-(require torch torch/nn torch/data/loader
+(require torch (except-in torch/nn accuracy) torch/data/loader
          (only-in racket/list first second)
          (only-in racket/math exact-floor pi)
          (only-in torch/vision/mnist load-mnist load-mnist-fixture))

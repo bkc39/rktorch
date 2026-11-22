@@ -22,7 +22,7 @@
            rackunit
            torch
            torch/data/loader
-           torch/nn
+           (except-in torch/nn accuracy)
            torch/scribblings/examples/05-mnist
            (only-in torch/train fit run-metric)
            (only-in torch/vision/mnist load-mnist-fixture))

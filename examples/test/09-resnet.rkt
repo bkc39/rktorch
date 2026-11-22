@@ -5,7 +5,7 @@
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
-         torch/nn
+         (except-in torch/nn accuracy)
          torch/scribblings/examples/09-resnet
          (only-in torch/foreign/raw/fault with-crossing-hook)
          (only-in torch/vision/cifar10 load-cifar10-fixture))
