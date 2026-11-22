@@ -1093,6 +1093,24 @@ asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.  The same rule and
 the same test cover `torch/nn/`, with `torch/nn.rkt` as the facade.
 
+Both forms also provide the plain definition from an `unchecked`
+submodule, and `torch/foreign.rkt`'s own `unchecked` submodule re-exports
+every foreign module's.  A library module outside `torch/foreign/` that
+calls ops on a hot path (`torch/vision/transforms.rkt`,
+`torch/data/dataset.rkt`, `torch/data/loader.rkt`) imports them from
+`(submod "../foreign.rkt" unchecked)`, so the contract is checked once, at
+the entry point the user called, and not again at every internal call.
+That is allowed only where the library guarantees the arguments -- a value
+the entry point's contract already checked, or one the library built --
+because an unchecked call goes straight to native code; a name whose
+argument the library cannot vouch for stays on the facade.
+`torch/tests/internal-unchecked-test.rkt` lists the contracted names each
+of those modules still imports, and checks every entry point that calls
+unchecked ops still blames its caller.  The submodule is an explicit
+`module+`, not `contract-out`'s `#:unprotected-submodule`: on Racket 9.3
+the names that option generates are dropped from a module that has another
+`module+` of the same name.
+
 A layer built with `define-layer` carries its constructor contract in a
 `#:contract` clause.  The clause is the export: it provides the constructor
 under that contract and the predicate, under its lowercase name

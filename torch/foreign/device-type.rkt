@@ -29,6 +29,9 @@
             [device-type (-> device? (or/c 'cpu 'cuda 'mps))]
             [device-index (-> device? exact-nonnegative-integer?)])))
 
+(module+ unchecked
+  (provide device? device-type device-index))
+
 (define/checked-out device/c contract? ;; noqa
   (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 

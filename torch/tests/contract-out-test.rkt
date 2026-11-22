@@ -116,6 +116,20 @@
              (lambda () (plain:twice "a"))))
 
 (module+ test
+  (require (prefix-in unchecked: (submod ".." lib unchecked))
+           (prefix-in checked-unchecked: (submod ".." checked-lib unchecked)))
+
+  (check-equal? (unchecked:safe-div 6 3) 2)
+  (check-exn #rx"^/: division by zero" (lambda () (unchecked:safe-div 1 0)))
+  (check-exn #rx"^quotient: undefined for 0"
+             (lambda () (unchecked:split-heads 32 0)))
+  (check-equal? unchecked:answer 42)
+  (check-exn #rx"^/: division by zero"
+             (lambda () (checked-unchecked:safe-div 1 0)))
+  (check-exn #rx"^[*]: contract violation"
+             (lambda () (checked-unchecked:twice "a"))))
+
+(module+ test
   (require (only-in racket/file file->string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/sequence sequence->list))

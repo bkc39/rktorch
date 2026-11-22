@@ -10,6 +10,9 @@
 (module+ checked
   (provide (contract-out [slice? (-> any/c boolean?)])))
 
+(module+ unchecked
+  (provide slice?))
+
 (define bound/c (or/c #f exact-integer?))
 
 (define/checked-out :: ;; noqa
