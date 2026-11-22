@@ -60,7 +60,8 @@
                #:callbacks (list (watching dir events) mc)))
     (define state ((callback-hook mc 'state-dict) mc #f))
     (append (unbox events)
-            (list (cons 'best-k (sort (for/list ([(p v) (in-hash (model-checkpoint-best-k-models mc))])
+            (list (cons 'best-k (sort (for/list ([(p v) (in-hash
+                                                         (model-checkpoint-best-k-models mc))])
                                         (cons (name-of p) v))
                                       string<? #:key car))
                   (list 'best (name-of (model-checkpoint-best-model-path mc))
@@ -137,8 +138,9 @@
     (apply-keywords fit
                     (append (list (cons '#:max-epochs hook-epochs) (cons '#:logger #f)
                                   (list '#:callbacks
-                                        (lambda-callback #:on-train-epoch-end (note! 'epoch-end)
-                                                         #:on-train-epoch-start (note! 'epoch-start))
+                                        (lambda-callback
+                                         #:on-train-epoch-end (note! 'epoch-end)
+                                         #:on-train-epoch-start (note! 'epoch-start))
                                         mc))
                             (if val? (list (cons '#:val (toy-loader 2))) '())
                             more)
@@ -183,9 +185,11 @@
                                     (directory-list root)))
                     3)))
 
-  (test-case "model-checkpoint: a missing #:monitor key warns while no validation has run, then raises"
+  (test-case (string-append "model-checkpoint: a missing #:monitor key warns while no validation"
+                            " has run, then raises")
     (with-temporary-directory (root #:template "mc-absent-~a")
-      (define (absent-monitor name) (model-checkpoint #:dirpath (build-path root name) #:monitor 'absent))
+      (define (absent-monitor name)
+        (model-checkpoint #:dirpath (build-path root name) #:monitor 'absent))
       (define-values (_run warnings)
         (call-with-logged-warnings
          (lambda ()
@@ -194,7 +198,7 @@
                   #:callbacks (list (absent-monitor "no-val")))))))
       (check-true (for/or ([w (in-list warnings)]) (regexp-match? #rx"absent" w))
                   "without a validation loop it warns")
-      (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? #rx"absent" (exn-message e))))
+      (check-exn #rx"absent"
                  (lambda ()
                    (fit (Small) (toy-loader 4) #:val (toy-loader 2) #:max-epochs 2 #:logger #f
                         #:callbacks (list (absent-monitor "val"))))

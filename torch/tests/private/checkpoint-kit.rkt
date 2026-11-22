@@ -4,11 +4,10 @@
          (only-in "../../main.rkt" generator-state make-generator manual-seed! randn rng-state)
          (only-in "../../nn.rkt" Dropout Linear Sequential mse-loss parameters sgd)
          "../../train.rkt"
-         (only-in "comparable.rkt" comparable host-bytes layer-bytes)
+         (only-in "comparable.rkt" host-bytes layer-bytes)
          (only-in "trainer-kit.rkt" toy-loader))
 
 (provide call-with-live-run
-         decoded-form
          fit-draws
          Small
          saving-callback
@@ -52,12 +51,10 @@
 
 (define (stored value-box)
   (lambda-callback #:state-key "stored"
-                   #:on-save-checkpoint (lambda (_r ckpt) (hash-set! ckpt "probe" (unbox value-box)))))
+                   #:on-save-checkpoint
+                   (lambda (_r ckpt) (hash-set! ckpt "probe" (unbox value-box)))))
 
 (define (saving-callback path-of #:weights-only? [weights-only? #f])
   (lambda-callback #:state-key "saving"
                    #:on-train-epoch-end
                    (lambda (r) (save-checkpoint! r (path-of r) #:weights-only? weights-only?))))
-
-(define (decoded-form v)
-  (comparable v #:hash-kinds? #t))

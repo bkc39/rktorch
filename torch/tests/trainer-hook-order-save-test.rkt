@@ -21,7 +21,8 @@
       (check-events 'save-weights-only sc
                     #:expected
                     (filter (lambda (e) (not (and (eq? (car e) 'callback)
-                                                  (memq (cadr e) '(state-dict on-save-checkpoint)))))
+                                                  (memq (cadr e)
+                                                        '(state-dict on-save-checkpoint)))))
                             (expected-events 'save)))))
 
   (test-case "T3 LO-9: save-checkpoint! inside on-save-checkpoint raises"

@@ -26,4 +26,5 @@
              (with-python-env (system* python "-I" generator (path->string out)))))
          (check-true ok? (get-output-string log))
          (check-equal? (file->value out) (file->value fixture-path)
-                       "torch/tests/lightning-checkpoint.rktd differs from the generator's output")))]))
+                       (string-append "torch/tests/lightning-checkpoint.rktd differs from"
+                                      " the generator's output"))))]))

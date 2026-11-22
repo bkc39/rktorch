@@ -98,7 +98,8 @@
     (void (cosine-annealing-lr opt #:t-max 6))
     (steps! opt net 3)
     (define saved (optimizer-state-dict opt net))
-    (define (group-values key state) (map (lambda (grp) (hash-ref grp key #f)) (hash-ref state "param_groups")))
+    (define (group-values key state)
+      (map (lambda (grp) (hash-ref grp key #f)) (hash-ref state "param_groups")))
     (check-equal? (length (hash-ref saved "param_groups")) 2)
     (check-equal? (group-values "weight_decay" saved) '(0.1 0.0))
     (check-equal? (group-values "initial_lr" saved) '(0.01 0.01) "the scheduler's initial_lr")
@@ -107,6 +108,11 @@
     (check-equal? (group-values "initial_lr" (optimizer-state-dict twin-opt net)) '(0.01 0.01)
                   "initial_lr loads into an optimizer that had none"))
 
+  (test-case "T3-L10: a group hyperparameter given exact saves as a flonum"
+    (define net (fresh-net))
+    (define saved (optimizer-state-dict (sgd (parameters net) #:lr 1/10) net))
+    (check-eqv? (hash-ref (car (hash-ref saved "param_groups")) "lr") 0.1))
+
   (define (adam-after-steps net)
     (define opt (adam (parameters net) #:lr 0.01))
     (steps! opt net 3)
@@ -114,7 +120,7 @@
 
   (define (check-refused label opt net state rx)
     (define before (comparable (optimizer-state-dict opt net)))
-    (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? rx (exn-message e))))
+    (check-exn rx
                (lambda () (load-optimizer-state! opt net state))
                label)
     (check-equal? (comparable (optimizer-state-dict opt net)) before

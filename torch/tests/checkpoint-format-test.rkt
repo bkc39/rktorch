@@ -12,7 +12,7 @@
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt"
-                    call-with-live-run decoded-form fit-draws saving-callback Small stored)
+                    call-with-live-run fit-draws saving-callback Small stored)
            (only-in "private/comparable.rkt" comparable layer-bytes))
 
   (define-runtime-path format-module "../train/private/format.rkt")
@@ -20,8 +20,8 @@
   (test-case "T3-L6: saving every epoch leaves the parameters and every random stream as they were"
     (with-temporary-directory (dir #:template "pure-~a")
       (define plain (fit-draws '()))
-      (define saved (fit-draws (list (saving-callback
-                                      (lambda (r) (build-path dir (format "e~a.ckpt" (run-epoch r))))))))
+      (define (epoch-path r) (build-path dir (format "e~a.ckpt" (run-epoch r))))
+      (define saved (fit-draws (list (saving-callback epoch-path))))
       (check-not-equal? (hash-ref plain 'cpu-rng) (hash-ref plain 'seeded-rng)
                         "the fit draws from the default stream")
       (check-equal? saved plain)
@@ -38,7 +38,7 @@
     (define-hparams lr)
     (define-optimizers (sgd (parameters net) #:lr lr))
     (define-training-step (x y) (mse-loss (net x) y))
-    (define-hook (on-save-checkpoint ckpt) (set-box! seen (decoded-form ckpt))))
+    (define-hook (on-save-checkpoint ckpt) (set-box! seen (comparable ckpt #:hash-kinds? #t))))
 
   (test-case "T3-L7: load-state! reads the model, read-checkpoint the tree the hooks saw"
     (with-temporary-directory (dir #:template "format-~a")
@@ -57,7 +57,7 @@
                                          (and (string-prefix? name "state_dict.net.")
                                               (substring name (string-length "state_dict.net.")))))
       (check-equal? (layer-bytes fresh) trained "the checkpoint holds the trainer's parameters")
-      (check-equal? (decoded-form (read-checkpoint path)) (unbox seen))
+      (check-equal? (comparable (read-checkpoint path) #:hash-kinds? #t) (unbox seen))
       (for ([key '("epoch" "global_step" "state_dict" "loops" "callbacks" "optimizer_states"
                    "lr_schedulers" "trainer_hparams" "hyper_parameters" "init_formals"
                    "init_dropped" "callback_metrics" "rng")])
@@ -108,13 +108,15 @@
       (save-state! (Linear 2 1) state-file)
       (define cases
         (list (list "a save-state! file" state-file #rx"not a.*checkpoint")
-              (list "version 2" (written "v2.ckpt" (version-2 raw)) #rx"version.*\"2\".*\"1\"|version.*2.*1")
-              (list "a truncated file" (written "cut.ckpt" (subbytes raw 0 (quotient (bytes-length raw) 2)))
+              (list "version 2" (written "v2.ckpt" (version-2 raw))
+                    #rx"version.*\"2\".*\"1\"|version.*2.*1")
+              (list "a truncated file"
+                    (written "cut.ckpt" (subbytes raw 0 (quotient (bytes-length raw) 2)))
                     #rx".")
               (list "a missing file" (build-path dir "absent.ckpt") #rx"absent.ckpt")))
       (for ([c (in-list cases)])
         (define-values (label path rx) (apply values c))
-        (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? rx (exn-message e))))
+        (check-exn rx
                    (lambda () (read-checkpoint path))
                    label)
         (define built (box 0))

@@ -83,9 +83,9 @@ The order of one @racket[fit], after Lightning 2.6.5, with
        parameters, each callback's @tt{on-load-checkpoint} and then
        @tt{load-state!}; after @tt{on-fit-start}, the training state (the
        optimizers, schedulers, scaler, counters and metrics); after
-       @tt{on-train-start}, the RNG states and loader generators. @racket[save-checkpoint!] runs the callbacks'
-       @tt{state-dict}, then @tt{on-save-checkpoint} for the callbacks and then
-       the trainer.}
+       @tt{on-train-start}, the RNG states and loader generators.
+       @racket[save-checkpoint!] runs the callbacks' @tt{state-dict}, then
+       @tt{on-save-checkpoint} for the callbacks and then the trainer.}
  @item{A validation loop runs in eval mode with gradients off:
        @tt{on-validation-start}, @tt{on-validation-epoch-start}, per batch
        the transfer hooks, @tt{on-validation-batch-start}, the validation

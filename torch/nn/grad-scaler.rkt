@@ -15,7 +15,7 @@
          (only-in (submod "optim.rkt" private)
                   call-with-gradient-buckets gradient-bucket gradient-bucket-dtype
                   optimizer-fused? scaled-step!)
-         (only-in "private/state-shape.rkt" record/c))
+         (only-in "private/state-shape.rkt" immutable-equal-hash/c record/c))
 
 (provide (contract-out [grad-scaler? (-> any/c boolean?)]))
 
@@ -264,7 +264,7 @@
 (define/contract-out grad-scaler-state/c ;; noqa
   contract?
   (rename-contract
-   (or/c (and/c hash? immutable? hash-equal? hash-empty?)
+   (or/c (and/c immutable-equal-hash/c hash-empty?)
          (record/c (hash "scale" (and/c flonum? (>/c 0.0))
                          "growth_factor" (and/c flonum? (>/c 1.0))
                          "backoff_factor" (and/c flonum? (>/c 0.0) (</c 1.0))

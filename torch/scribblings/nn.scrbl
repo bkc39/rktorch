@@ -1187,9 +1187,11 @@ The state functions below are not implemented yet: they raise
 parameter names rather than positions, so a reordered model fails loudly. The
 state tensors are the optimizer's own, as in torch, and @racket["step"] is an
 integer in every mode, so a state moves between @racket['loop], @racket['foreach]
-and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash, and a
-hyperparameter keeps the exactness it was given, so @racket[#:lr 1/10] saves as
-@racket[1/10]. Loading checks everything first and replaces each group's
+and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash. Group
+hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as @racket[0.1];
+a value that bypasses the groups can stay exact, as @racket[one-cycle-lr] with
+@racket[#:max-lr 1/10 #:div-factor 25] saves an exact @racket[1/250] as its
+@tt{initial_lr} and @tt{base_lrs}. Loading checks everything first and replaces each group's
 hyperparameters; floating tensors go to their parameter's device and dtype, as
 torch does.}
 

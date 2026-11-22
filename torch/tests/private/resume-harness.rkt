@@ -32,9 +32,6 @@
 (define (resumable-net)
   (Sequential (Linear 4 8) (Dropout 0.5) (Linear 8 1)))
 
-(define (parameter-table layer)
-  (make-immutable-hash (named-parameters layer)))
-
 (define-trainer Resumable (net temperature seen)
   (define-init (s)
     (set! net (resumable-net))
@@ -76,10 +73,11 @@
     (set! e (ema (run-trainer run) average #:decay 0.9)))
   (define-hook (on-train-batch-end _loss _extra . _batch) (ema-update! e))
   (define-hook (state-dict)
-    (hash "n" (ema-n-averaged e) "average" (parameter-table average)))
+    (hash "n" (ema-n-averaged e) "average" (make-immutable-hash (named-parameters average))))
   (define-hook (load-state! state)
     (with-no-grad
-      (for ([(name p) (in-hash (parameter-table average))])
+      (for ([entry (in-list (named-parameters average))])
+        (match-define (cons name p) entry)
         (copy! p (hash-ref (hash-ref state "average") name))))
     (set-ema-n-averaged! e (hash-ref state "n"))))
 
@@ -131,8 +129,8 @@
     (define hook (callback-hook cb 'state-dict))
     (and hook (dir-relative dir (comparable (hook cb r))))))
 
-(define (snapshot l)
-  (match-define (leg w r _logger _saver dir) l)
+(define (snapshot leg-run)
+  (match-define (leg w r _logger _saver dir) leg-run)
   (define tr (world-trainer w))
   (hasheq 'parameters (comparable (state-dict tr))
           'optimizers (for/list ([opt (in-list (run-optimizers r))])

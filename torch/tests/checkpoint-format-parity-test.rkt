@@ -32,7 +32,8 @@
   (define (tensors-in v)
     (cond
       [(tensor? v) (list (host-bytes v))]
-      [(hash? v) (for*/list ([(k x) (in-hash v)] [t (in-list (append (tensors-in k) (tensors-in x)))])
+      [(hash? v) (for*/list ([(k x) (in-hash v)]
+                             [t (in-list (append (tensors-in k) (tensors-in x)))])
                    t)]
       [(pair? v) (append (tensors-in (car v)) (tensors-in (cdr v)))]
       [else '()]))
@@ -83,7 +84,8 @@
            (define name (string-append "state_dict." key))
            (check-equal? (entry-form (hash-ref entries (string->symbol name))) (host-bytes t) name))
          (check-equal? (sorted (for/list ([(name e) (in-hash entries)]
-                                          #:unless (string-prefix? (symbol->string name) "state_dict."))
+                                          #:unless (string-prefix? (symbol->string name)
+                                                                   "state_dict."))
                                  (entry-form e)))
                        (sorted (tensors-in (hash-remove tree "state_dict")))
                        "the other tensors, byte for byte"))])))

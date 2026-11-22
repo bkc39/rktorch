@@ -19,7 +19,8 @@
        (define s (grad-scaler #:device device #:init-scale 16.0 #:growth-interval 2))
        (for ([torch (in-list (hash-ref (oracle-json dir "grad-scaler") 'states))] [t (in-naturals)])
          (define loss (sum (net (ones 1 3 #:device device))))
-         (define scaled (grad-scaler-scale-loss s (if (hash-ref torch 'overflow) (* loss +inf.0) loss)))
+         (define scaled
+           (grad-scaler-scale-loss s (if (hash-ref torch 'overflow) (* loss +inf.0) loss)))
          (backward! scaled)
          (grad-scaler-step! s opt)
          (grad-scaler-update! s)

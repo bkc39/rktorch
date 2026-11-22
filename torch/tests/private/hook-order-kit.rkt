@@ -11,7 +11,9 @@
 
 (define (save-here! run dir weights-only?)
   (save-checkpoint! run
-                    (build-path dir (format "epoch=~a-step=~a.ckpt" (run-epoch run) (run-global-step run)))
+                    (build-path dir (format "epoch=~a-step=~a.ckpt"
+                                            (run-epoch run)
+                                            (run-global-step run)))
                     #:weights-only? weights-only?))
 
 (define-callback epoch-saver (dir weights-only?)

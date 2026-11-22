@@ -165,29 +165,31 @@
                  #:callbacks (list (lambda-callback
                                     #:on-train-batch-start
                                     (lambda (r . _)
-                                      (when (= (run-global-step r) 1) (save-checkpoint! r path)))))))
+                                      (when (= (run-global-step r) 1)
+                                        (save-checkpoint! r path)))))))
       (check-true (file-exists? path))
       (check-not-exn (lambda () (read-checkpoint path)))
       (define started (box #f))
-      (check-exn exn:fail?
+      (check-exn #rx"cannot be resumed"
                  (lambda ()
                    (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
                         #:callbacks (list (lambda-callback
                                            #:on-train-start (lambda (_r) (set-box! started #t)))))))
       (check-false (unbox started) "no training ran")))
 
-  (test-case "§1.7 row 16: a checkpoint taken under a current-generator resumes only under one on its device"
+  (test-case (string-append "§1.7 row 16: a checkpoint taken under a current-generator resumes only"
+                            " under one on its device")
     (with-temporary-directory (dir #:template "generator-~a")
       (define path
         (parameterize ([current-generator (make-generator 13)])
           (saved-with dir '())))
-      (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? #rx"current-generator" (exn-message e))))
+      (check-exn #rx"current-generator"
                  (lambda () (resume-from path))
                  "none")
       (check-not-exn (lambda ()
                        (parameterize ([current-generator (make-generator 1)]) (resume-from path))))
       (when (cuda-available?)
-        (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? #rx"current-generator" (exn-message e))))
+        (check-exn #rx"current-generator"
                    (lambda ()
                      (parameterize ([current-generator (make-generator 1 #:device 'cuda)])
                        (resume-from path)))

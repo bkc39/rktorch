@@ -7,7 +7,8 @@
            (only-in "../main.rkt" full ones randn zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
-           (only-in "private/checkpoint-kit.rkt" call-with-live-run decoded-form stored)
+           (only-in "private/checkpoint-kit.rkt" call-with-live-run stored)
+           (only-in "private/comparable.rkt" comparable)
            (only-in "private/safetensors-reader.rkt" safetensors-metadata))
 
   (define dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
@@ -71,7 +72,8 @@
             (set-box! current v)
             (save-checkpoint! r path)
             (define back (hash-ref (read-checkpoint path) "probe"))
-            (check-equal? (decoded-form back) (decoded-form v) (format "value ~a: ~e" i v))
+            (check-equal? (comparable back #:hash-kinds? #t) (comparable v #:hash-kinds? #t)
+                          (format "value ~a: ~e" i v))
             (check-true (immutable-throughout? back) (format "value ~a is immutable" i))))))))
 
   (test-case "T3-L8: an exact non-integer is {\"$rational\": \"n/d\"}, an integer a JSON integer"

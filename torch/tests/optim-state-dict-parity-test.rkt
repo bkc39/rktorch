@@ -45,7 +45,8 @@
     (for ([k (in-range from to)])
       (zero-grads! opt)
       (backward! (for/fold ([loss #f]) ([e (in-list (named-parameters net))])
-                   (define term (sum (* (cdr e) (hash-ref tensors (format "grad.~a.~a" k (car e))))))
+                   (define grad (hash-ref tensors (format "grad.~a.~a" k (car e))))
+                   (define term (sum (* (cdr e) grad)))
                    (if loss (+ loss term) term)))
       (step! opt)))
 

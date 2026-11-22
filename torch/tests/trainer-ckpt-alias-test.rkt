@@ -15,7 +15,8 @@
                #:ckpt-path path
                #:callbacks (append (list (lambda-callback
                                           #:on-load-checkpoint
-                                          (lambda (_r ckpt) (set-box! step (hash-ref ckpt "global_step")))
+                                          (lambda (_r ckpt)
+                                            (set-box! step (hash-ref ckpt "global_step")))
                                           #:on-train-start
                                           (lambda (r) (set-box! start (run-epoch r))))
                                          mc)
@@ -33,7 +34,8 @@
   (test-case "T3-L24: 'best with no model-checkpoint, or two, raises"
     (with-temporary-directory (dir #:template "best-count-~a")
       (check-exn #rx"model-checkpoint"
-                 (lambda () (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best)))
+                 (lambda ()
+                   (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best)))
       (check-exn #rx"model-checkpoint"
                  (lambda ()
                    (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f #:ckpt-path 'best
