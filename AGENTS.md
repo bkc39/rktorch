@@ -32,6 +32,9 @@ The Racket package is the `torch` collection:
 - `(require (submod torch/foreign unsafe))` — adds `tensor-free!` for
   deterministic release. Idempotent: a second free raises `exn:fail:contract`
   at the contract boundary instead of double-freeing.
+- `(require (submod torch/foreign unchecked))` — library-internal: the same
+  names without contracts, for hot paths whose arguments the library has
+  already checked (see "Validating arguments"). Not a user entry point.
 - `(require torch/foreign/raw/*)` — the direct C FFI layer.
 
 The native bridge is a C++ shared library, `libtorchrkt`, built with CMake and
@@ -1093,23 +1096,13 @@ asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.  The same rule and
 the same test cover `torch/nn/`, with `torch/nn.rkt` as the facade.
 
-Both forms also provide the plain definition from an `unchecked`
-submodule, and `torch/foreign.rkt`'s own `unchecked` submodule re-exports
-every foreign module's.  A library module outside `torch/foreign/` that
-calls ops on a hot path (`torch/vision/transforms.rkt`,
-`torch/data/dataset.rkt`, `torch/data/loader.rkt`) imports them from
-`(submod "../foreign.rkt" unchecked)`, so the contract is checked once, at
-the entry point the user called, and not again at every internal call.
-That is allowed only where the library guarantees the arguments -- a value
-the entry point's contract already checked, or one the library built --
-because an unchecked call goes straight to native code; a name whose
-argument the library cannot vouch for stays on the facade.
-`torch/tests/internal-unchecked-test.rkt` lists the contracted names each
-of those modules still imports, and checks every entry point that calls
-unchecked ops still blames its caller.  The submodule is an explicit
-`module+`, not `contract-out`'s `#:unprotected-submodule`: on Racket 9.3
-the names that option generates are dropped from a module that has another
-`module+` of the same name.
+Both forms also provide the plain definition from an `unchecked` submodule,
+gathered by `torch/foreign.rkt`'s.  A hot-path module imports from
+`(submod "../foreign.rkt" unchecked)` only names whose arguments the library
+guarantees; `torch/tests/internal-unchecked-test.rkt` lists what each still
+imports from the facade.  Racket 9.3's `#:unprotected-submodule` drops its
+names when a same-named `module+` precedes the `contract-out`, so the
+submodule is a hand-written `module+`.
 
 A layer built with `define-layer` carries its constructor contract in a
 `#:contract` clause.  The clause is the export: it provides the constructor
