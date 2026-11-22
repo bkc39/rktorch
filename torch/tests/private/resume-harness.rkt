@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list append* last)
-                  (only-in racket/path file-name-from-path)
+         (only-in racket/path file-name-from-path)
          rackunit
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
          (only-in "../../main.rkt"
@@ -103,6 +103,10 @@
 (define (every-epoch-saver dir)
   (model-checkpoint #:dirpath dir #:filename "split-{epoch}-{step}" #:save-top-k -1))
 
+(define ((every-steps-saver n) dir)
+  (model-checkpoint #:dirpath dir #:filename "split-{epoch}-{step}" #:save-top-k -1
+                    #:every-n-train-steps n))
+
 (define (monitor-checkpoint w)
   (for/first ([cb (in-list (world-callbacks w))] #:when (model-checkpoint? cb)) cb))
 
@@ -136,11 +140,12 @@
   (manual-seed! n)
   (random-seed n))
 
-(define (fit-leg make-world dir fit-args #:seed seed #:ckpt-path [ckpt-path #f] #:bounds bounds)
+(define (fit-leg make-world dir fit-args #:seed seed #:ckpt-path [ckpt-path #f] #:bounds bounds
+                 #:saver make-saver)
   (seed! seed)
   (define w (make-world dir))
   (define l (collecting-logger))
-  (define saver (every-epoch-saver dir))
+  (define saver (make-saver dir))
   (define r
     (apply-keywords fit
                     (append bounds
@@ -159,12 +164,13 @@
 (define (check-resume make-world #:split split #:total n #:fit-args [fit-args '()]
                       #:split-step [split-step #f])
   (define splits (if (list? split) split (list split)))
+  (define make-saver (if split-step (every-steps-saver split-step) every-epoch-saver))
   (with-temporary-directory (root #:template "resume-~a")
-    (define straight (fit-leg make-world (build-path root "straight") fit-args
+    (define straight (fit-leg make-world (build-path root "straight") fit-args #:saver make-saver
                               #:seed 0 #:bounds (list (cons '#:max-epochs n))))
     (define split-dir (build-path root "split"))
     (define first-leg
-      (fit-leg make-world split-dir fit-args #:seed 0
+      (fit-leg make-world split-dir fit-args #:seed 0 #:saver make-saver
                #:bounds (if split-step
                             (list (cons '#:max-epochs n) (cons '#:max-steps split-step))
                             (list (cons '#:max-epochs (car splits))))))
@@ -172,7 +178,7 @@
       (for/fold ([legs (list first-leg)] #:result (reverse legs))
                 ([epochs (in-list (append (if split-step '() (cdr splits)) (list n)))])
         (define previous (car legs))
-        (cons (fit-leg make-world split-dir fit-args #:seed 12345
+        (cons (fit-leg make-world split-dir fit-args #:seed 12345 #:saver make-saver
                        #:ckpt-path (model-checkpoint-best-model-path (leg-saver previous))
                        #:bounds (list (cons '#:max-epochs epochs)))
               legs)))

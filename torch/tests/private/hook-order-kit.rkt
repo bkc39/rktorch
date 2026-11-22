@@ -7,7 +7,23 @@
          (only-in "lightning-names.rkt" expected-events)
          (only-in "trainer-kit.rkt" recorder Recorded scenario-events toy-loader))
 
-(provide check-events fit-scenario)
+(provide check-events epoch-saver fit-scenario step-saver)
+
+(define (save-here! run dir weights-only?)
+  (save-checkpoint! run
+                    (build-path dir (format "epoch=~a-step=~a.ckpt" (run-epoch run) (run-global-step run)))
+                    #:weights-only? weights-only?))
+
+(define-callback epoch-saver (dir weights-only?)
+  #:kind checkpoint
+  (define-init (d #:weights-only? [w? #f]) (set! dir d) (set! weights-only? w?))
+  (define-hook (on-train-epoch-end) (save-here! run dir weights-only?)))
+
+(define-callback step-saver (dir every)
+  #:kind checkpoint
+  (define-hook (on-train-batch-end _loss _extra . _batch)
+    (when (zero? (modulo (run-global-step run) every))
+      (save-here! run dir #f))))
 
 (define (same-event? a e)
   (match* (a e)
