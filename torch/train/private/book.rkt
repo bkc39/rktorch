@@ -174,7 +174,7 @@
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
 
-(define (frozen table state-of)
+(define (frozen table [state-of values])
   (for/hasheq ([(k v) (in-hash table)]) (values k (state-of v))))
 
 (define (pending-state p)
@@ -188,8 +188,8 @@
   (hash "steps" (frozen (ledger-steps l) pending-state)
         "epoch" (frozen (ledger-epoch l) entry-state)
         "stepped" (sort (hash-keys (ledger-stepped l)) symbol<?)
-        "latest" (frozen (ledger-latest l) values)
-        "closed" (frozen (ledger-closed l) values)))
+        "latest" (frozen (ledger-latest l))
+        "closed" (frozen (ledger-closed l))))
 
 (define (book-state b)
   (hash "train" (ledger-state (book-train b)) "eval" (ledger-state (book-eval b))))
