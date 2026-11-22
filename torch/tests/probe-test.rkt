@@ -400,6 +400,9 @@
                               (lambda () (linear-probe fit #:weight-decay 1e-3
                                                        #:weight-decays '(1e-3)))
                               (lambda () (linear-probe fit select #:weight-decays '()))
+                              (lambda ()
+                                (linear-probe fit (tensors->probe-dataset (blob-features 30 3)
+                                                                          (cycle-labels 30 5))))
                               (lambda () (linear-probe (blob-set 1 2) #:weight-decay 1e-3))))]
           [i (in-naturals)])
       (check-exn blames-this-test? bad (format "case ~a" i)))
@@ -434,17 +437,34 @@
       (check-exn blames-this-test? (lambda () (probe-accuracy single-probe moved)))
       (check-exn blames-this-test? (lambda () (knn-accuracy single-fit moved)))))
 
-  (bounded-test "P15: a wrong-rank encoder output raises, naming probe-dataset"
+  (bounded-test "P15: a malformed encoder pass raises, naming probe-dataset"
     (define (raised-by-probe-dataset? e)
       (and (exn:fail:contract? e)
            (regexp-match? #rx"^probe-dataset: " (exn-message e))
            (not (blames-this-test? e))))
-    (check-exn raised-by-probe-dataset?
-               (lambda () (probe-dataset doubled (image-dataset 4) #:pool #f)))
-    (check-exn raised-by-probe-dataset?
-               (lambda () (probe-dataset cls-token (token-dataset 4 5 3) #:pool 'cls)))
-    (check-exn raised-by-probe-dataset?
-               (lambda () (probe-dataset doubled (tensor-dataset (randn 4 3)) #:pool #f))))
+    (define tabular (tensor-dataset (randn 4 3) (cycle-labels 4 4)))
+    (for ([bad (in-list
+                (list (lambda () (probe-dataset doubled (image-dataset 4) #:pool #f))
+                      (lambda () (probe-dataset cls-token (token-dataset 4 5 3) #:pool 'cls))
+                      (lambda () (probe-dataset doubled (tensor-dataset (randn 4 3)) #:pool #f))
+                      (lambda () (probe-dataset doubled tabular #:pool #f
+                                                #:forward (lambda (x) (to-dtype x 'int64))))
+                      (lambda () (probe-dataset doubled (tensor-dataset (randn 4 3) (randn 4))
+                                                #:pool #f))
+                      (lambda () (probe-dataset doubled tabular #:pool #f #:batch-size 4
+                                                #:forward (lambda (x) (narrow x 0 0 1))))
+                      (lambda () (probe-dataset doubled
+                                                (tensor-dataset (randn 0 3)
+                                                                (zeros 0 #:dtype 'int64))
+                                                #:pool #f))
+                      (lambda () (probe-dataset doubled (token-dataset 6 5 3) #:classes 2))))]
+          [i (in-naturals)])
+      (check-exn raised-by-probe-dataset? bad (format "case ~a" i))))
+
+  (bounded-test "P15: probe-dataset keeps uint8 labels as int64"
+    (define bytes-labelled (tensor-dataset (randn 4 3) (to-dtype (cycle-labels 4 2) 'uint8)))
+    (check-equal? (~> (probe-dataset doubled bytes-labelled #:pool #f) probe-dataset-labels dtype)
+                  'int64))
 
   (for ([dev (in-list accelerators)])
     (bounded-test (format "P17: on ~a the probes match the CPU within 1/n" dev)

@@ -293,6 +293,8 @@
        (or (supplied-or select #f) (unsupplied-arg? weight-decays))
        #:pre/name (fit select) "fit and select of one feature width, dtype and device"
        (same-features? fit (supplied-or select #f))
+       #:pre/name (fit select) "select classes within the fit's"
+       (classes-fit? fit (supplied-or select #f))
        #:pre/name (fit) "at least two fit rows"
        (<= 2 (length fit))
        [result linear-probe?])

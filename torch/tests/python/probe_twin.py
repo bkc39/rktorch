@@ -135,10 +135,10 @@ def quadratic(line_search):
     a = torch.tensor(SPD_A, dtype=torch.float64)
     b = torch.tensor(SPD_B, dtype=torch.float64)
     x = torch.zeros(6, dtype=torch.float64, requires_grad=True)
-    minimised([x], lambda: 0.5 * (x * (a @ x)).sum() - (b * x).sum(),
-              max_iter=100, tolerance_change=1e-12, line_search_fn=line_search)
-    exact = torch.linalg.solve(a, b)
-    return (x.detach() - exact).abs().max().item()
+    losses = minimised([x], lambda: 0.5 * (x * (a @ x)).sum() - (b * x).sum(),
+                       max_iter=100, tolerance_change=1e-12,
+                       line_search_fn=line_search)
+    return {"losses": losses, "x": x.detach().tolist()}
 
 
 def probe_trace(n, scale, wd):
@@ -166,7 +166,7 @@ out = {"fit": packed(fit), "fit_labels": packed(fy),
        "lbfgs_rosenbrock": rosenbrock([-1.5, 2.0], torch.float64),
        "lbfgs_rosenbrock32": [{"start": start, **rosenbrock(start, torch.float32)}
                               for start in ([1.3, 2.0], [-1.2, 2.0])],
-       "lbfgs_quadratic": {"none": quadratic(None),
+       "lbfgs_quadratic": {"a": SPD_A, "b": SPD_B, "none": quadratic(None),
                            "strong_wolfe": quadratic("strong_wolfe")},
        "lbfgs_probe": {"n": 100, "scale": 10.0, "weight_decay": 1e-2,
                        "losses": probe_trace(100, 10.0, 1e-2)}}

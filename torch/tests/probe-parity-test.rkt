@@ -5,14 +5,13 @@
            rackunit
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + - / @ abs argmax backward! cat dtype eq exp eye item masked-fill! max min
-                    narrow ones pow requires-grad! reshape scatter-add! select shape sqrt sum
-                    take tensor tensor->list to-dtype topk transpose zero-grad! zeros)
+                    * + - / @ abs argmax backward! dtype eq eye item masked-fill! max min narrow
+                    ones pow requires-grad! reshape select shape sqrt sum take tensor
+                    tensor->list to-dtype topk transpose zero-grad! zeros)
            (only-in "../train.rkt"
                     knn-accuracy linear-probe linear-probe-bias linear-probe-mean linear-probe-std
                     linear-probe-weight linear-probe-weight-decay probe-accuracy
-                    probe-dataset-classes probe-dataset-features probe-dataset-indices
-                    probe-dataset-labels probe-split
+                    probe-dataset-features probe-dataset-indices probe-dataset-labels probe-split
                     tensors->probe-dataset)
            (only-in "../train/private/lbfgs.rkt" lbfgs-minimize!)
            (only-in (submod "../train/probe.rkt" private) knn-predictions probe-objective)
@@ -46,30 +45,18 @@
   (define (row-normalised x)
     (/ x (sqrt (@ (* x x) (ones (cadr (shape x)) 1 #:dtype (dtype x))))))
 
-  (define (vote top labels classes temperature)
-    (define tally (zeros (car (shape top)) classes #:dtype (dtype top)))
-    (scatter-add! tally 1 labels (exp (/ top temperature)))
-    (flat (argmax tally 1)))
-
-  (define (near-tie-flips fit-x fit-labels classes query-x [swap-temperature 0.07])
+  (define (split-gaps fit-x fit-labels query-x)
     (define f (row-normalised fit-x))
     (define sims (@ (row-normalised (or query-x fit-x)) (transpose f 0 1)))
     (unless query-x
       (masked-fill! sims (~> (shape fit-x) car (eye #:dtype 'int64) (eq 1)) -inf.0))
     (define-values (top idx) (topk sims 21 #:dim 1))
     (define labels (take fit-labels idx))
-    (define (swapped t)
-      (cat (list (narrow t 1 0 19) (narrow t 1 20 1)) 1))
-    (define gaps (flat (- (select top 1 19) (select top 1 20))))
-    (define split?
-      (for/list ([a (in-list (flat (select labels 1 19)))] [b (in-list (flat (select labels 1 20)))])
-        (not (= a b))))
-    (define kept (vote (narrow top 1 0 20) (narrow labels 1 0 20) classes 0.07))
-    (define moved (vote (swapped top) (swapped labels) classes swap-temperature))
-    (for/fold ([checked 0] [flips 0])
-              ([gap (in-list gaps)] [split (in-list split?)] [k (in-list kept)] [m (in-list moved)]
-               #:when (and split (<= gap 1e-5)))
-      (values (+ checked 1) (if (= k m) flips (+ flips 1)))))
+    (for/list ([gap (in-list (flat (- (select top 1 19) (select top 1 20))))]
+               [a (in-list (flat (select labels 1 19)))]
+               [b (in-list (flat (select labels 1 20)))]
+               #:unless (= a b))
+      gap))
 
   (define (hits-ratio predicted labels)
     (/ (for/sum ([p (in-list (flat predicted))] [y (in-list (flat labels))]) (if (= p y) 1 0))
@@ -137,11 +124,11 @@
     (for ([query (in-list (list #f select test))]
           [query-x (in-list (list #f (std-of 1) (std-of 2)))]
           [key (in-list '(train val test))])
-      (define-values (checked flips)
-        (near-tie-flips (std-of 0) (probe-dataset-labels fit) (probe-dataset-classes fit) query-x))
-      (check-equal? flips 0
-                    (format "P16c: ~a votes flipped by swapping ~a near-tied 20th and 21st neighbours"
-                            key checked))
+      (define gaps (split-gaps (std-of 0) (probe-dataset-labels fit) query-x))
+      (check-equal? (for/sum ([gap (in-list gaps)] #:unless (< 1e-5 gap)) 1) 0
+                    (format (string-append "P16c: similarity gap precondition, ~a, on the ~a rows"
+                                           " whose 20th and 21st neighbours differ in label")
+                            key (length gaps)))
       (check-= (knn-accuracy fit query) (hash-ref knn key) 1e-6 (format "P16c: knn ~a" key))))
 
   (define (check-sklearn j fit select test)
@@ -227,11 +214,21 @@
                   "P14: float32 probe objective losses, evaluation for evaluation"))
 
   (define (check-quadratic j)
-    (define worst (hash-ref j 'lbfgs_quadratic))
-    (for ([key (in-list '(none strong_wolfe))])
-      (check-true (<= (hash-ref worst key) 1e-6)
-                  (format "P14: torch.optim.LBFGS (~a) within 1e-6 of the minimum, off by ~a"
-                          key (hash-ref worst key)))))
+    (define want (hash-ref j 'lbfgs_quadratic))
+    (define a (tensor (hash-ref want 'a) #:dtype 'float64))
+    (define b (tensor (hash-ref want 'b) #:dtype 'float64))
+    (for ([line-search (in-list '(#f strong-wolfe))] [key (in-list '(none strong_wolfe))])
+      (define x (requires-grad! (zeros 6 #:dtype 'float64)))
+      (define losses
+        (traced (list x)
+                (lambda () (- (* 0.5 (sum (* x (@ a x)))) (sum (* b x))))
+                (lambda (params closure)
+                  (lbfgs-minimize! params closure #:max-iter 100 #:tolerance-change 1e-12
+                                   #:line-search line-search))))
+      (define run (hash-ref want key))
+      (check-equal? losses (hash-ref run 'losses)
+                    (format "P14: ~a losses, evaluation for evaluation" key))
+      (check-equal? (flat x) (hash-ref run 'x) (format "P14: ~a final x" key))))
 
   (cond
     [(not (python-module-available? "sklearn"))
