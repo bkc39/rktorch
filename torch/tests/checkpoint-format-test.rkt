@@ -96,6 +96,8 @@
   (define (version-2 bs)
     (regexp-replace #rx#"(\"version\" *: *)\"1\"" bs #"\\1\"2\""))
 
+  (define (header-length raw) (integer-bytes->integer raw #f #f 0 8))
+
   (test-case "T3-L20: what is not a version-1 checkpoint raises before any trainer is built"
     (with-temporary-directory (dir #:template "refused-~a")
       (define good (build-path dir "good.ckpt"))
@@ -105,15 +107,25 @@
         (define p (build-path dir name))
         (call-with-output-file p (lambda (o) (write-bytes bs o)))
         p)
+      (define (unreadable label path)
+        (define name (let-values ([(_dir name _dir?) (split-path path)]) (path->string name)))
+        (list label path (pregexp (string-append "not a rktorch checkpoint.*path: .*"
+                                                 (regexp-quote name)))))
       (define state-file (build-path dir "state.safetensors"))
       (save-state! (Linear 2 1) state-file)
       (define cases
         (list (list "a save-state! file" state-file #rx"not a.*checkpoint")
               (list "version 2" (written "v2.ckpt" (version-2 raw))
                     #rx"version.*\"2\".*\"1\"|version.*2.*1")
-              (list "a truncated file"
-                    (written "cut.ckpt" (subbytes raw 0 (quotient (bytes-length raw) 2)))
-                    #rx".")
+              (unreadable "an empty file" (written "empty.ckpt" #""))
+              (unreadable "a cut length prefix" (written "prefix.ckpt" (subbytes raw 0 4)))
+              (unreadable "a cut header"
+                          (written "header.ckpt"
+                                   (subbytes raw 0 (+ 8 (quotient (header-length raw) 2)))))
+              (unreadable "a cut payload"
+                          (written "payload.ckpt" (subbytes raw 0 (sub1 (bytes-length raw)))))
+              (unreadable "a Lightning zip checkpoint"
+                          (written "lightning.ckpt" (bytes-append #"PK\3\4" (make-bytes 60 0))))
               (list "a missing file" (build-path dir "absent.ckpt") #rx"absent.ckpt")))
       (for ([c (in-list cases)])
         (define-values (label path rx) (apply values c))

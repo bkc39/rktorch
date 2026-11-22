@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in json string->jsexpr)
+           (only-in racket/contract/base flat-contract-predicate)
            (only-in racket/match match)
            rackunit
            (only-in "../main.rkt" full ones randn zeros)
@@ -29,6 +30,9 @@
   (define (stable-key)
     (pick (list 'a 'b '$c 0 1 -1 #t #f '())))
 
+  (define (eqv-key)
+    (pick (list 'a '$c 0 -1 #t '() 1.5 -0.0 0.0 +nan.0 (expt 2 80) -7/3)))
+
   (define (equal-key)
     (pick (list "a" "b" "π" 3 2.5 'sym '(1 2) (cons 'x 1.0) #f)))
 
@@ -39,7 +43,7 @@
       [(0) (for/list ([_ (in-range width)]) (child))]
       [(1) (cons (child) (random-leaf))]
       [(2) (for/hasheq ([_ (in-range width)]) (values (stable-key) (child)))]
-      [(3) (for/hasheqv ([_ (in-range width)]) (values (stable-key) (child)))]
+      [(3) (for/hasheqv ([_ (in-range width)]) (values (eqv-key) (child)))]
       [else (for/hash ([_ (in-range width)]) (values (equal-key) (child)))]))
 
   (define (random-value depth)
@@ -75,6 +79,16 @@
             (check-equal? (comparable back #:hash-kinds? #t) (comparable v #:hash-kinds? #t)
                           (format "value ~a: ~e" i v))
             (check-true (immutable-throughout? back) (format "value ~a is immutable" i))))))))
+
+  (test-case "T3-L8: an eq? or eqv? key must keep its identity through a read"
+    (define value? (flat-contract-predicate checkpoint-value/c))
+    (for ([v (list (hasheq "a" 1) (hasheq 1.5 1) (hasheq (expt 2 80) 1) (hasheq 1/3 1)
+                   (hasheq '(1 2) 1) (hasheq (cons 'a 'b) 1)
+                   (hasheqv "a" 1) (hasheqv '(1 2) 1) (hash 'k (hasheq "nested" 1)))])
+      (check-false (value? v) (format "~e" v)))
+    (for ([v (list (hasheq 'a 1 0 2 #t 3 '() 4) (hasheqv 1.5 1 (expt 2 80) 2 1/3 3 -0.0 4)
+                   (hash "a" 1 1.5 2 '(1 2) 3))])
+      (check-true (value? v) (format "~e" v))))
 
   (test-case "T3-L8: an exact non-integer is {\"$rational\": \"n/d\"}, an integer a JSON integer"
     (with-temporary-directory (dir #:template "rational-~a")
