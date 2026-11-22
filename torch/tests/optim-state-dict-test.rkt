@@ -48,7 +48,9 @@
 
   (test-case "T3-L10: 3 steps, dict, load into a fresh optimizer, 2 more steps on both"
     (for* ([c (in-list cases)] [mode (in-list (list-ref c 3))])
-      (define-values (name make kws) (values (car c) (cadr c) (caddr c)))
+      (define name (car c))
+      (define make (cadr c))
+      (define kws (caddr c))
       (define label (format "~a, ~a" name mode))
       (define net (fresh-net))
       (define opt (build make kws mode net))
@@ -70,7 +72,8 @@
     (for* ([c (in-list cases)]
            [from (in-list (list-ref c 3))]
            [to-mode (in-list (list-ref c 3))])
-      (define-values (make kws) (values (cadr c) (caddr c)))
+      (define make (cadr c))
+      (define kws (caddr c))
       (define net (fresh-net))
       (define opt (build make kws from net))
       (steps! opt net 3)

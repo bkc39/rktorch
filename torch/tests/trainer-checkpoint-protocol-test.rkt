@@ -35,7 +35,7 @@
 
   (test-case "T3-L17: a callback's state arrives equal? and immutable"
     (with-temporary-directory (dir #:template "protocol-~a")
-      (define state (make-hash (list (cons "a" (list 1 2.5 'x)) (cons "b" (make-hasheq '((k . "v")))))))
+      (define state (make-hash (list (list "a" 1 2.5 'x) (cons "b" (make-hasheq '((k . "v")))))))
       (define path (saved-with dir (list (keeper "keep" state (box #f)))))
       (define seen (box #f))
       (void (resume-capturing (Small) path (list (keeper "keep" state seen))))
@@ -90,7 +90,8 @@
         (define tr (make))
         (define before (layer-bytes tr))
         (define seen (box '()))
-        (define (note! name) (lambda (_r . _) (set-box! seen (cons name (unbox seen)))))
+        (define ((note! name) _r . _)
+          (set-box! seen (cons name (unbox seen))))
         (check-exn rx (lambda ()
                         (fit tr (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
                              #:callbacks (list (lambda-callback #:on-exception (note! 'on-exception)

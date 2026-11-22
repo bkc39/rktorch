@@ -17,7 +17,8 @@
     (with-temporary-directory (dir #:template "limit-~a")
       (define path (epoch-2-checkpoint dir))
       (define seen (box '()))
-      (define (note! name) (lambda (_r . _) (set-box! seen (cons name (unbox seen)))))
+      (define ((note! name) _r . _)
+        (set-box! seen (cons name (unbox seen))))
       (void (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
                  #:callbacks (list (lambda-callback #:on-train-start (note! 'start)
                                                     #:on-train-batch-start (note! 'batch)

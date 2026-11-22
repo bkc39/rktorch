@@ -32,7 +32,7 @@
                                                   "betas" '(0.9 0.999) "eps" 1e-8
                                                   "weight_decay" 0.01 "initial_lr" 0.01)))))
     (check-false (optimizer-state? (make-hash (list (cons "state" (hash))
-                                                    (cons "param_groups" (list sgd-group)))))
+                                                    (list "param_groups" sgd-group))))
                  "mutable")
     (check-false (optimizer-state? (hasheq "state" (hash) "param_groups" (list sgd-group)))
                  "not equal?-based")

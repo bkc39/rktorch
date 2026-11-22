@@ -53,8 +53,8 @@
 
   (test-case "T3-L7 (PS): Python reads the metadata and every entry of a checkpoint"
     (cond
-      [(not (file-exists? script)) (printf "skipped: no read_checkpoint.py (installed package)\n")]
-      [(not python) (printf "skipped: no python3\n")]
+      [(not (file-exists? script)) (displayln "skipped: no read_checkpoint.py (installed package)")]
+      [(not python) (displayln "skipped: no python3")]
       [else
        (with-temporary-directory (dir #:template "format-parity-~a")
          (define path (build-path dir "p.ckpt"))

@@ -42,7 +42,8 @@
    (lambda (dir)
      (test-case "T3-L30: scheduler state after each step equals torch's state_dict"
        (for ([kind (in-list kinds)])
-         (define-values (name make) (values (car kind) (cadr kind)))
+         (define name (car kind))
+         (define make (cadr kind))
          (define opt (sgd (parameters (Linear 3 2)) #:lr 0.1 #:momentum 0.9))
          (define s (make opt))
          (for ([torch (in-list (hash-ref (oracle-json dir name) 'states))] [t (in-naturals)])

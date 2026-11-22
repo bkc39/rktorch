@@ -8,7 +8,7 @@
 
   (test-case "T3-L1g: the resume law on CUDA, with deterministic algorithms"
     (cond
-      [(not (cuda-available?)) (printf "skipped: no CUDA device\n")]
+      [(not (cuda-available?)) (displayln "skipped: no CUDA device")]
       [else
        (define was (deterministic-algorithms-enabled?))
        (dynamic-wind

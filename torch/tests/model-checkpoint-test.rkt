@@ -83,7 +83,8 @@
     (define fixture (hash-ref (file->value fixture-path) 'cases))
     (with-temporary-directory (root #:template "replay-~a")
       (for ([c (in-list cases)])
-        (define-values (name kws) (values (car c) (cadr c)))
+        (define name (car c))
+        (define kws (cadr c))
         (define options (cddr c))
         (define existing (cond [(memq '#:existing options) => cadr] [else '()]))
         (define accumulate (cond [(memq '#:accumulate options) => cadr] [else 1]))
@@ -96,7 +97,7 @@
                      #:more [more '()])
     (apply-keywords fit
                     (append (list (cons '#:max-epochs epochs) (cons '#:logger #f)
-                                  (cons '#:ckpt-path path) (cons '#:callbacks (list mc)))
+                                  (cons '#:ckpt-path path) (list '#:callbacks mc))
                             (if val? (list (cons '#:val (toy-loader 2))) '())
                             more)
                     tr (toy-loader 4)))
@@ -134,18 +135,16 @@
 
   (define (saved-at dir hook-epochs #:val? [val? #t] #:more [more '()])
     (define seen (box '()))
-    (define (note! where) (lambda (r) (set-box! seen (cons (list where (run-epoch r)
-                                                                 (length (directory-list dir)))
-                                                           (unbox seen)))))
+    (define ((note! where) r)
+      (set-box! seen (cons (list where (run-epoch r) (length (directory-list dir))) (unbox seen))))
     (define mc (model-checkpoint #:dirpath dir #:save-top-k -1))
     (make-directory dir)
     (apply-keywords fit
                     (append (list (cons '#:max-epochs hook-epochs) (cons '#:logger #f)
-                                  (cons '#:callbacks
-                                        (list (lambda-callback
-                                               #:on-train-epoch-end (note! 'epoch-end)
-                                               #:on-train-epoch-start (note! 'epoch-start))
-                                              mc)))
+                                  (list '#:callbacks
+                                        (lambda-callback #:on-train-epoch-end (note! 'epoch-end)
+                                                         #:on-train-epoch-start (note! 'epoch-start))
+                                        mc))
                             (if val? (list (cons '#:val (toy-loader 2))) '())
                             more)
                     (Small) (toy-loader 4))

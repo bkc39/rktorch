@@ -44,7 +44,7 @@
 
   (test-case "T3-L28 (c): after a native fault nothing is written and the original raise survives"
     (unless (eq? native-fault-policy 'raise)
-      (printf "skipped: RKTORCH_ON_NATIVE_FAULT=exit\n"))
+      (displayln "skipped: RKTORCH_ON_NATIVE_FAULT=exit"))
     (when (eq? native-fault-policy 'raise)
       (with-temporary-directory (dir #:template "latched-~a")
         (call-with-output-file (file-in dir) (lambda (o) (write-bytes #"earlier" o)))

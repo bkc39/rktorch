@@ -39,7 +39,8 @@
 
   (test-case "T3-L12: k steps, save, rebuild with another lr, load optimizer then scheduler"
     (for* ([kind (in-list kinds)] [k (in-list '(0 1 3 5))])
-      (define-values (name make) (values (car kind) (cadr kind)))
+      (define name (car kind))
+      (define make (cadr kind))
       (define net (Linear 2 1))
       (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
       (define s (make opt))
