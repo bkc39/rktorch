@@ -1,8 +1,18 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _bytes _fun _int _intptr _uint get-ffi-obj)
+(require (only-in ffi/unsafe
+                  _bytes
+                  _fun
+                  _int
+                  _intptr
+                  _long
+                  _pointer
+                  define-cstruct
+                  get-ffi-obj
+                  malloc)
          (only-in ffi/unsafe/os-thread call-in-os-thread)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
+         (only-in racket/math exact-floor)
          (only-in racket/os getpid)
          (only-in racket/port port->string))
 
@@ -14,10 +24,114 @@
          exit-status-of
          status-and-stderr-of)
 
-(define c-write (get-ffi-obj "write" #f (_fun _int _bytes _intptr -> _intptr)))
-(define c-sleep (get-ffi-obj "sleep" #f (_fun #:blocking? #t _uint -> _uint)))
-(define c-raise (get-ffi-obj "raise" #f (_fun _int -> _int)))
+(define (libc name type) (get-ffi-obj name #f type))
+(define c-write (libc "write" (_fun _int _bytes _intptr -> _intptr)))
+(define c-raise (libc "raise" (_fun _int -> _int)))
 (define sigalrm 14)
+
+(define (pthread-constants os)
+  (match os
+    ['linux '(110 1)]
+    ['macosx '(60 6)]
+    [_ (raise-arguments-error 'process-deadline "no ETIMEDOUT known for this OS" "os" os)]))
+
+(define (platform os*)
+  (match os*
+    [(or 'macosx 'darwin) 'macosx]
+    [_ os*]))
+
+(define os (platform (system-type 'os*)))
+(match-define (list etimedout clock-monotonic) (pthread-constants os))
+
+(define (call-failed! call status)
+  (define notice
+    (string->bytes/utf-8
+     (string-append "process deadline: " call " returned " (number->string status)
+                    "; ending the process with SIGALRM\n")))
+  (c-write 2 notice (bytes-length notice))
+  (c-raise sigalrm))
+
+(define (checked-call name type)
+  (define call (libc name type))
+  (lambda arguments
+    (define status (apply call arguments))
+    (unless (zero? status)
+      (call-failed! name status))))
+
+(define read-clock (libc "clock_gettime" (_fun _int _pointer -> _int)))
+(define checked-read-clock (checked-call "clock_gettime" (_fun _int _pointer -> _int)))
+(define mutex-init (checked-call "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
+(define mutex-lock (checked-call "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
+(define mutex-unlock (checked-call "pthread_mutex_unlock" (_fun _pointer -> _int)))
+(define condition-init (checked-call "pthread_cond_init" (_fun _pointer _pointer -> _int)))
+(define condition-signal (checked-call "pthread_cond_signal" (_fun _pointer -> _int)))
+(define condition-wait
+  (checked-call "pthread_cond_wait" (_fun #:blocking? #t _pointer _pointer -> _int)))
+
+(define pthread-object-bytes 128)
+
+(define (pthread-object init! . arguments)
+  (define object (malloc pthread-object-bytes 'atomic-interior))
+  (apply init! object arguments)
+  object)
+
+(define-cstruct _timespec ([sec _long] [nsec _long]) #:malloc-mode 'atomic-interior)
+
+(define nanoseconds-per-second 1000000000)
+
+(define (timespec->nanoseconds time)
+  (+ (* nanoseconds-per-second (timespec-sec time)) (timespec-nsec time)))
+
+(define (set-timespec-nanoseconds! time nanoseconds)
+  (define-values (sec nsec) (quotient/remainder nanoseconds nanoseconds-per-second))
+  (set-timespec-sec! time sec)
+  (set-timespec-nsec! time nsec))
+
+(define (set-time-left! left deadline now)
+  (set-timespec-nanoseconds!
+   left
+   (max 1 (- (timespec->nanoseconds deadline) (timespec->nanoseconds now)))))
+
+(define (monotonic-deadline-after milliseconds)
+  (define deadline (make-timespec 0 0))
+  (checked-read-clock clock-monotonic deadline)
+  (set-timespec-nanoseconds!
+   deadline
+   (+ (timespec->nanoseconds deadline) (exact-floor (* 1000000 milliseconds))))
+  deadline)
+
+(define-values (monotonic-condition-attributes wait-name wait-until)
+  (match os
+    ['linux
+     (define attributes-init (checked-call "pthread_condattr_init" (_fun _pointer -> _int)))
+     (define attributes-set-clock
+       (checked-call "pthread_condattr_setclock" (_fun _pointer _int -> _int)))
+     (define wait-until-deadline
+       (libc "pthread_cond_timedwait" (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+     (values (lambda ()
+               (define attributes (pthread-object attributes-init))
+               (attributes-set-clock attributes clock-monotonic)
+               attributes)
+             "pthread_cond_timedwait"
+             (lambda (condition mutex deadline _left)
+               (wait-until-deadline condition mutex deadline)))]
+    ['macosx
+     (define wait-for
+       (libc "pthread_cond_timedwait_relative_np"
+             (_fun #:blocking? #t _pointer _pointer _pointer -> _int)))
+     (values (lambda () #f)
+             "pthread_cond_timedwait_relative_np"
+             (lambda (condition mutex deadline left)
+               (read-clock clock-monotonic left)
+               (set-time-left! left deadline left)
+               (wait-for condition mutex left)))]))
+
+(define (wake-outcome status lifted?)
+  (cond
+    [lifted? 'lifted]
+    [(zero? status) 'spurious]
+    [(= status etimedout) 'ran-past]
+    [else 'failed]))
 
 (define-logger process-deadline)
 
@@ -35,34 +149,42 @@
     [1 (format "~a s" seconds)]
     [_ (format "~a s (~a s x ~a under raco cover)" (* scale seconds) seconds scale)]))
 
-;; The watch runs on an OS thread of its own, so it ends a process wedged in
-;; atomic mode, and it names itself on stderr first: under raco cover the
-;; process it ends is the whole suite's, which runs instrumented, so there the
-;; deadline is scaled by the factor cover stamped with that process's pid; its
-;; children inherit the stamp but load compiled code, and keep theirs. It
-;; sleeps to the deadline in one blocking call, and a lifted watch sleeps on: a
-;; thread that returns from a blocking call after a collection claims a fresh
-;; 16 KiB allocation area, which (current-memory-use 'cumulative) counts in
-;; whatever window main has open, so a watch that woke to poll would land in
-;; heap measurements.
+;; arm returns only once the watch is parked in its blocking wait, so the watch
+;; charges no allocation to any heap window main opens afterwards (#460).
 (define (arm-process-deadline! seconds [what "a deadline's body"])
   (define scale (deadline-scale))
+  (define bound (bound-text seconds scale))
   (define lifted (box #f))
+  (define parked (box #f))
+  (define mutex (pthread-object mutex-init #f))
+  (define condition (pthread-object condition-init (monotonic-condition-attributes)))
+  (define deadline (monotonic-deadline-after (* 1000 scale seconds)))
+  (define left (make-timespec 0 0))
   (define notice
     (string->bytes/utf-8
-     (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n"
-             what (bound-text seconds scale))))
-  (log-process-deadline-debug "armed for ~a: ~a" what (bound-text seconds scale))
+     (format "process deadline: ~a ran past ~a; ending the process with SIGALRM\n" what bound)))
+  (define notice-length (bytes-length notice))
+  (log-process-deadline-debug "armed for ~a: ~a" what bound)
+  (mutex-lock mutex)
   (call-in-os-thread
    (lambda ()
-     (let watch ([left (inexact->exact (ceiling (* scale seconds)))])
-       (define unslept (c-sleep left))
-       (cond
-         [(unbox lifted) (void)]
-         [(positive? unslept) (watch unslept)]
-         [else
-          (c-write 2 notice (bytes-length notice))
-          (c-raise sigalrm)]))))
+     (mutex-lock mutex)
+     (set-box! parked #t)
+     (condition-signal condition)
+     (let watch ()
+       (define status (wait-until condition mutex deadline left))
+       (match (wake-outcome status (unbox lifted))
+         ['lifted (void)]
+         ['spurious (watch)]
+         ['ran-past
+          (c-write 2 notice notice-length)
+          (c-raise sigalrm)]
+         ['failed (call-failed! wait-name status)]))))
+  (let park ()
+    (unless (unbox parked)
+      (condition-wait condition mutex)
+      (park)))
+  (mutex-unlock mutex)
   (lambda () (set-box! lifted #t)))
 
 (define (call-with-process-deadline seconds thunk
@@ -133,6 +255,37 @@
 
   (define (run body #:within seconds)
     (exit-status-of (program body) #:within seconds))
+
+  (test-case "ETIMEDOUT and CLOCK_MONOTONIC are read for the OS os* names, and others refused"
+    (check-equal? (pthread-constants 'linux) '(110 1))
+    (check-equal? (pthread-constants 'macosx) '(60 6))
+    (check-exn #rx"no ETIMEDOUT known for this OS.*freebsd"
+               (lambda () (pthread-constants 'freebsd))))
+
+  (test-case "a nix-built darwin Racket's os* name reads as macOS"
+    (check-equal? (map platform '(darwin macosx linux)) '(macosx macosx linux)))
+
+  (test-case "a wake is read as lifted first, then as spurious, a deadline, or a failed call"
+    (check-equal? (wake-outcome 22 #t) 'lifted)
+    (check-equal? (wake-outcome etimedout #t) 'lifted)
+    (check-equal? (wake-outcome 0 #f) 'spurious)
+    (check-equal? (wake-outcome etimedout #f) 'ran-past)
+    (check-equal? (wake-outcome 22 #f) 'failed))
+
+  (test-case "the time left to a deadline is its difference from now, and never zero"
+    (define (left-of deadline now)
+      (define left (make-timespec 0 0))
+      (set-time-left! left (apply make-timespec deadline) (apply make-timespec now))
+      (list (timespec-sec left) (timespec-nsec left)))
+    (check-equal? (left-of '(10 500000000) '(8 700000000)) '(1 800000000))
+    (check-equal? (left-of '(10 0) '(10 0)) '(0 1))
+    (check-equal? (left-of '(10 0) '(12 0)) '(0 1)))
+
+  (test-case "a wedge ends at its bound, not before it"
+    (define start (current-inexact-monotonic-milliseconds))
+    (check-equal? (run '(call-with-process-deadline 2 wedge) #:within 30) sigalrm-status)
+    (define elapsed (- (current-inexact-monotonic-milliseconds) start))
+    (check-true (>= elapsed 2000) (format "ended after ~a ms" elapsed)))
 
   (test-case "a process wedged in atomic mode ends at its deadline"
     (check-equal? (run '(call-with-process-deadline 1 wedge) #:within 30) sigalrm-status))
@@ -219,7 +372,6 @@
       (status-and-stderr-of
        (program '(begin
                    (arm-process-deadline! 300)
-                   (usleep 200000)
                    (define spans
                      (for/list ([_ (in-range 3)])
                        (collect-garbage 'minor)
