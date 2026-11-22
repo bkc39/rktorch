@@ -12,7 +12,8 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optimization.rkt" set-hparam! trainer-hparams)
          (only-in "private/book.rkt" book-metrics)
-         (only-in "private/checks.rkt" captured-arguments-shapes captured-arguments-values formal-name)
+         (only-in "private/checks.rkt"
+                  captured-arguments-shapes captured-arguments-values formal-name)
          (only-in "private/dispatch.rkt" call-callback call-hooks call-trainer trainer-device)
          (only-in "private/format.rkt" read-checkpoint-file write-checkpoint!)
          (only-in "private/restore.rkt" rng-bundle)
@@ -57,7 +58,8 @@
 
 (define (formal-entry shape)
   (match shape
-    [(list 'keyword kw id) (list "keyword" (string-append "#:" (keyword->string kw)) (symbol->string id))]
+    [(list 'keyword kw id)
+     (list "keyword" (string-append "#:" (keyword->string kw)) (symbol->string id))]
     [(list kind id) (list (symbol->string kind) (symbol->string id))]))
 
 (define (init-entries tr)
@@ -147,9 +149,10 @@
     (cond
       [(hash-has-key? overrides name) (hash-ref overrides name)]
       [(hash-has-key? saved id) (hash-ref saved id)]
-      [else (raise-arguments-error 'load-from-checkpoint
-                                   "the checkpoint did not save this init argument; pass it in #:init-args"
-                                   "formal" name)]))
+      [else (raise-arguments-error
+             'load-from-checkpoint
+             "the checkpoint did not save this init argument; pass it in #:init-args"
+             "formal" name)]))
   (for/fold ([positional '()] [keywords '()]
              #:result (let ([kws (sort keywords keyword<? #:key car)])
                         (values (map car kws) (map cdr kws) (reverse positional))))

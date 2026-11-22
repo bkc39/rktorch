@@ -34,6 +34,8 @@
   (define text (json-text (encode-value tree name-tensor)))
   (define-values (dir _name _dir?) (split-path (path->complete-path path)))
   (make-directory* dir)
+  ;; make-temporary-file draws from `random` when a name is taken, and a save
+  ;; must not move the run's Racket stream
   (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
     (write-safetensors! who path (reverse entries)
                         #:metadata (hash "format" format-name

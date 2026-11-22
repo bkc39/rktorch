@@ -326,7 +326,27 @@ trainer's @tt{on-load-checkpoint} with a run that has not started, loads the
 parameters and buffers, strictly unless @racket[strict?] is @racket[#f], and
 moves the trainer to @racket[device]. An argument that was not a
 @racket[checkpoint-value/c], such as a layer, was not saved; without an entry in
-@racket[init-args] it raises an error naming the formal.}
+@racket[init-args] it raises an error naming the formal. A name in
+@racket[init-args] that is not a formal is ignored, as Lightning ignores a
+keyword its constructor does not take.
+
+@examples[#:eval train-eval
+(define-trainer Kept (net rate)
+  (define-init (width #:rate [r 0.1]) (set! net (Linear 2 width)) (set! rate r))
+  (define-hparams rate)
+  (define-optimizers (sgd (parameters net) #:lr rate))
+  (define-training-step (x y) (mse-loss (net x) y)))
+(define kept-path (build-path (find-system-path 'temp-dir) "kept.ckpt"))
+(define (save-at-end r) (save-checkpoint! r kept-path))
+(void (fit (Kept 1 #:rate 0.05)
+           (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 4)
+           #:max-epochs 2 #:logger #f
+           #:callbacks (list (lambda-callback #:on-train-end save-at-end))))
+(define tree (read-checkpoint kept-path))
+(list (hash-ref tree "global_step") (hash-ref tree "init_formals"))
+(trainer-hparams (load-from-checkpoint Kept kept-path))
+(delete-file kept-path)
+]}
 
 @defproc[(model-checkpoint [#:dirpath dirpath path-string?]
                            [#:filename filename (or/c #f checkpoint-filename/c) #f]

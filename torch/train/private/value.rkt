@@ -21,8 +21,6 @@
        (not (hash-weak? h))
        (not (hash-ephemeron? h))))
 
-;; #f, or the key path to the first part of `v` that is not a checkpoint value
-;; and that part: list positions are indices, an improper tail is 'tail
 (define (value-problem v)
   (define on-path (make-hasheq))
   (define accepted (make-hasheq))
@@ -93,7 +91,6 @@
     [(eqv? x +nan.0) "+nan.0"]
     [else #f]))
 
-;; `name-tensor` gives the file entry for a tensor met at a key path
 (define (encode-value v name-tensor #:path [path '()])
   (let encode ([v v] [path path])
     (match v
