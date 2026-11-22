@@ -21,6 +21,7 @@ toolchain="$(xcrun clang --version | sed -n 1p), SDK $(xcrun --show-sdk-version)
 # shellcheck source=scripts/platform/build-common.sh
 . "$here/../build-common.sh"
 configure_flags["mpg123-1.33.4.tar.bz2"]+=" --with-cpu=aarch64"
+jpeg_flags+=(-DCMAKE_OSX_ARCHITECTURES=arm64 "-DCMAKE_OSX_DEPLOYMENT_TARGET=$target")
 
 commands() {
   "$here/load-commands.sh" "$1"

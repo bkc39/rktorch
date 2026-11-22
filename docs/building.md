@@ -181,14 +181,14 @@ the collection `torch-native` at torch's `native-version` (which moves only
 when the compiled bytes do; [`releasing.md`](releasing.md#versions)): `torch-x86_64-linux`
 and `torch-aarch64-macosx`, each declared once for every platform string
 that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
-libraries from PyTorch's official zip, and libsndfile with its codecs as
-separate shared libraries, and finds them all beside itself.
+libraries from PyTorch's official zip, and libsndfile with its codecs and
+libjpeg-turbo as separate shared libraries, and finds them all beside itself.
 
 Their skeletons live in `pkgs/`: the `pkgs/*/info.rkt`, a `THIRD-PARTY-NOTICES`,
 and the licences only that platform bundles. The licences both packages carry
-(PyTorch's and its third-party code's, stb's and the codecs') live once, in
-`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them,
-with `torch/LICENSE`, when it builds a package. The Nix build and the
+(PyTorch's and its third-party code's, stb's, the codecs' and libjpeg-turbo's)
+live once, in `scripts/platform/licenses/`, and `scripts/platform/assemble.sh`
+adds them, with `torch/LICENSE`, when it builds a package. The Nix build and the
 shells install the host's skeleton, with no libraries in it, so `torch`'s
 dependency is met without a download; the staged `torch/native-libs/`
 still supplies the shim.
@@ -208,13 +208,13 @@ maps every string to its package.
 
 Both builds share `scripts/platform/build-common.sh`, which fetches every
 source, checks it against the sha256 that `scripts/platform/sources.txt` pins
-(the libtorch zips, the codecs, libsndfile, stb, GoogleTest and the Racket
-installers the macOS and `rockylinux:8` smokes use), builds the codecs and
-libsndfile as shared libraries, then GoogleTest and the shim, and runs the
-shim's gtests against the finished bundle. The work directory keeps the
-downloads and builds, so a second run rebuilds only the shim; the unpacked
-libtorch, the codecs and GoogleTest are rebuilt when the sha256 pinned for
-them changes.
+(the libtorch zips, the codecs, libsndfile, libjpeg-turbo, stb, GoogleTest
+and the Racket installers the macOS and `rockylinux:8` smokes use), builds
+the codecs, libsndfile and libjpeg-turbo as shared libraries, then GoogleTest
+and the shim, and runs the shim's gtests against the finished bundle. The
+work directory keeps the downloads and builds, so a second run rebuilds only
+the shim; the unpacked libtorch, the codecs and GoogleTest are rebuilt when
+the sha256 pinned for them changes.
 
 ### x86_64 Linux
 

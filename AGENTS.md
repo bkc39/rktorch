@@ -241,12 +241,13 @@ with `backward!` outside the form as PyTorch recommends). From
   safetensors file of those entries (`torch/private/safetensors.rkt`)
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
   and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
-  'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG
-  through `stb_image` behind `tr_image_decode`, the header from nixpkgs'
-  `stb` found by pkg-config like libsndfile and compiled once in
-  `src/torchrkt/detail/stb_image.c`; PNGs match
-  torchvision.io exactly, JPEGs within a count or two
-  (`torch/tests/image-parity-test.rkt`, against torchvision in both shells)
+  'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`, behind
+  `tr_image_decode`: JPEG through libjpeg-turbo with torchvision's
+  `decode_jpeg` settings (#459), PNG through `stb_image`; JPEGs match
+  torchvision.io byte for byte in unchanged, gray and rgb, PNGs in
+  unchanged and rgb
+  (`torch/tests/image-parity-test.rkt`, against torchvision in both
+  shells; the gtests hold the JPEG decode to torchvision's digests)
 - generative examples on MNIST (#152):
   `torch/scribblings/examples/10-dcgan.rkt` (a DCGAN shrunk to 28x28,
   `ConvTranspose2d` and `BatchNorm2d` in the generator, `leaky-relu` in the
@@ -628,7 +629,7 @@ skeletons of the platform packages: each `pkgs/*/info.rkt` (collection
 when the compiled bytes do, apart from torch's `version`), a
 `THIRD-PARTY-NOTICES` and the licences only that platform bundles. The
 licences both carry (PyTorch's and its third-party code's under
-`pytorch-third-party/`, stb's, the codecs') live once, in
+`pytorch-third-party/`, stb's, the codecs', libjpeg-turbo's) live once, in
 `scripts/platform/licenses/`, and `assemble.sh` adds them, and
 `torch/LICENSE` as the package's own, to the built package.
 `scripts/platform/linux/` builds the Linux libraries outside Nix at the

@@ -43,6 +43,7 @@ for name in images:
     decoded[name] = {
         "unchanged": packed(decode_image(data, ImageReadMode.UNCHANGED)),
         "rgb": packed(decode_image(data, ImageReadMode.RGB)),
+        "gray": packed(decode_image(data, ImageReadMode.GRAY)),
     }
 
 gradient = decode_image(fixture("gradient.png")).float() / 255

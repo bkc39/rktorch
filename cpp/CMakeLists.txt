@@ -19,6 +19,7 @@ find_package(Torch CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 pkg_check_modules(STB REQUIRED IMPORTED_TARGET stb)
+pkg_check_modules(LIBJPEG REQUIRED IMPORTED_TARGET libjpeg)
 
 # Torch's bundled Caffe2 config leaks MKL stub link directories
 # ("/lib;/lib/intel64;...") into the RPATH CMake expects to rewrite at
@@ -39,6 +40,7 @@ target_sources(torchrkt
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
+    src/torchrkt/detail/jpeg.cpp
     src/torchrkt/detail/stb_image.c
     src/torchrkt/device.cpp
     src/torchrkt/elementwise.cpp
@@ -84,8 +86,8 @@ endif()
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
 # only our own code, not ATen's.
 target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
-target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE
-  PkgConfig::STB)
+target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::LIBJPEG
+  PkgConfig::SNDFILE PkgConfig::STB)
 
 # libtorch ships ABI flags (notably -D_GLIBCXX_USE_CXX11_ABI=...) that our TUs
 # including ATen headers must match, or std::string symbols won't link.
@@ -138,6 +140,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche11_test.cpp
     tests/torchrkt/generated_tranche12_test.cpp
     tests/torchrkt/generated_tranche13_test.cpp
+    tests/torchrkt/image_golden_test.cpp
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
@@ -149,9 +152,16 @@ if(BUILD_TESTING)
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
+  file(GLOB TORCHRKT_TEST_DATA CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/torchrkt/data/*.jpg
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/torchrkt/data/*.txt)
+  torchrkt_embed_files(
+    ${CMAKE_CURRENT_BINARY_DIR}/test-data/test_data.hpp
+    ${TORCHRKT_TEST_DATA})
   target_include_directories(torchrkt_tests
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests
+      ${CMAKE_CURRENT_BINARY_DIR}/test-data
       # finalizer_death_test is deliberately white-box: it builds a real
       # tr_tensor around a throwing from_blob deleter, so it needs the
       # private handle header and the torch headers other tests don't.

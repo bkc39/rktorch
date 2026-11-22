@@ -61,3 +61,27 @@ function(torchrkt_add_tidy_target target build_target)
     )
   endif()
 endfunction()
+
+function(torchrkt_embed_files out)
+  set(entries "")
+  foreach(path IN LISTS ARGN)
+    get_filename_component(name "${path}" NAME)
+    file(READ "${path}" hex HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," bytes "${hex}")
+    string(APPEND entries "      {\"${name}\", {${bytes}}},\n")
+  endforeach()
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ARGN})
+  file(CONFIGURE OUTPUT "${out}" @ONLY CONTENT [=[#pragma once
+
+#include <cstdint>
+#include <map>
+#include <string>
+#include <vector>
+
+inline const std::map<std::string, std::vector<uint8_t>>& embedded_files() {
+  static const std::map<std::string, std::vector<uint8_t>> files = {
+@entries@  };
+  return files;
+}
+]=])
+endfunction()

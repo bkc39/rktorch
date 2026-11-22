@@ -7,18 +7,33 @@ checked pixel for pixel without a decoder:
     nix develop --command python3 scripts/gen-image-fixtures.py
 
 The PNGs are the gradients below, exactly. The JPEGs encode a smooth
-field through Pillow's libjpeg, so their bytes depend on its version but
-any two decoders agree on them to within a count or two; the reader's
-parity test measures by how much.
+field through Pillow's libjpeg, so their bytes depend on its version; the
+reader's parity test holds its decode of them to torchvision's, byte for
+byte. smooth-cmyk.jpg is the same field as Adobe CMYK, with a varying K;
+smooth-arithmetic.jpg is smooth.jpg's coefficients arithmetic-coded by
+jpegtran. malformed-images/ holds two JPEGs that must not decode: one
+with a 13-bit sample precision, one whose header claims 16000 x 16000.
+
+The shim's gtests get copies of some of these in cpp/tests/torchrkt/data,
+with image-goldens.txt: the shape and SHA-256 of torchvision's decode of
+each in a mode, as "name mode C H W sha256" lines.
 """
+import hashlib
 import math
 import os
+import shutil
+import subprocess
 
 from PIL import Image
+from torchvision.io import ImageReadMode, decode_image, read_file
 
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                   "..", "torch", "vision", "fixtures", "images")
-os.makedirs(out, exist_ok=True)
+root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+fixtures = os.path.join(root, "torch", "vision", "fixtures")
+out = os.path.join(fixtures, "images")
+malformed = os.path.join(fixtures, "malformed-images")
+gtest_data = os.path.join(root, "cpp", "tests", "torchrkt", "data")
+for d in (out, malformed, gtest_data):
+    os.makedirs(d, exist_ok=True)
 
 W, H = 37, 23
 
@@ -66,8 +81,64 @@ small.save(os.path.join(out, "smooth-444.jpg"), quality=90, subsampling=0)
 small.save(os.path.join(out, "smooth-progressive.jpg"), quality=90,
            subsampling=2, progressive=True)
 small.convert("L").save(os.path.join(out, "smooth-gray.jpg"), quality=90)
+
+
+def smooth_cmyk(x, y):
+    r, g, b = smooth(x, y)
+    return (255 - r, 255 - g, 255 - b, round(60 + 50 * math.sin(x / 17)))
+
+
+cmyk = Image.new("CMYK", small.size)
+cmyk.putdata([smooth_cmyk(x, y) for y in range(small.height)
+              for x in range(small.width)])
+cmyk.save(os.path.join(out, "smooth-cmyk.jpg"), quality=90)
 smooth_image(401, 299).save(os.path.join(out, "smooth-401x299.jpg"),
                             quality=90, subsampling=2)
 
-for name in sorted(os.listdir(out)):
-    print(f"wrote {os.path.join(out, name)}")
+subprocess.run(["jpegtran", "-arithmetic",
+                "-outfile", os.path.join(out, "smooth-arithmetic.jpg"),
+                os.path.join(out, "smooth.jpg")], check=True)
+
+
+def frame_at(data):
+    at = 2
+    while data[at + 1] != 0xC0:
+        at += 2 + int.from_bytes(data[at + 2:at + 4], "big")
+    return at
+
+
+def with_frame(name, edit):
+    with open(os.path.join(out, "smooth-gray.jpg"), "rb") as f:
+        data = bytearray(f.read())
+    edit(data, frame_at(data))
+    for d in (malformed, gtest_data):
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(data)
+
+
+def precision_13(data, frame):
+    data[frame + 4] = 13
+
+
+def claims_16000(data, frame):
+    data[frame + 5:frame + 9] = (16000).to_bytes(2, "big") * 2
+
+
+with_frame("bad-precision.jpg", precision_13)
+with_frame("huge.jpg", claims_16000)
+
+goldens = [("smooth.jpg", "unchanged"), ("smooth.jpg", "gray"),
+           ("smooth-cmyk.jpg", "unchanged"), ("smooth-cmyk.jpg", "rgb"),
+           ("smooth-cmyk.jpg", "gray"), ("smooth-arithmetic.jpg", "unchanged")]
+with open(os.path.join(gtest_data, "image-goldens.txt"), "w") as f:
+    for name, mode in goldens:
+        path = os.path.join(out, name)
+        shutil.copyfile(path, os.path.join(gtest_data, name))
+        pixels = decode_image(read_file(path), ImageReadMode[mode.upper()])
+        digest = hashlib.sha256(pixels.contiguous().numpy().tobytes())
+        f.write(" ".join([name, mode, *map(str, pixels.shape),
+                          digest.hexdigest()]) + "\n")
+
+for d in (out, malformed, gtest_data):
+    for name in sorted(os.listdir(d)):
+        print(f"wrote {os.path.join(d, name)}")

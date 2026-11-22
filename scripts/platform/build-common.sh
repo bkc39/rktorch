@@ -26,6 +26,8 @@ declare -A configure_flags=(
   [mpg123-1.33.4.tar.bz2]="--disable-components --enable-libmpg123"
   [libsndfile-1.2.2.tar.xz]="--disable-full-suite --disable-sqlite --disable-alsa"
 )
+jpeg=libjpeg-turbo-3.1.4
+jpeg_flags=(-DENABLE_STATIC=OFF -DWITH_TURBOJPEG=OFF -DREQUIRE_SIMD=ON)
 declare -A pinned
 
 step() {
@@ -44,7 +46,7 @@ current() {
 
 fetch_sources() {
   local fetched sum file
-  fetched=$(bash "$shared/fetch.sh" "$dl" "$libtorch_zip" "${codecs[@]}" stb_image.h "$gtest.tar.gz")
+  fetched=$(bash "$shared/fetch.sh" "$dl" "$libtorch_zip" "${codecs[@]}" "$jpeg.tar.gz" stb_image.h "$gtest.tar.gz")
   while read -r sum file; do
     pinned[$file]=$sum
   done <<<"$fetched"
@@ -89,6 +91,19 @@ codecs_key() {
   for tarball in "${codecs[@]}"; do
     echo "${pinned[$tarball]} $tarball ${configure_flags[$tarball]-}"
   done
+  echo "${pinned[$jpeg.tar.gz]} $jpeg.tar.gz ${jpeg_flags[*]}"
+}
+
+build_jpeg() {
+  step "$jpeg"
+  tar -C "$work/codec-build" -xf "$dl/$jpeg.tar.gz"
+  (export CFLAGS=$codec_cflags LDFLAGS=$codec_ldflags
+   cmake -S "$work/codec-build/$jpeg" -B "$work/codec-build/$jpeg/build" -G "Unix Makefiles" \
+     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps" -DCMAKE_INSTALL_LIBDIR=lib \
+     "${jpeg_flags[@]}" &&
+     cmake --build "$work/codec-build/$jpeg/build" -j "$jobs" &&
+     cmake --install "$work/codec-build/$jpeg/build") >"$log/$jpeg.log" 2>&1 ||
+    failed "$jpeg" "$log/$jpeg.log"
 }
 
 build_codecs() {
@@ -114,6 +129,7 @@ build_codecs() {
   for line in 'External FLAC/Ogg/Vorbis/Opus : [.]* yes' 'External MPEG Lame/MPG123 : [.]* yes'; do
     grep -q "$line" "$sndfile_log" || failed "libsndfile without its codecs" "$sndfile_log"
   done
+  build_jpeg
   echo "$key" >"$deps/.pinned"
 }
 

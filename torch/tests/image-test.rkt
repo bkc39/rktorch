@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
-           (only-in racket/list append*)
+           (only-in racket/list append* remove-duplicates)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
@@ -13,6 +13,7 @@
            (only-in "../vision/transforms.rkt" resize))
 
   (define-runtime-path fixtures "../vision/fixtures/images")
+  (define-runtime-path malformed "../vision/fixtures/malformed-images")
   (define (fixture name) (build-path fixtures name))
 
   (define (plane img c) (tensor->list (select img 0 c)))
@@ -91,7 +92,20 @@
                   '(1 64 96))
     (check-equal? (tensor->bytes (read-image (fixture "smooth.jpg")))
                   (tensor->bytes (read-image (fixture "smooth-progressive.jpg")))
-                  "one encoder's coefficients, two scan orders"))
+                  "one encoder's coefficients, two scan orders")
+    (check-equal? (tensor->bytes (read-image (fixture "smooth-arithmetic.jpg")))
+                  (tensor->bytes (read-image (fixture "smooth.jpg")))
+                  "one encoder's coefficients, two entropy codings"))
+
+  (test-case "a CMYK JPEG keeps its four channels unless a mode converts them"
+    (define path (fixture "smooth-cmyk.jpg"))
+    (check-equal? (tensor-shape (read-image path)) '(4 64 96))
+    (define rgb (read-image path #:mode 'rgb))
+    (check-equal? (tensor-shape rgb) '(3 64 96))
+    (check-equal? (tensor-shape (read-image path #:mode 'gray)) '(1 64 96))
+    (define rgba (read-image path #:mode 'rgba))
+    (check-equal? (tensor->bytes (narrow rgba 0 0 3)) (tensor->bytes rgb))
+    (check-equal? (remove-duplicates (plane rgba 3)) '(255)))
 
   (test-case "decode-image reads bytes the way read-image reads a file"
     (define path (fixture "smooth.jpg"))
@@ -104,9 +118,10 @@
     (define header
       (bytes-append #"\211PNG\r\n\32\n" (be32 13) #"IHDR" (be32 16000)
                     (be32 16000) (bytes 8 0 0 0 0) (be32 0) (be32 0) #"IDAT"))
-    (check-exn
-     #rx"decode-image: .*16000 x 16000 pixels is over the 178956970-pixel limit"
-     (lambda () (decode-image header))))
+    (for ([image (list header (file->bytes (build-path malformed "huge.jpg")))])
+      (check-exn
+       #rx"decode-image: .*16000 x 16000 pixels is over the 178956970-pixel limit"
+       (lambda () (decode-image image)))))
 
   (test-case "what is not an image is an error, what is not bytes a contract"
     (check-exn #rx"decode-image: .*cannot decode image: unknown image type"
@@ -118,6 +133,13 @@
     (check-exn #rx"read-image: .*cannot decode image"
                (lambda ()
                  (read-image (build-path fixtures 'up "cifar10-256.bin"))))
+    (define jpeg (file->bytes (fixture "smooth.jpg")))
+    (for ([keep (in-list (list (- (bytes-length jpeg) 2) 600 3))])
+      (check-exn #rx"decode-image: .*cannot decode image"
+                 (lambda () (decode-image (subbytes jpeg 0 keep)))
+                 (format "the first ~a bytes of a JPEG" keep)))
+    (check-exn #rx"read-image: .*cannot decode image"
+               (lambda () (read-image (build-path malformed "bad-precision.jpg"))))
     (check-exn exn:fail:contract? (lambda () (decode-image #"")))
     (check-exn exn:fail:contract?
                (lambda () (read-image (fixture "smooth.jpg") #:mode 'cmyk)))))

@@ -48,7 +48,7 @@ jobs:
             .scratch/macos/racket/dl
           key: platform-macos-dl-${{ hashFiles('scripts/platform/sources.txt') }}
 
-      - name: Codecs and libsndfile
+      - name: Codecs, libsndfile and libjpeg-turbo
         run: scripts/platform/macos/build.sh "$WORK" codecs
 
       - name: GoogleTest
