@@ -331,7 +331,9 @@ sgd adam rmsprop step! zero-grads! clip-grad-norm! clip-grad-value! learning-rat
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
-kaiming-uniform uniform-init normal-init trunc-normal-init fan-in`. The functional
+kaiming-uniform uniform-init normal-init trunc-normal-init fan-in accuracy
+confusion-matrix perplexity accuracy-metric confusion-matrix-metric
+perplexity-metric metric? metric-update! metric-compute metric-reset!`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
@@ -927,7 +929,10 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   memo's tables, thread ownership, failure and closing); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
-  `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
+  `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`,
+  `torch/nn/metrics.rkt` = torchmetrics' micro accuracy, confusion matrix and
+  perplexity, functional and as `metric?` accumulators whose state lives on the
+  first update's device, updated under `with-no-grad`; #215).
 - `torch/train.rkt` — pure re-export facade over `torch/train/trainer.rkt`
   (`define-trainer`, `define-callback` and their body forms),
   `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),

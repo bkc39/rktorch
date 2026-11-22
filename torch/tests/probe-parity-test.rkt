@@ -21,11 +21,11 @@
     (~> t (reshape -1) tensor->list))
 
   (define (check-close got want tolerance label)
-    (define worst (item (max (abs (- got want)))))
+    (define worst (~> (- got want) abs max item))
     (check-true (<= worst tolerance) (format "~a: off by ~a" label worst)))
 
   (define (labelled j features-key labels-key dtype)
-    (tensors->probe-dataset (to-dtype (unpack (hash-ref j features-key) 'float32) dtype)
+    (tensors->probe-dataset (~> (hash-ref j features-key) (unpack 'float32) (to-dtype dtype))
                             (unpack (hash-ref j labels-key) 'int64)))
 
   (define (standardised probe ds)
@@ -39,7 +39,7 @@
 
   (define (smallest-margin probe ds)
     (define-values (top _) (topk (logits probe ds) 2 #:dim 1))
-    (item (min (- (select top 1 0) (select top 1 1)))))
+    (~> (- (select top 1 0) (select top 1 1)) min item))
 
   (define (row-normalised x)
     (/ x (sqrt (@ (* x x) (ones (cadr (shape x)) 1 #:dtype (dtype x))))))
@@ -48,9 +48,9 @@
     (define f (row-normalised fit-x))
     (define sims (@ (row-normalised (or query-x fit-x)) (transpose f 0 1)))
     (unless query-x
-      (masked-fill! sims (eq (eye (car (shape fit-x)) #:dtype 'int64) 1) -inf.0))
+      (masked-fill! sims (~> (shape fit-x) car (eye #:dtype 'int64) (eq 1)) -inf.0))
     (define-values (top _) (topk sims 21 #:dim 1))
-    (item (min (- (select top 1 19) (select top 1 20)))))
+    (~> (- (select top 1 19) (select top 1 20)) min item))
 
   (define (hits-ratio predicted labels)
     (/ (for/sum ([p (in-list (flat predicted))] [y (in-list (flat labels))]) (if (= p y) 1 0))
@@ -63,7 +63,7 @@
   (define (check-split j)
     (define labels256 (unpack (hash-ref j 'labels256) 'int64))
     (define-values (fit select)
-      (probe-split (tensors->probe-dataset (zeros 256 1) labels256) #:select-per-class 2))
+      (~> (zeros 256 1) (tensors->probe-dataset labels256) (probe-split #:select-per-class 2)))
     (check-equal? (flat (probe-dataset-indices fit)) (flat (unpack (car (hash-ref j 'split)) 'int64))
                   "P6: fit indices of the fixture")
     (check-equal? (flat (probe-dataset-indices select))
@@ -76,7 +76,7 @@
       [else
        (define-values (_images labels) (load-cifar10 'train))
        (define-values (fit* select*)
-         (probe-split (tensors->probe-dataset (zeros (car (shape labels)) 1) labels)))
+         (~> (shape labels) car (zeros 1) (tensors->probe-dataset labels) probe-split))
        (check-equal? (flat (probe-dataset-indices fit*)) (flat (unpack (car full) 'int64))
                      "P6: CIFAR-10 fit indices")
        (check-equal? (flat (probe-dataset-indices select*)) (flat (unpack (cadr full) 'int64))
@@ -102,7 +102,7 @@
   (define (check-suite j fit select test)
     (define suite (hash-ref j 'suite))
     (define linear (hash-ref suite 'linear))
-    (define sweep (sort (hash-values (hash-ref linear 'sweep)) >))
+    (define sweep (~> (hash-ref linear 'sweep) hash-values (sort >)))
     (check-true (> (- (car sweep) (cadr sweep)) (/ 1 600))
                 "P16c: the twin's best weight decay leads the runner-up by more than 1/n")
     (define probe (linear-probe fit select))
@@ -113,7 +113,7 @@
           [n (in-list '(3000 600 1000))])
       (check-= (probe-accuracy probe ds) (hash-ref linear key) (/ 1.0 n)
                (format "P16c: linear ~a" key)))
-    (define (std-of k) (unpack (list-ref (hash-ref j 'std) k) 'float32))
+    (define (std-of k) (~> (hash-ref j 'std) (list-ref k) (unpack 'float32)))
     (define knn (hash-ref suite 'knn))
     (for ([query (in-list (list #f select test))]
           [query-x (in-list (list #f (std-of 1) (std-of 2)))]
@@ -132,7 +132,7 @@
         (define probe (linear-probe fit #:weight-decay wd))
         (define w (linear-probe-weight probe))
         (check-close w (unpack (hash-ref entry 'coef) 'float64)
-                     (* 1e-3 (item (max (abs w))))
+                     (* 1e-3 (~> (abs w) max item))
                      (format "P16d: weights at ~a" wd))
         (for ([ds (in-list (list select test))] [key (in-list '(select test))])
           (check-true (< 1e-3 (smallest-margin probe ds))
@@ -151,7 +151,7 @@
                (format "P16e: knn ~a" key))))
 
   (define (hash-ref-ratio knn key labels)
-    (exact->inexact (hits-ratio (unpack (hash-ref knn key) 'int64) labels)))
+    (~> (hash-ref knn key) (unpack 'int64) (hits-ratio labels) exact->inexact))
 
   (define (check-rosenbrock j)
     (define want (hash-ref j 'lbfgs_rosenbrock))

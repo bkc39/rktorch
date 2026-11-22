@@ -30,7 +30,7 @@
            (only-in racket/math nan?)
            rackunit
            torch
-           (except-in torch/nn accuracy)
+           torch/nn
            torch/scribblings/examples/15-finetune
            (only-in torch/vision/image-folder image-folder))
   ;; Offline and deterministic: random weights, the four fixture photos as
@@ -50,6 +50,23 @@
   (check-equal? (shape (cdr (assoc "fc.weight" (named-parameters net))))
                 '(2 512))
   (check-true (layer-training? net) "accuracy left the net in eval mode")
+  (define-values (val-xs val-ys) (load-val folder 'cpu))
+  (define by-hand
+    (in-eval-mode net
+      (with-no-grad
+        (define n (car (shape val-xs)))
+        (define correct
+          (for/sum ([start (in-range 0 n 64)])
+            (define len (min 64 (- n start)))
+            (~> (narrow val-xs 0 start len) net (argmax 1) (eq (narrow val-ys 0 start len))
+                sum item)))
+        (exact->inexact (/ correct n)))))
+  (check-= (validation-accuracy net val-xs val-ys) by-hand 6e-8
+           "M17: validation-accuracy is the old helper's share")
+  (define-values (exported _syntax) (module->exports 'torch/scribblings/examples/15-finetune))
+  (check-false (for*/or ([phase (in-list exported)] [name (in-list (cdr phase))])
+                 (eq? (car name) 'accuracy))
+               "M17: 15 no longer exports accuracy")
   (set-frozen! net #t)
   (check-equal? (for/list ([(name p) (in-named-parameters net)]
                            #:when (requires-grad? p))

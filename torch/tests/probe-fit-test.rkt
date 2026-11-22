@@ -86,7 +86,7 @@
                                    (knn-accuracy fit test)
                                    (knn-accuracy fit)))]
           [name (in-list '(linear knn knn-leave-one-out))])
-      (define hits (inexact->exact (round (* accuracy 2000))))
+      (define hits (~> (* accuracy 2000) round inexact->exact))
       (check-true (<= lo hits hi) (format "~a: ~a hits outside [~a, ~a]" name hits lo hi))))
 
   (define (column-means xss)
@@ -138,7 +138,7 @@
         (define votes (make-vector classes 0.0))
         (for ([entry (in-list (neighbours sims (and (not query) i) k))])
           (define c (list-ref fit-labels (cdr entry)))
-          (vector-set! votes c (+ (vector-ref votes c) (exp (/ (car entry) temperature)))))
+          (vector-set! votes c (+ (vector-ref votes c) (~> (car entry) (/ temperature) exp))))
         (define predicted (argmax (lambda (c) (vector-ref votes c)) (range classes)))
         (if (= predicted y) 1 0)))
     (/ hits (length query-labels)))
@@ -235,7 +235,7 @@
     (for ([col (in-range n)])
       (define pivot (vector-ref (vector-ref m col) col))
       (for ([r (in-range n)] #:unless (= r col))
-        (define factor (/ (vector-ref (vector-ref m r) col) pivot))
+        (define factor (~> (vector-ref m r) (vector-ref col) (/ pivot)))
         (for ([c (in-range (+ n 1))])
           (vector-set! (vector-ref m r) c
                        (- (vector-ref (vector-ref m r) c)

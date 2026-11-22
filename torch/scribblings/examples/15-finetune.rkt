@@ -30,7 +30,7 @@ with momentum under a step schedule.
 
 @chunk[<r15-provide>
 (provide pick-device load-train load-val train-batch head-parameters set-frozen!
-         accuracy train-phase finetune)]
+         validation-accuracy train-phase finetune)]
 
 @bold{The data.} An image folder reads one class per directory, labels in
 the directories' alphabetical order, so ants are 0 and bees 1. There are
@@ -92,19 +92,20 @@ backbone.
     (requires-grad! p (not frozen?))))]
 
 @bold{Accuracy.} The validation batch under @racket[in-eval-mode], so
-the batch norms normalise with their running statistics, in slices of 64.
+the batch norms normalise with their running statistics, in slices of 64
+added up by an @racket[accuracy-metric]. The labels are known good, so it
+skips the range check, and the count is read to the host once, at the end.
 
 @chunk[<r15-accuracy>
-(define (accuracy net xs ys)
+(define (validation-accuracy net xs ys)
+  (define correct (accuracy-metric #:validate-args? #f))
+  (define n (car (tensor-shape xs)))
   (in-eval-mode net
     (with-no-grad
-      (define n (car (tensor-shape xs)))
-      (define correct
-        (for/sum ([start (in-range 0 n 64)])
-          (define len (min 64 (- n start)))
-          (item (sum (eq (argmax (net (narrow xs 0 start len)) 1)
-                         (narrow ys 0 start len))))))
-      (exact->inexact (/ correct n)))))]
+      (for ([start (in-range 0 n 64)])
+        (define len (min 64 (- n start)))
+        (metric-update! correct (net (narrow xs 0 start len)) (narrow ys 0 start len)))))
+  (item (metric-compute correct)))]
 
 @bold{One phase.} Epochs of shuffled batches, the network in
 @racket['train] mode throughout, so its batch norms normalise by the batch
@@ -140,7 +141,7 @@ wall-clock seconds.
     (step! schedule)
     (list phase epoch
           (/ total n)
-          (accuracy net (car val) (cdr val))
+          (validation-accuracy net (car val) (cdr val))
           (/ (- (current-inexact-milliseconds) start) 1000.0))))]
 
 @bold{Both phases.} The head alone at 0.001 with momentum 0.9, the rate

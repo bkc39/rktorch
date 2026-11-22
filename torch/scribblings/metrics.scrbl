@@ -30,7 +30,7 @@ checks every label is in range by reading their extremes to the host; pass
 @racket[#f] in a loop whose labels are known good. This is torchmetrics'
 @tt{multiclass_accuracy} with @tt{average="micro"}.
 
-@racketblock[
+@examples[#:eval torch-eval
 (define logits (tensor '((2.0 1.0 0.1) (0.5 2.5 0.3) (0.2 0.1 3.0) (1.5 1.6 0.0))))
 (define labels (tensor '(0 1 2 0)))
 (accuracy logits labels)
@@ -49,7 +49,7 @@ and columns predicted ones, as in torchmetrics'
 @tt{multiclass_confusion_matrix}. Scores are reduced by @racket[argmax]
 first. Its diagonal over its sum is the top-1 @racket[accuracy].
 
-@racketblock[
+@examples[#:eval torch-eval
 (confusion-matrix (tensor '(0 2 1 1)) (tensor '(0 1 1 2)) #:classes 3)]
 }
 
@@ -62,7 +62,7 @@ accumulates, or a mean cross-entropy when @racket[tokens] is @racket[#f].
 A real answers a flonum; a tensor answers a scalar on its device, and
 gradients flow through it.
 
-@racketblock[
+@examples[#:eval torch-eval
 (perplexity (cross-entropy (zeros 4 10) (tensor '(0 1 2 3))))
 (perplexity 23.0 #:tokens 10)]
 }
@@ -94,7 +94,7 @@ Adds one batch, with the arguments the metric's functional form takes. It
 reads nothing to the host unless the metric validates its arguments, and
 builds no graph.
 
-@racketblock[
+@examples[#:eval torch-eval
 (define correct (accuracy-metric))
 (metric-update! correct (narrow logits 0 0 2) (narrow labels 0 0 2))
 (metric-update! correct (narrow logits 0 2 2) (narrow labels 0 2 2))

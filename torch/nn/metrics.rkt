@@ -3,10 +3,15 @@
 (require (only-in racket/contract/base
                   -> ->* ->i any/c contract-out flat-contract-predicate flat-named-contract
                   or/c)
+         (only-in racket/flonum fl/ flexp)
          (only-in racket/list drop-right last)
          (only-in racket/match match-define)
+         (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  device dtype eq max min numel shape stack tensor->list tensor? where)
+                  * + / argmax copy! device dtype eq exp index-add! log-softmax max min ne numel
+                  ones-like reshape shape stack sum tensor tensor->list tensor? to-dtype topk unsqueeze
+                  where with-no-grad zeros)
+         (prefix-in g: (only-in "../generated.rkt" nll-loss sum-dim-intlist))
          (only-in "../private/contract.rkt" define/contract-out supplied-or))
 
 (define (float-dtype? dt)
@@ -96,6 +101,45 @@
   (or (not (tensor? tokens))
       (and (tensor? nll) (same-device? nll tokens))))
 
+(define (predicted-classes predictions)
+  (if (classes-of predictions) (argmax predictions 1) predictions))
+
+(define (row-hits predictions labels top-k)
+  (cond
+    [(= top-k 1) (~> (predicted-classes predictions) (eq labels) (to-dtype 'int64))]
+    [else
+     (define-values (_top indices) (topk predictions top-k #:dim 1))
+     (g:sum-dim-intlist (eq indices (unsqueeze labels 1)) '(1) #f 'int64)]))
+
+(define (counted labels ignore-index)
+  (if ignore-index (to-dtype (ne labels ignore-index) 'int64) (ones-like labels)))
+
+(define (accuracy-counts predictions labels top-k ignore-index)
+  (define weights (counted labels ignore-index))
+  (list (~> (row-hits predictions labels top-k) (* weights) sum) (sum weights)))
+
+(define (ratio counts)
+  (match-define (list hits total) counts)
+  (/ (to-dtype hits 'float32) (to-dtype total 'float32)))
+
+;; an ignored row adds its zero weight at cell 0, whatever its label
+(define (confusion-add! counts predictions labels classes ignore-index)
+  (define weights (counted labels ignore-index))
+  (define width (tensor classes #:dtype 'int64 #:device (device labels)))
+  (define cells (+ (* labels width) (predicted-classes predictions)))
+  (index-add! counts 0 (if ignore-index (where (eq weights 0) 0 cells) cells) weights))
+
+(define sum-reduction 2)
+
+(define (perplexity-counts logits targets ignore-index)
+  (define ignored (or ignore-index -100))
+  (define flat-targets (reshape targets -1))
+  (define nll
+    (~> (reshape logits -1 (last (shape logits)))
+        (log-softmax -1)
+        (g:nll-loss flat-targets #f sum-reduction ignored)))
+  (list (to-dtype nll 'float32) (~> (ne flat-targets ignored) (to-dtype 'float32) sum)))
+
 (define/contract-out (accuracy predictions labels ;; noqa
                                #:top-k [top-k 1]
                                #:ignore-index [ignore-index #f]
@@ -115,7 +159,7 @@
        (or (not (supplied-or validate-args? #t))
            (labels-in-range? predictions labels (supplied-or ignore-index #f)))
        [result float32-scalar/c])
-  (error 'unimplemented))
+  (with-no-grad (ratio (accuracy-counts predictions labels top-k ignore-index))))
 
 (define/contract-out (confusion-matrix predictions labels ;; noqa
                                        #:classes classes
@@ -134,7 +178,10 @@
        (or (not (supplied-or validate-args? #t))
            (indices-in-range? predictions labels classes (supplied-or ignore-index #f)))
        [result (classes) (confusion/c classes)])
-  (error 'unimplemented))
+  (with-no-grad
+    (define counts (zeros (* classes classes) #:dtype 'int64 #:device (device labels)))
+    (confusion-add! counts predictions labels classes ignore-index)
+    (reshape counts classes classes)))
 
 (define/contract-out (perplexity nll #:tokens [tokens #f]) ;; noqa
   (->i ([nll nll/c])
@@ -142,7 +189,10 @@
        #:pre/name (nll tokens) "a token tensor needs an NLL tensor on its device"
        (tokens-match? nll (supplied-or tokens #f))
        [result (nll) (if (tensor? nll) float32-scalar/c flonum?)])
-  (error 'unimplemented))
+  (if (tensor? nll)
+      (to-dtype (exp (if tokens (/ nll tokens) nll)) 'float32)
+      (flexp (if tokens (fl/ (real->double-flonum nll) (real->double-flonum tokens))
+                 (real->double-flonum nll)))))
 
 (struct metric (kind config [state #:mutable]))
 
@@ -190,22 +240,26 @@
 (define/contract-out (accuracy-metric #:top-k [top-k 1] ;; noqa
                                       #:ignore-index [ignore-index #f]
                                       #:validate-args? [validate-args? #t])
-  (->* () (#:top-k exact-positive-integer? #:ignore-index ignore-index/c #:validate-args? boolean?)
+  (->* [] [#:top-k exact-positive-integer? #:ignore-index ignore-index/c #:validate-args? boolean?]
        metric?)
-  (error 'unimplemented))
+  (metric 'accuracy
+          (hasheq 'top-k top-k 'ignore-index ignore-index 'validate-args? validate-args?)
+          #f))
 
 (define/contract-out (confusion-matrix-metric #:classes classes ;; noqa
                                               #:ignore-index [ignore-index #f]
                                               #:validate-args? [validate-args? #t])
-  (->* (#:classes exact-positive-integer?)
-       (#:ignore-index ignore-index/c #:validate-args? boolean?)
+  (->* [#:classes exact-positive-integer?]
+       [#:ignore-index ignore-index/c #:validate-args? boolean?]
        metric?)
-  (error 'unimplemented))
+  (metric 'confusion-matrix
+          (hasheq 'classes classes 'ignore-index ignore-index 'validate-args? validate-args?)
+          #f))
 
 (define/contract-out (perplexity-metric #:ignore-index [ignore-index #f] ;; noqa
                                         #:validate-args? [validate-args? #t])
-  (->* () (#:ignore-index ignore-index/c #:validate-args? boolean?) metric?)
-  (error 'unimplemented))
+  (->* [] [#:ignore-index ignore-index/c #:validate-args? boolean?] metric?)
+  (metric 'perplexity (hasheq 'ignore-index ignore-index 'validate-args? validate-args?) #f))
 
 (define/contract-out (metric-update! m predictions targets) ;; noqa
   (->i ([m metric?]
@@ -222,15 +276,43 @@
        #:pre/name (m predictions targets) "targets in range, or the ignore index"
        (range-fits? m predictions targets)
        [result void?])
-  (error 'unimplemented))
+  (with-no-grad
+    (define ignore-index (config-ref m 'ignore-index))
+    (define state (metric-state m))
+    (case (metric-kind m)
+      [(confusion-matrix)
+       (define classes (config-ref m 'classes))
+       (define counts
+         (if state
+             (car state)
+             (zeros (* classes classes) #:dtype 'int64 #:device (device targets))))
+       (confusion-add! counts predictions targets classes ignore-index)
+       (set-metric-state! m (list counts))]
+      [else
+       (define counts
+         (if (perplexity-metric? m)
+             (perplexity-counts predictions targets ignore-index)
+             (accuracy-counts predictions targets (config-ref m 'top-k) ignore-index)))
+       (set-metric-state! m (if state (map + state counts) counts))])))
 
 (define/contract-out (metric-compute m) ;; noqa
   (->i ([m metric?])
        #:pre/name (m) "updated since construction or the last reset"
        (metric-updated? m)
        [result tensor?])
-  (error 'unimplemented))
+  (with-no-grad
+    (define state (metric-state m))
+    (case (metric-kind m)
+      [(accuracy) (ratio state)]
+      [(confusion-matrix)
+       (define classes (config-ref m 'classes))
+       (define fresh (zeros classes classes #:dtype 'int64 #:device (device (car state))))
+       (copy! fresh (reshape (car state) classes classes))
+       fresh]
+      [else
+       (match-define (list nll tokens) state)
+       (exp (/ nll tokens))])))
 
 (define/contract-out (metric-reset! m) ;; noqa
   (-> metric? void?)
-  (error 'unimplemented))
+  (set-metric-state! m #f))

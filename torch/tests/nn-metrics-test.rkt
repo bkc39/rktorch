@@ -336,8 +336,8 @@
     (values (list (item (accuracy l y #:ignore-index -100))
                   (item (accuracy l y #:top-k 3 #:ignore-index -100))
                   (item (metric-compute a))
-                  (tensor->list (to (confusion-matrix l y #:classes 5 #:ignore-index -100) 'cpu))
-                  (tensor->list (to (metric-compute cm) 'cpu)))
+                  (~> (confusion-matrix l y #:classes 5 #:ignore-index -100) (to 'cpu) tensor->list)
+                  (~> (metric-compute cm) (to 'cpu) tensor->list))
             (device (metric-compute a))
             (item (metric-compute ppl))))
 

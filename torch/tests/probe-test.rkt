@@ -48,7 +48,7 @@
     (tensor (for/list ([i (in-range n)])
               (for/list ([j (in-range t)])
                 (for/list ([k (in-range d)])
-                  (exact->inexact (- (list-ref draws (+ (* i t d) (* j d) k)) 8)))))
+                  (~> (list-ref draws (+ (* i t d) (* j d) k)) (- 8) exact->inexact))))
             #:dtype 'float32))
 
   (define (cycle-labels n classes)
@@ -144,7 +144,7 @@
             eval!
             (lambda (enc)
               (train! enc)
-              (layer-set-mode! (last (children enc)) 'eval))))
+              (~> (children enc) last (layer-set-mode! 'eval)))))
     (for ([start! (in-list starts)])
       (define enc (dropout-encoder))
       (start! enc)
@@ -347,7 +347,7 @@
           [i (in-naturals)])
       (check-exn blames-this-test? bad (format "case ~a" i)))
     (for ([dev (in-list accelerators)])
-      (define moved (tensors->probe-dataset (to (to-dtype (blob-features 30 3) 'float32) dev)
+      (define moved (tensors->probe-dataset (~> (blob-features 30 3) (to-dtype 'float32) (to dev))
                                             (to (cycle-labels 30 3) dev)))
       (check-exn blames-this-test? (lambda () (linear-probe (single fit) moved)))))
 
@@ -370,7 +370,7 @@
           [i (in-naturals)])
       (check-exn blames-this-test? bad (format "case ~a" i)))
     (for ([dev (in-list accelerators)])
-      (define moved (tensors->probe-dataset (to (to-dtype (blob-features 30 3) 'float32) dev)
+      (define moved (tensors->probe-dataset (~> (blob-features 30 3) (to-dtype 'float32) (to dev))
                                             (to (cycle-labels 30 3) dev)))
       (define single-fit (single fit))
       (define single-probe (linear-probe single-fit #:weight-decay 1e-3 #:max-iter 20))
@@ -394,9 +394,13 @@
                                 (to (probe-dataset-labels ds) dev)))
       (define fit (single (blob-set 60 2)))
       (define select (single (blob-set 30 3)))
-      (define-values (cpu-fit cpu-select) (probe-split (single (blob-set 60 7)) #:select-per-class 5))
-      (define-values (dev-fit dev-select) (probe-split (on-device (single (blob-set 60 7)))
-                                                       #:select-per-class 5))
+      (define-values (cpu-fit cpu-select) (~> (blob-set 60 7)
+                                              single
+                                              (probe-split #:select-per-class 5)))
+      (define-values (dev-fit dev-select) (~> (blob-set 60 7)
+                                              single
+                                              on-device
+                                              (probe-split #:select-per-class 5)))
       (check-equal? (flat (probe-dataset-indices dev-select))
                     (flat (probe-dataset-indices cpu-select)))
       (check-equal? (flat (probe-dataset-indices dev-fit)) (flat (probe-dataset-indices cpu-fit)))

@@ -95,12 +95,12 @@
                                     #:batch-size [batch-size 1024]
                                     #:device [device #f]
                                     #:classes [classes #f])
-  (->* ((or/c layer? procedure?) dataset?)
-       (#:pool probe-pool/c
+  (->* [(or/c layer? procedure?) dataset?]
+       [#:pool probe-pool/c
         #:forward (or/c #f (procedure-arity-includes/c 1))
         #:batch-size exact-positive-integer?
         #:device (or/c #f device/c)
-        #:classes (or/c #f exact-positive-integer?))
+        #:classes (or/c #f exact-positive-integer?)]
        probe-dataset?)
   (error 'unimplemented))
 
@@ -117,7 +117,7 @@
   (error 'unimplemented))
 
 (define/contract-out (probe-split ds #:select-per-class [per-class 500] #:seed [seed 0]) ;; noqa
-  (->* (probe-dataset?) (#:select-per-class exact-positive-integer? #:seed seed/c)
+  (->* [probe-dataset?] [#:select-per-class exact-positive-integer? #:seed seed/c]
        (values probe-dataset? probe-dataset?))
   (error 'unimplemented))
 
