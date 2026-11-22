@@ -2,7 +2,8 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in ffi/unsafe
-                  _enum _fun _int _int64 _list _ptr _void set-cpointer-tag!)
+                  _enum _fun _int _int64 _list _ptr _void cpointer-has-tag?
+                  set-cpointer-tag!)
          (only-in racket/list filter-map remove-duplicates)
          (only-in racket/match match-define match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -38,7 +39,14 @@
          (only-in "tallies.rkt" flush-tally! tally-op!))
 
 (provide account!
+         adopt-scoped!
          adopted-bytes
+         (struct-out tensor-scope)
+         current-tensor-scope
+         enable-scoping!
+         forget-open-table!
+         free-scoped!
+         note-open-table!
          tr-tensor-free/checked
          free-handles!
          collect-and-drain!
@@ -87,7 +95,48 @@
 (define lifetimes (make-weak-hasheq))
 
 (define (lifetime-of! key)
-  (hash-ref! lifetimes key fresh-lifetime))
+  (or (and scoping? (lifetime-ref key))
+      (hash-ref! lifetimes key fresh-lifetime)))
+
+;; Diagnostic (#556): a tensor made inside a tensor scope has its lifetime in
+;; the scope's `owned` table, not in `lifetimes`, and no reaper registration.
+;; `scoping?` stays #f until the first scope opens, so until then every lookup
+;; below is master's.
+(struct tensor-scope (parent owned guard))
+
+(define current-tensor-scope (make-thread-cell #f))
+
+(define scoping? #f)
+
+(define (enable-scoping!)
+  (set! scoping? #t))
+
+(define open-tables (box (hasheq)))
+
+(define (note-open-table! owned)
+  (cas-update! open-tables (lambda (open) (hash-set open owned #t))))
+
+(define (forget-open-table! owned)
+  (cas-update! open-tables (lambda (open) (hash-remove open owned))))
+
+(define (chain-lifetime h)
+  (let loop ([s (thread-cell-ref current-tensor-scope)])
+    (and s (or (hash-ref (tensor-scope-owned s) h #f)
+               (loop (tensor-scope-parent s))))))
+
+(define (open-table-lifetime h)
+  (for/or ([owned (in-immutable-hash-keys (unbox open-tables))])
+    (hash-ref owned h #f)))
+
+(define (lifetime-ref h)
+  (if scoping?
+      (or (chain-lifetime h) (hash-ref lifetimes h #f) (open-table-lifetime h))
+      (hash-ref lifetimes h #f)))
+
+;; A handle no table holds is freed unclaimed, as master frees an unregistered
+;; one, unless a scope already freed it.
+(define (unowned-freeable? h)
+  (not (and scoping? (cpointer-has-tag? h 'Tensor-freed))))
 
 ;; The tag flips even when the release raises: an attempted free consumes
 ;; the finalizer backstop, so a live-looking tag would invite use-after-free.
@@ -126,8 +175,8 @@
 
 (define (tr-tensor-free/checked h)
   (parameterize-break #f
-    (define lt (hash-ref lifetimes h #f))
-    (when (or (not lt) (claim-lifetime! lt (current-thread)))
+    (define lt (lifetime-ref h))
+    (when (if lt (claim-lifetime! lt (current-thread)) (unowned-freeable? h))
       (when lt (unaccount-lifetime! h lt))
       (race-point free-unaccounted h)
       (release! h lt)
@@ -139,8 +188,8 @@
   (parameterize-break #f
     (define claimed
       (filter-map (lambda (h)
-                    (define lt (hash-ref lifetimes h #f))
-                    (and (or (not lt) (claim-lifetime! lt (current-thread)))
+                    (define lt (lifetime-ref h))
+                    (and (if lt (claim-lifetime! lt (current-thread)) (unowned-freeable? h))
                          (cons h lt)))
                   hs))
     (define held (map car claimed))
@@ -224,9 +273,33 @@
 (define tensor-reaped (reaped 'tensor release-dead-handle! #:after-batch flush-tally!))
 
 (define (register-tensor! h)
-  (hash-set! lifetimes h (fresh-lifetime))
-  (reap-when-dead! tensor-reaped h)
+  (define scope (and scoping? (thread-cell-ref current-tensor-scope)))
+  (cond
+    [scope (hash-set! (tensor-scope-owned scope) h (fresh-lifetime))]
+    [else (hash-set! lifetimes h (fresh-lifetime))
+          (reap-when-dead! tensor-reaped h)])
   (race-point handle-registered h))
+
+;; a scoped handle leaving its root scope is registered as master registers it
+(define (adopt-scoped! h lt)
+  (hash-set! lifetimes h lt)
+  (reap-when-dead! tensor-reaped h))
+
+;; Frees every handle of `owned` that `by` can claim, in one native release,
+;; and answers how many. A claim a free already took is skipped (#266).
+(define (free-scoped! owned by)
+  (parameterize-break #f
+    (define claimed
+      (for/list ([(h lt) (in-hash owned)] #:when (claim-lifetime! lt by))
+        (cons h lt)))
+    (hash-clear! owned)
+    (define held (map car claimed))
+    (define lts (map cdr claimed))
+    (for ([h (in-list held)] [lt (in-list lts)])
+      (unaccount-lifetime! h lt))
+    (unless (null? held)
+      (release-all! held lts))
+    (length held)))
 
 ;; One uninterruptible region on the caller's OS thread: a kill or a break
 ;; waits for it, so no handle escapes without its finalizer.
@@ -310,7 +383,7 @@
   (if adopt (with-ledger (charge! #f)) (charge! (tally-of a))))
 
 (define (unaccount! key)
-  (define lt (hash-ref lifetimes key #f))
+  (define lt (lifetime-ref key))
   (when lt (unaccount-lifetime! key lt)))
 
 (define (unaccount-lifetime! key lt)
@@ -344,7 +417,7 @@
          (unadopt! a)))]))
 
 (define (charge-of key)
-  (define lt (hash-ref lifetimes key #f))
+  (define lt (lifetime-ref key))
   (and lt (unbox (lifetime-charge lt))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
@@ -382,7 +455,10 @@
 ;; The entry-by-entry fold; the counters above must agree with it.
 (define (native-memory-use/fold)
   (define totals (make-hash))
-  (for ([lt (in-list (hash-values lifetimes))])
+  (for ([lt (in-list (append (hash-values lifetimes)
+                             (for*/list ([owned (in-immutable-hash-keys (unbox open-tables))]
+                                         [lt (in-list (hash-values owned))])
+                               lt)))])
     (define a (unbox (lifetime-charge lt)))
     (when a
       (hash-update! totals (allocation-device a)
@@ -499,3 +575,8 @@
         (lambda (_h)
           (with-handlers ([(lambda (_) #t) void])
             (eprintf "[rktorch mem] ~s\n" (finalizer-diagnostics)))))))
+
+(module+ scope-private
+  (provide registered-lifetime?)
+  (define (registered-lifetime? h)
+    (and (hash-ref lifetimes h #f) #t)))
