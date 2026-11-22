@@ -9,8 +9,8 @@ three and after five steps, and the state tensors after three steps; the JSON
 holds the constructor's groups and torch's state_dict after three steps, with
 parameter indices mapped to names in named_parameters order and every state
 tensor replaced by the name of its safetensors entry. Each scheduler case
-writes <case>.json: the state_dict after every step. The grad-scaler case is
-written only where CUDA is available, or under RKTORCH_PARITY_DEVICE.
+writes <case>.json: the state_dict after every step. The grad-scaler case
+writes grad-scaler.json on the CPU, or on RKTORCH_PARITY_DEVICE.
 """
 
 import json
@@ -178,11 +178,7 @@ def main():
         optimizer_case(out, case, *spec)
     for case, make in SCHEDULERS.items():
         scheduler_case(out, case, make)
-    device = os.environ.get("RKTORCH_PARITY_DEVICE")
-    if device is None and torch.cuda.is_available():
-        device = "cuda"
-    if device is not None:
-        grad_scaler_case(out, device)
+    grad_scaler_case(out, os.environ.get("RKTORCH_PARITY_DEVICE", "cpu"))
 
 
 if __name__ == "__main__":
