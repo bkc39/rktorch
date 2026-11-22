@@ -3,30 +3,28 @@
 (module+ test
   (require (for-syntax racket/base)
            (only-in racket/file file->bytes)
+           (only-in racket/list filter-map)
+           (only-in racket/match match-lambda)
            (only-in racket/runtime-path define-runtime-path)
            (only-in racket/string string-prefix?)
            rackunit
-           (only-in "../nn.rkt" Linear load-state! mse-loss parameters save-state! sgd)
+           (only-in "../nn.rkt" Linear load-state! mse-loss parameters save-state! sgd state-dict)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt"
-                    call-with-live-run decoded-form saving-callback Small stored)
-           (only-in "private/comparable.rkt" layer-bytes)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+                    call-with-live-run decoded-form fit-draws saving-callback Small stored)
+           (only-in "private/comparable.rkt" comparable layer-bytes))
 
   (define-runtime-path format-module "../train/private/format.rkt")
 
-  (define (fit-small tr callbacks)
-    (fit tr (toy-loader 4) #:val (toy-loader 2) #:max-epochs 3 #:logger #f #:callbacks callbacks))
-
-  (test-case "T3-L6: saving every epoch leaves the fit's bytes as they were"
+  (test-case "T3-L6: saving every epoch leaves the parameters and every random stream as they were"
     (with-temporary-directory (dir #:template "pure-~a")
-      (define plain (Small))
-      (define saved (Small))
-      (void (fit-small plain '()))
-      (void (fit-small saved (list (saving-callback
-                                    (lambda (r) (build-path dir (format "e~a.ckpt" (run-epoch r))))))))
-      (check-equal? (layer-bytes saved) (layer-bytes plain))
+      (define plain (fit-draws '()))
+      (define saved (fit-draws (list (saving-callback
+                                      (lambda (r) (build-path dir (format "e~a.ckpt" (run-epoch r))))))))
+      (check-not-equal? (hash-ref plain 'cpu-rng) (hash-ref plain 'seeded-rng)
+                        "the fit draws from the default stream")
+      (check-equal? saved plain)
       (check-equal? (length (directory-list dir)) 3)))
 
   (test-case "T3-L6: two consecutive saves give byte-identical files"
@@ -48,11 +46,17 @@
       (define seen (box #f))
       (define tr (Watched seen))
       (void (call-with-live-run #:trainer tr (lambda (r) (save-checkpoint! r path))))
+      (define trained
+        (comparable (filter-map (match-lambda
+                                  [(cons (regexp #rx"^net[.](.*)$" (list _ name)) t) (cons name t)]
+                                  [_ #f])
+                                (state-dict tr))))
       (define fresh (Linear 2 1))
+      (check-not-equal? (layer-bytes fresh) trained "the fresh layer starts elsewhere")
       (load-state! fresh path #:rename (lambda (name)
                                          (and (string-prefix? name "state_dict.net.")
                                               (substring name (string-length "state_dict.net.")))))
-      (check-equal? (layer-bytes fresh) (layer-bytes (Linear 2 1)) "a fresh layer differs")
+      (check-equal? (layer-bytes fresh) trained "the checkpoint holds the trainer's parameters")
       (check-equal? (decoded-form (read-checkpoint path)) (unbox seen))
       (for ([key '("epoch" "global_step" "state_dict" "loops" "callbacks" "optimizer_states"
                    "lr_schedulers" "trainer_hparams" "hyper_parameters" "init_formals"

@@ -3,12 +3,13 @@
 (module+ test
   (require (only-in racket/file file->bytes)
            rackunit
+           (only-in "../main.rkt" cuda-available? current-generator make-generator)
            (only-in "../nn.rkt" Linear mse-loss parameters save-state! sgd step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" call-with-live-run saving-callback Small)
            (only-in "private/comparable.rkt" layer-bytes)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
   (define (saved-with dir callbacks #:name [name "e.ckpt"] #:weights-only? [weights-only? #f])
     (define path (build-path dir name))
@@ -24,14 +25,14 @@
                      #:load-state! (lambda (_r st) (set-box! seen st))))
 
   (define (resume-capturing trainer path callbacks)
-    (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
     (define err (open-output-string))
-    (parameterize ([current-error-port err])
-      (fit trainer (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path #:callbacks callbacks))
-    (values (let loop ()
-              (define v (sync/timeout 0 receiver))
-              (if v (cons (vector-ref v 1) (loop)) '()))
-            (get-output-string err)))
+    (define-values (_run warnings)
+      (call-with-logged-warnings
+       (lambda ()
+         (parameterize ([current-error-port err])
+           (fit trainer (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
+                #:callbacks callbacks)))))
+    (values warnings (get-output-string err)))
 
   (test-case "T3-L17: a callback's state arrives equal? and immutable"
     (with-temporary-directory (dir #:template "protocol-~a")
@@ -152,4 +153,42 @@
                           #:callbacks (list (lambda-callback
                                              #:setup (lambda (_r _stage)
                                                        (set-box! seen '(setup))))))))
-        (check-equal? (unbox seen) '() (format "~a" path))))))
+        (check-equal? (unbox seen) '() (format "~a" path)))))
+
+  (define (resume-from path)
+    (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path))
+
+  (test-case "D40: a checkpoint saved in on-train-batch-start is written, and fit refuses it"
+    (with-temporary-directory (dir #:template "odd-hook-~a")
+      (define path (build-path dir "odd.ckpt"))
+      (void (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f
+                 #:callbacks (list (lambda-callback
+                                    #:on-train-batch-start
+                                    (lambda (r . _)
+                                      (when (= (run-global-step r) 1) (save-checkpoint! r path)))))))
+      (check-true (file-exists? path))
+      (check-not-exn (lambda () (read-checkpoint path)))
+      (define started (box #f))
+      (check-exn exn:fail?
+                 (lambda ()
+                   (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
+                        #:callbacks (list (lambda-callback
+                                           #:on-train-start (lambda (_r) (set-box! started #t)))))))
+      (check-false (unbox started) "no training ran")))
+
+  (test-case "§1.7 row 16: a checkpoint taken under a current-generator resumes only under one on its device"
+    (with-temporary-directory (dir #:template "generator-~a")
+      (define path
+        (parameterize ([current-generator (make-generator 13)])
+          (saved-with dir '())))
+      (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? #rx"current-generator" (exn-message e))))
+                 (lambda () (resume-from path))
+                 "none")
+      (check-not-exn (lambda ()
+                       (parameterize ([current-generator (make-generator 1)]) (resume-from path))))
+      (when (cuda-available?)
+        (check-exn (lambda (e) (and (exn:fail? e) (regexp-match? #rx"current-generator" (exn-message e))))
+                   (lambda ()
+                     (parameterize ([current-generator (make-generator 1 #:device 'cuda)])
+                       (resume-from path)))
+                   "one on another device")))))

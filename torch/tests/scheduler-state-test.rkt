@@ -1,13 +1,15 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../nn.rkt"
                     Linear chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
                     exponential-lr lambda-lr learning-rate linear-lr load-optimizer-state!
                     load-scheduler-state! multi-step-lr one-cycle-lr optimizer-state-dict
                     parameters scheduler-rate scheduler-state-dict sequential-lr sgd step!
-                    step-lr))
+                    step-lr)
+           (only-in "private/comparable.rkt" comparable))
 
   (define kinds
     `(("step" ,(lambda (o) (step-lr o #:step-size 2 #:gamma 0.5)))
@@ -39,8 +41,7 @@
 
   (test-case "T3-L12: k steps, save, rebuild with another lr, load optimizer then scheduler"
     (for* ([kind (in-list kinds)] [k (in-list '(0 1 3 5))])
-      (define name (car kind))
-      (define make (cadr kind))
+      (match-define (list name make) kind)
       (define net (Linear 2 1))
       (define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9))
       (define s (make opt))
@@ -51,5 +52,7 @@
       (define rebuilt (make rebuilt-opt))
       (load-optimizer-state! rebuilt-opt net opt-state)
       (load-scheduler-state! rebuilt state)
+      (check-equal? (comparable (optimizer-state-dict rebuilt-opt net)) (comparable opt-state)
+                    (format "~a after ~a: the optimizer, initial_lr included" name k))
       (check-equal? (scheduler-state-dict rebuilt) state (format "~a after ~a: the state" name k))
       (check-equal? (rates rebuilt 6) (rates s 6) (format "~a after ~a: the rates" name k)))))

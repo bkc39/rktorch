@@ -5,12 +5,13 @@
            (only-in racket/port open-output-nowhere)
            rackunit
            (only-in "../foreign/raw/fault.rkt"
-                    native-fault-policy note-native-fault! reset-native-fault-latch!)
+                    native-fault-policy note-native-fault!)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd state-dict)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/comparable.rkt" comparable host-bytes)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+           (only-in "private/trainer-kit.rkt"
+                    call-with-fault-latch-reset call-with-logged-warnings toy-loader))
 
   (define-trainer Failing (net at-raise how)
     (define-init (h [b (box #f)]) (set! net (Linear 2 1)) (set! at-raise b) (set! how h))
@@ -48,20 +49,18 @@
     (when (eq? native-fault-policy 'raise)
       (with-temporary-directory (dir #:template "latched-~a")
         (call-with-output-file (file-in dir) (lambda (o) (write-bytes #"earlier" o)))
-        (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
         (define tr (Failing (lambda ()
                               (note-native-fault! "a planned fault")
                               (error 'training-step "original failure"))))
-        (dynamic-wind
-         void
-         (lambda ()
-           (parameterize ([current-error-port (open-output-nowhere)])
-             (check-exn #rx"original failure" (lambda () (fit-failing tr dir)))))
-         reset-native-fault-latch!)
+        (define-values (_result warnings)
+          (call-with-logged-warnings
+           (lambda ()
+             (call-with-fault-latch-reset
+              (lambda ()
+                (parameterize ([current-error-port (open-output-nowhere)])
+                  (check-exn #rx"original failure" (lambda () (fit-failing tr dir)))))))))
         (check-equal? (file->bytes (file-in dir)) #"earlier")
-        (check-true (let loop ()
-                      (define v (sync/timeout 0 receiver))
-                      (and v (or (regexp-match? #rx"disabled|native" (vector-ref v 1)) (loop))))))))
+        (check-true (for/or ([w (in-list warnings)]) (regexp-match? #rx"disabled|native" w))))))
 
   (test-case "T3-L28 (d): a break gives a file"
     (with-temporary-directory (dir #:template "break-~a")

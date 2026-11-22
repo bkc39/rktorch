@@ -6,7 +6,7 @@
            (only-in "../main.rkt"
                     * + - abs backward! copy! item max sum with-no-grad)
            (only-in "../nn.rkt"
-                    Linear adam adamw load-optimizer-state! named-parameters
+                    Linear adam adamw in-named-parameters load-optimizer-state! named-parameters
                     optimizer-state-dict param-group rmsprop sgd step! zero-grads!)
            (only-in "private/optim-oracle.rkt" call-with-optim-oracle oracle-json oracle-tensors)
            (only-in "private/trainer-kit.rkt" apply-keywords))
@@ -24,10 +24,11 @@
         ['nesterov (cons (cons '#:nesterov? v) kws)]
         ['alpha (cons (cons '#:alpha v) kws)]
         ['eps (cons (cons '#:eps v) kws)]
-        ['betas (list* (cons '#:beta1 (car v)) (cons '#:beta2 (cadr v)) kws)])))
+        ['betas (match v
+                  [(list beta1 beta2) (list* (cons '#:beta1 beta1) (cons '#:beta2 beta2) kws)])])))
 
   (define (build j net)
-    (define params (for/hash ([e (in-list (named-parameters net))]) (values (car e) (cdr e))))
+    (define params (make-immutable-hash (named-parameters net)))
     (define groups
       (for/list ([grp (in-list (hash-ref j 'groups))])
         (apply-keywords param-group (keywords grp)
@@ -37,8 +38,8 @@
 
   (define (load-parameters! net tensors prefix)
     (with-no-grad
-      (for ([e (in-list (named-parameters net))])
-        (copy! (cdr e) (hash-ref tensors (string-append prefix (car e)))))))
+      (for ([(name p) (in-named-parameters net)])
+        (copy! p (hash-ref tensors (string-append prefix name))))))
 
   (define (gradient-steps! opt net tensors from to)
     (for ([k (in-range from to)])

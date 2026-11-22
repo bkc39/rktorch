@@ -52,7 +52,8 @@
                       #:accumulate [accumulate 1]
                       #:val-check-interval [interval #f]
                       #:max-epochs [max-epochs 2]
-                      #:max-steps [max-steps #f])
+                      #:max-steps [max-steps #f]
+                      #:ckpt-path [ckpt-path #f])
   (fit (make sc) (toy-loader n)
        #:val (toy-loader 4)
        #:max-epochs max-epochs
@@ -62,4 +63,5 @@
        #:val-check-interval interval
        #:precision precision
        #:logger #f
+       #:ckpt-path ckpt-path
        #:callbacks (cons (recorder sc) callbacks)))
