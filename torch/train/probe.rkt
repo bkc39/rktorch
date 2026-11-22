@@ -235,14 +235,16 @@
   (and (= (rows w) (width f)) (eq? (dtype w) (dtype f)) (same-device? w f)))
 
 (define (standardiser x)
-  (define wide (to-dtype x 'float64))
-  (define centred (- wide (g:mean-dim wide '(0) #f #f)))
+  ;; torch.std accumulates a float32 column in double on the CPU; MPS has no float64
+  (define host (~> x (to 'cpu) (to-dtype 'float64)))
+  (define centred (- host (g:mean-dim host '(0) #f #f)))
   (values (g:mean-dim x '(0) #f #f)
           (~> (* centred centred)
               (g:sum-dim-intlist '(0) #f #f)
               (/ (- (rows x) 1))
               sqrt
               (to-dtype (dtype x))
+              (to (device x))
               (clamp #:min 1e-6))))
 
 (define (standardised x mean std)
@@ -347,7 +349,8 @@
                 -inf.0))
     (define-values (top idx) (topk sim k #:dim 1))
     (define tally (zeros m classes #:dtype (dtype sim) #:device (device sim)))
-    (scatter-add! tally 1 (take fit-labels idx) (exp (/ top temperature)))
+    (scatter-add! tally 1 (take fit-labels idx)
+                  (~> (- top (narrow top 1 0 1)) (/ temperature) exp))
     tally))
 
 (define/contract-out (knn-accuracy fit [query #f] ;; noqa
@@ -367,6 +370,8 @@
        (k-fits? fit (supplied-or query #f) (supplied-or k 20))
        #:pre/name (fit query) "query classes within the fit's"
        (classes-fit? fit (supplied-or query #f))
+       #:pre/name (fit standardize?) "at least two fit rows when standardizing"
+       (or (not (supplied-or standardize? #t)) (<= 2 (length fit)))
        [result (real-in 0 1)])
   (~> (knn-predictions fit query #:k k #:temperature temperature #:standardize? standardize?
                        #:batch-size batch-size)

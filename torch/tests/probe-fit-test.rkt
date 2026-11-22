@@ -164,6 +164,15 @@
                1e-6
                (format "k ~a, standardize? ~a, query? ~a" k standardize? (and q #t)))))
 
+  (bounded-test "P12: a small temperature does not overflow float32 votes"
+    (define unit-fit
+      (tensors->probe-dataset (tensor '((0.8 0.6) (0.9 0.4358899)) #:dtype 'float32)
+                              (tensor '(0 1))))
+    (define unit-query
+      (tensors->probe-dataset (tensor '((1.0 0.0)) #:dtype 'float32) (tensor '(1))))
+    (check-= (knn-accuracy unit-fit unit-query #:k 2 #:temperature 0.001 #:standardize? #f)
+             1.0 0.0))
+
   (define (logits probe ds)
     (~> (- (probe-dataset-features ds) (linear-probe-mean probe))
         (/ (linear-probe-std probe))

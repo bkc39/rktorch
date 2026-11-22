@@ -3,10 +3,10 @@
 Ten-class Gaussian blobs in 24 dimensions, seeded 0, as fit, select and
 test splits; the twin's stratified split of the CIFAR-10 fixture's labels
 (and of the cached training archive's, when present); its standardiser,
-fit_linear and probe_suite; sklearn's logistic regression and cosine kNN
-on the twin-standardised float64 features; and torch.optim.LBFGS on the
-2-D Rosenbrock function, on probe-fit-test.rkt's P14 quadratic, and on the
-probe objective, each closure's loss recorded.
+fit_linear and probe_suite; torch.std of the fit split; sklearn's logistic
+regression and cosine kNN on the twin-standardised float64 features; and
+torch.optim.LBFGS on the 2-D Rosenbrock function, on probe-fit-test.rkt's
+P14 quadratic, and on the probe objective, each closure's loss recorded.
 """
 import importlib.util
 import json
@@ -159,6 +159,7 @@ out = {"fit": packed(fit), "fit_labels": packed(fy),
        "split": [packed(i) for i in split256],
        "full_split": full_split,
        "std": [packed(t) for t in twin.standardise(fit, sel, te)],
+       "fit_sd": packed(fit.std(0).clamp_min(1e-6)),
        "fit_linear": fit_linear,
        "suite": twin.probe_suite(fit, sel, te, fy, sy, ty),
        "sklearn": {"logistic": logistic, "knn": knn,

@@ -90,6 +90,8 @@
 
   (define (check-standardiser j fit select test)
     (define probe (linear-probe fit #:weight-decay 1e-4))
+    (check-equal? (flat (linear-probe-std probe)) (flat (unpack (hash-ref j 'fit_sd) 'float32))
+                  "P16a: the float32 std is torch.std's, bit for bit")
     (for ([ds (in-list (list fit select test))]
           [want (in-list (hash-ref j 'std))]
           [name (in-list '(fit select test))])

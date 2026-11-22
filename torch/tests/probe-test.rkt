@@ -418,6 +418,8 @@
     (define wide-classes (tensors->probe-dataset (blob-features 30 3) (cycle-labels 30 5)))
     (define float32-set (tensors->probe-dataset (to-dtype (blob-features 30 3) 'float32)
                                                 (cycle-labels 30 3)))
+    (define one-class (tensors->probe-dataset (blob-features 5 3) (cycle-labels 5 1)))
+    (check-= (knn-accuracy (blob-set 1 2) one-class #:k 1 #:standardize? #f) 1.0 0.0)
     (for ([bad (in-list (list (lambda () (probe-accuracy probe narrow-set))
                               (lambda () (probe-accuracy probe float32-set))
                               (lambda () (probe-accuracy probe wide-classes))
@@ -426,7 +428,8 @@
                               (lambda () (knn-accuracy fit #:k 0))
                               (lambda () (knn-accuracy fit #:k 40))
                               (lambda () (knn-accuracy fit (blob-set 30 3) #:k 41))
-                              (lambda () (knn-accuracy fit #:temperature 0))))]
+                              (lambda () (knn-accuracy fit #:temperature 0))
+                              (lambda () (knn-accuracy (blob-set 1 2) one-class #:k 1))))]
           [i (in-naturals)])
       (check-exn blames-this-test? bad (format "case ~a" i)))
     (for ([dev (in-list accelerators)])

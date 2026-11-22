@@ -133,9 +133,11 @@ own statistics.
          (real-in 0 1)]{
 Top-1 accuracy of a weighted vote among the @racket[k] fit rows most
 cosine-similar to each query row, after standardising both with the fit's
-statistics when @racket[standardize?]. Each neighbour votes
-@racket[(exp (/ similarity temperature))]. Without @racket[query] it
-scores the fit split, each row leaving itself out.
+statistics when @racket[standardize?], which needs at least two fit rows.
+Each neighbour votes @racket[(exp (/ similarity temperature))], scaled
+per query row by its nearest neighbour's vote so that a small
+@racket[temperature] does not overflow. Without @racket[query] it scores
+the fit split, each row leaving itself out.
 
 @examples[#:eval train-eval
 (knn-accuracy fit)
