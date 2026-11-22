@@ -225,8 +225,10 @@ where Lightning raises at the clip.
 @racket[#:ckpt-path] resumes from a checkpoint; @secref["train-hooks"] says
 what is restored at which hook. The file is read and its format checked before
 any hook runs, and a checkpoint taken outside an epoch end and the fit's end
-raises there. The trainer must hold the checkpoint's parameters and buffers,
-strictly, and as many optimizers and schedulers; a @racket[#:weights-only?]
+raises there, as does a checkpoint whose loop counters or hyperparameters are
+missing or malformed. The trainer must hold the checkpoint's parameters and
+buffers, strictly, or the fit raises with its parameters and hyperparameters
+unchanged; it must configure as many optimizers and schedulers; a @racket[#:weights-only?]
 checkpoint raises when the optimizers are restored, with Lightning's message. A
 saved hyperparameter the trainer does not define and a callback state no
 callback claims are skipped with a warning on the @racket['rktorch-train] topic
@@ -234,7 +236,11 @@ and stderr. The default streams, @racket[current-generator]'s and Racket's
 @racket[current-pseudo-random-generator] are restored too, so a resumed fit
 draws what the uninterrupted one would have, which Lightning does not do; a
 checkpoint saved under a @racket[current-generator] needs one on the same
-device. A loader's own @racket[#:generator] is not saved: a callback whose
+device. The values logged and not yet published are restored with what
+@racket[run-metric] and @racket[run-metrics] read, so the rows logged after the
+resume and the values read are the uninterrupted fit's. The sanity check runs
+on a resumed fit, after the callback states are restored, as in Lightning. A
+loader's own @racket[#:generator] is not saved: a callback whose
 @tt{state-dict} answers its @racket[generator-state] and whose
 @tt{load-state!} calls @racket[set-generator-state!] carries it. A checkpoint
 from an epoch end resumes at the next epoch and one from the fit's end at the
