@@ -26,6 +26,7 @@
 
 (provide check-resume-epoch!
          checkpoint-source
+         path-noted
          restore-modules!
          restore-rng!
          restore-training-state!)
@@ -183,13 +184,12 @@
                              (run-entry r) field)))))
 
 (define (path-noted e path)
-  (define message (format "~a\n  path: ~e" (exn-message e) path))
   (define-values (type skipped?) (struct-info e))
   (match (and type (not skipped?) (struct->vector e))
-    [(vector _ _ marks fields ...) (apply (struct-type-make-constructor type) message marks fields)]
-    [#f
-     (warn-train! (format "fit: restoring the checkpoint ~a raised: ~a" path (exn-message e)))
-     e]))
+    [(vector _ message marks fields ...)
+     (define noted (format "~a\n  path: ~e" message path))
+     (apply (struct-type-make-constructor type) noted marks fields)]
+    [#f e]))
 
 (define (call-with-path-noted path thunk)
   (with-handlers ([exn:fail? (lambda (e) (raise (path-noted e path)))])

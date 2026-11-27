@@ -11,6 +11,7 @@
            (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd state-dict step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
+           (only-in "../train/private/resume.rkt" path-noted)
            (only-in "private/checkpoint-kit.rkt" saving-callback Small)
            (only-in "private/comparable.rkt" comparable)
            (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader)
@@ -237,6 +238,15 @@
                              (lambda () (resume tr path #:callbacks (list (setup-seen seen))))))
          (check-equal? (unbox seen) '() "no hook ran")
          (check-equal? (tensor->list (generator-state g)) before "the generator is kept")))))
+
+  (struct exn:fail:opaque exn:fail ())
+
+  (test-case "an exception whose struct this module cannot rebuild comes back unchanged, silently"
+    (define e (exn:fail:opaque "raised" (current-continuation-marks)))
+    (define-values (noted warnings)
+      (call-with-logged-warnings (lambda () (path-noted e (string->path "e.ckpt")))))
+    (check-eq? noted e)
+    (check-equal? warnings '()))
 
   (test-case "an epoch-end file without epoch_end_logged resumes without a warning"
     (with-temporary-directory (dir #:template "older-~a")
