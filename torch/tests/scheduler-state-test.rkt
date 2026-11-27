@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/match match-define match-lambda)
            rackunit
            (only-in "../nn.rkt"
                     Linear chained-scheduler cosine-annealing-lr cosine-annealing-warm-restarts
@@ -9,7 +9,10 @@
                     load-scheduler-state! multi-step-lr one-cycle-lr optimizer-state-dict
                     parameters scheduler-rate scheduler-state-dict sequential-lr sgd step!
                     step-lr)
+           (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/comparable.rkt" comparable))
+
+  (define blames-this-test? (blames-caller? "scheduler-state-test"))
 
   (define kinds
     `(("step" ,(lambda (o) (step-lr o #:step-size 2 #:gamma 0.5)))
@@ -77,14 +80,15 @@
     (define chained (scheduler-state-dict (fresh chain-of)))
     (check-refused "an inner state that does not fit" chain-of
                    (hash-update chained "_schedulers"
-                                (lambda (subs) (list (car subs) (hash-set plain "base_lrs" '()))))
+                                (match-lambda
+                                  [(list first _) (list first (hash-set plain "base_lrs" '()))]))
                    #rx"_schedulers\\[1\\].*base_lrs"))
 
   (test-case "T3-L12: an exact one-cycle base survives a state round trip exact"
     (define net (Linear 2 1))
-    (define (cycle o) (one-cycle-lr o #:max-lr 1/10 #:div-factor 25 #:total-steps 12))
+    (define (cycle o max-lr) (one-cycle-lr o #:max-lr max-lr #:div-factor 25 #:total-steps 12))
     (define opt (sgd (parameters net) #:lr 0.1))
-    (define s (cycle opt))
+    (define s (cycle opt 1/10))
     (void (rates s 3))
     (define state (scheduler-state-dict s))
     (check-equal? (hash-ref state "base_lrs") '(1/250))
@@ -93,8 +97,19 @@
            (hash-ref (optimizer-state-dict o net) "param_groups")))
     (check-equal? (initial-lrs opt) '(1/250))
     (define rebuilt-opt (sgd (parameters net) #:lr 0.7))
-    (define rebuilt (cycle rebuilt-opt))
+    (define rebuilt (cycle rebuilt-opt 1/5))
+    (check-equal? (hash-ref (scheduler-state-dict rebuilt) "base_lrs") '(1/125) "before the load")
     (load-optimizer-state! rebuilt-opt net (optimizer-state-dict opt net))
     (load-scheduler-state! rebuilt state)
     (check-equal? (hash-ref (scheduler-state-dict rebuilt) "base_lrs") '(1/250))
-    (check-equal? (initial-lrs rebuilt-opt) '(1/250))))
+    (check-equal? (initial-lrs rebuilt-opt) '(1/250)))
+
+  (test-case "T3-L12: a warm-restarts T_cur that is not an exact count blames the caller"
+    (define s (cosine-annealing-warm-restarts (sgd (parameters (Linear 2 1)) #:lr 0.1) #:t-0 3))
+    (void (rates s 2))
+    (define state (scheduler-state-dict s))
+    (for ([t-cur (in-list '(1.5 2.0 -1))])
+      (check-exn blames-this-test?
+                 (lambda () (load-scheduler-state! s (hash-set state "T_cur" t-cur)))
+                 (format "T_cur ~a" t-cur))
+      (check-equal? (scheduler-state-dict s) state (format "T_cur ~a: unchanged" t-cur)))))

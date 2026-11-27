@@ -2,7 +2,7 @@ result
 result-*
 .racket-user/
 cpp/build/
-torch/native-libs/libtorchrkt.*
+**/native-libs/libtorchrkt.*
 # Host NVIDIA driver symlink farm staged by the `cuda` devShell's shellHook.
 .cuda-driver/
 **/compiled/

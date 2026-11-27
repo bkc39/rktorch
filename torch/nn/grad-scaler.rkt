@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >/c and/c any/c contract-out contract? or/c rename-contract
-                  unsupplied-arg?)
+                  -> ->* ->i </c >/c >=/c and/c any/c contract-out contract? or/c
+                  rename-contract unsupplied-arg?)
          (only-in racket/match match match* match-define struct*)
          (only-in "../foreign.rkt"
                   * + copy! cuda-available? device device-type device? full item tensor? to)
@@ -268,7 +268,7 @@
   contract?
   (rename-contract
    (or/c (and/c immutable-equal-hash/c hash-empty?)
-         (record/c (hash "scale" (and/c flonum? (>/c 0.0))
+         (record/c (hash "scale" (and/c flonum? (>=/c 0.0))
                          "growth_factor" (and/c flonum? (>/c 1.0))
                          "backoff_factor" (and/c flonum? (>/c 0.0) (</c 1.0))
                          "growth_interval" exact-positive-integer?
@@ -297,16 +297,16 @@
       (raise-arguments-error
        'load-grad-scaler-state!
        "the state is empty, possibly because it was saved from a disabled grad-scaler"))
-    (define scale (hash-ref state "scale"))
-    (define tracker (hash-ref state "_growth_tracker"))
+    (match-define (hash* ["scale" scale] ["growth_factor" growth] ["backoff_factor" backoff]
+                         ["growth_interval" interval] ["_growth_tracker" tracker])
+      state)
     (set-grad-scaler-init! s scale)
-    (set-grad-scaler-growth! s (hash-ref state "growth_factor"))
-    (set-grad-scaler-backoff! s (hash-ref state "backoff_factor"))
-    (set-grad-scaler-interval! s (hash-ref state "growth_interval"))
+    (set-grad-scaler-growth! s growth)
+    (set-grad-scaler-backoff! s backoff)
+    (set-grad-scaler-interval! s interval)
     (set-grad-scaler-initial-tracker! s tracker)
-    (match (grad-scaler-state s)
-      [#f (void)]
-      [st
-       (g:fill-scalar! (device-state-factor st) scale)
-       (g:fill-scalar! (device-state-tracker st) (exact->inexact tracker))
-       (void)])))
+    (define st (grad-scaler-state s))
+    (when st
+      (g:fill-scalar! (device-state-factor st) scale)
+      (g:fill-scalar! (device-state-tracker st) (exact->inexact tracker))
+      (void))))

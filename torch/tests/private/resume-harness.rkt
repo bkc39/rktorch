@@ -24,13 +24,14 @@
 (provide check-resume
          fixture-fit-args
          fixture-world
+         training-world
          (struct-out world)
          every-epoch-saver)
 
 (struct world (trainer train val callbacks generators fingerprints))
 
 (define (resumable-net)
-  (Sequential (Linear 4 8) (Dropout 0.5) (Linear 8 1)))
+  (Sequential (Linear 4 8) (Dropout #:p 0.5) (Linear 8 1)))
 
 (define-trainer Resumable (net temperature seen)
   (define-init (s)
@@ -66,10 +67,9 @@
                                    (set! total (hash-ref state "total")))))
 
 (define-callback averaging (average e)
-  (define-init () (set! average #f) (set! e #f))
+  (define-init () (set! average (resumable-net)) (set! e #f))
   (define-state-key "averaging")
   (define-hook (setup _stage)
-    (set! average (resumable-net))
     (set! e (ema (run-trainer run) average #:decay 0.9)))
   (define-hook (on-train-batch-end _loss _extra . _batch) (ema-update! e))
   (define-hook (state-dict)
@@ -89,7 +89,7 @@
 (define fixture-fit-args
   '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5)))
 
-(define (fixture-world dir #:generator? [generator? #f] #:workers [workers 0])
+(define (training-world #:generator? [generator? #f] #:workers [workers 0])
   (define seen (box '()))
   (define g (and generator? (make-generator 11)))
   (define source (make-generator 3))
@@ -99,10 +99,16 @@
          (dataloader (data 8 source) #:batch-size 4)
          (list (hparam-scheduler 'temperature (lambda (t) (/ 1.0 (add1 t))))
                (counting-callback)
-               (averaging)
-               (model-checkpoint #:dirpath dir #:monitor 'val-loss #:save-top-k 2))
+               (averaging))
          (if g (list g) '())
          seen))
+
+(define (fixture-world dir #:generator? [generator? #f] #:workers [workers 0])
+  (define w (training-world #:generator? generator? #:workers workers))
+  (struct-copy world w
+               [callbacks (append (world-callbacks w)
+                                  (list (model-checkpoint #:dirpath dir #:monitor 'val-loss
+                                                          #:save-top-k 2)))]))
 
 (define (every-epoch-saver dir)
   (model-checkpoint #:dirpath dir #:filename "split-{epoch}-{step}" #:save-top-k -1))
@@ -182,6 +188,7 @@
   (with-temporary-directory (root #:template "resume-~a")
     (define straight (fit-leg make-world (build-path root "straight") fit-args #:saver make-saver
                               #:seed 0 #:bounds (list (cons '#:max-epochs n))))
+    (define expected (snapshot straight))
     (define split-dir (build-path root "split"))
     (define-values (first-bounds later-ends)
       (match* (split-step splits)
@@ -197,7 +204,6 @@
                        #:ckpt-path (model-checkpoint-best-model-path (leg-saver previous))
                        #:bounds (list (cons '#:max-epochs epochs)))
               legs)))
-    (define expected (snapshot straight))
     (define actual (snapshot (last legs)))
     (for ([(key v) (in-hash expected)])
       (check-equal? (hash-ref actual key) v (format "resume law: ~a" key)))
