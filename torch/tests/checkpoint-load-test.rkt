@@ -196,7 +196,9 @@
       (check-equal? args '(1 1/3))
       (check-equal? (length warnings) 1)
       (check-regexp-match
-       #rx"takes no positional depth, keyword #:tag, rest more saved in .*old[.]ckpt"
+       (pregexp (string-append "dropped init arguments saved in .*old[.]ckpt: the constructor"
+                               " takes no positional depth, keyword #:tag; saved rest values"
+                               " for more are never passed$"))
        (car warnings))))
 
   (test-case "the drop warning names only formals the checkpoint saved a value for"
@@ -206,7 +208,7 @@
       (define-values (args warnings) (loaded Plain path))
       (check-equal? args '(1))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"takes no keyword #:rate saved in" (car warnings))))
+      (check-regexp-match #rx"ckpt: the constructor takes no keyword #:rate$" (car warnings))))
 
   (test-case "a rest formal the constructor does not take is dropped"
     (with-temporary-directory (dir #:template "rest-drop-~a")
@@ -214,7 +216,7 @@
       (define-values (args warnings) (loaded Plain path))
       (check-equal? args '(1))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"constructor takes no rest more saved in .*old[.]ckpt"
+      (check-regexp-match #rx"saved in .*old[.]ckpt: saved rest values for more are never passed$"
                           (car warnings))))
 
   (test-case "a saved rest formal's values do not fill optional positionals, as Lightning's *args"
@@ -223,7 +225,7 @@
       (define-values (args warnings) (loaded Optional path))
       (check-equal? args '(1 1))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"takes no rest more saved in" (car warnings))))
+      (check-regexp-match #rx"ckpt: saved rest values for more are never passed$" (car warnings))))
 
   (test-case "saved rest values never reach a constructor that takes a rest formal, as Lightning's"
     (with-temporary-directory (dir #:template "rest-rest-~a")
@@ -231,7 +233,7 @@
       (define-values (args warnings) (loaded Old path))
       (check-equal? args '(1 1 ()))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"takes no rest more saved in" (car warnings))
+      (check-regexp-match #rx"ckpt: saved rest values for more are never passed$" (car warnings))
       (define-values (given-args none) (loaded Old path #:init-args (hasheq 'more '(5))))
       (check-equal? given-args '(1 5 ()) "an #:init-args rest value follows the saved positionals")
       (check-equal? none '())))
@@ -242,7 +244,8 @@
       (define-values (args warnings) (loaded Keyed path))
       (check-equal? args '(1 1 1/3))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"takes no positional depth, keyword #:tag saved in" (car warnings))))
+      (check-regexp-match #rx"ckpt: the constructor takes no positional depth, keyword #:tag$"
+                          (car warnings))))
 
   (test-case "a positional count the constructor's arity leaves out raises the named error"
     (with-temporary-directory (dir #:template "gap-~a")

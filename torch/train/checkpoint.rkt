@@ -245,21 +245,25 @@
 
 (define (warn-dropped! make-trainer saved overrides path extra-ids untaken-keywords rest-id)
   (define (saved? id) (hash-has-key? saved id))
-  (define dropped
+  (define untaken
     (append (filter-map (lambda (id) (and (saved? id) (string-append "positional " id)))
                         extra-ids)
             (filter-map (match-lambda
                           [(list _ text id) (and (saved? id) (string-append "keyword " text))])
-                        untaken-keywords)
+                        untaken-keywords)))
+  (define clauses
+    (append (if (null? untaken)
+                '()
+                (list (string-append "the constructor takes no " (string-join untaken ", "))))
             (if (and rest-id
                      (not (rest-passed? make-trainer overrides rest-id))
                      (pair? (hash-ref saved rest-id '())))
-                (list (string-append "rest " rest-id))
+                (list (string-append "saved rest values for " rest-id " are never passed"))
                 '())))
-  (unless (null? dropped)
-    (log-rktorch-train-warning
-     "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
-     (string-join dropped ", ") path)))
+  (unless (null? clauses)
+    (log-rktorch-train-warning "load-from-checkpoint: dropped init arguments saved in ~a: ~a"
+                               path
+                               (string-join clauses "; "))))
 
 (define (init-call make-trainer tree overrides path)
   (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
