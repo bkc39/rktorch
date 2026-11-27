@@ -229,16 +229,19 @@ runs to @racket[#:max-epochs]. The sanity check runs on a resumed fit, after
 the callback states are restored, as in Lightning.
 @itemlist[
  @item{Refused before any hook runs: a checkpoint taken outside an epoch end
-       and the fit's end, and one whose loop counters, hyperparameters, logged
+       and the fit's end; one whose loop counters, hyperparameters, logged
        values, logging book, RNG states, grad-scaler state or optimizer and
-       scheduler states are missing or malformed.}
+       scheduler states are missing or malformed; one that resumes at an epoch
+       above @racket[#:max-epochs]; one saved under a
+       @racket[current-generator] when the fit has none, or has one on another
+       device.}
  @item{Refused as it is restored: a trainer that does not hold the
        checkpoint's parameters and buffers, strictly, which leaves its
        parameters and hyperparameters unchanged; a trainer that configures a
        different number of optimizers or schedulers, or an optimizer of another
        kind; a @racket[#:weights-only?] checkpoint, with Lightning's message
-       when the optimizers are restored; a restored epoch above @racket[#:max-epochs].
-       Every refusal names the file and keeps the error's kind.}
+       when the optimizers are restored. Every refusal names the file and
+       keeps the error's kind.}
  @item{Skipped with a warning on the @racket['rktorch-train] topic and stderr:
        a saved hyperparameter the trainer does not define, and a callback
        state no callback claims. A save that is not @racket[#:weights-only?],
@@ -248,8 +251,7 @@ the callback states are restored, as in Lightning.
  @item{Restored: the default streams, @racket[current-generator]'s and
        Racket's @racket[current-pseudo-random-generator], so a resumed fit
        draws what the uninterrupted one would have, which Lightning does not
-       do; a checkpoint saved under a @racket[current-generator] needs one on
-       the same device. The values logged and not yet published are restored
+       do. The values logged and not yet published are restored
        with what @racket[run-metric] and @racket[run-metrics] read, so the rows
        logged after the resume and the values read are the uninterrupted
        fit's.}

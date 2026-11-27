@@ -7,10 +7,11 @@
            (only-in racket/string string-contains? string-join)
            rackunit
            (only-in "../main.rkt" current-generator make-generator zeros)
-           (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd step-lr)
+           (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd state-dict step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" saving-callback Small)
+           (only-in "private/comparable.rkt" comparable)
            (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader)
            (only-in "private/wedge.rkt" call-with-process-deadline))
 
@@ -88,6 +89,36 @@
     (hash-clear! tree)
     (for ([(k x) (in-hash edited)]) (hash-set! tree k x)))
 
+  (define (setup-seen seen)
+    (lambda-callback #:setup (lambda (_r _stage) (set-box! seen '(setup)))))
+
+  (define (check-refused-untouched rx path what #:max-epochs [epochs 2])
+    (define tr (Small))
+    (define weights (comparable (state-dict tr)))
+    (define hparams (trainer-hparams tr))
+    (define seen (box '()))
+    (check-names-path rx path
+                      (lambda () (resume tr path #:max-epochs epochs
+                                         #:callbacks (list (setup-seen seen))))
+                      what)
+    (check-equal? (unbox seen) '() (format "~a: no hook ran" what))
+    (check-equal? (trainer-hparams tr) hparams (format "~a: the hyperparameters are kept" what))
+    (check-equal? (comparable (state-dict tr)) weights (format "~a: the weights are kept" what)))
+
+  (define retuned (reshaping "retuned" (edit-at '("trainer_hparams" "lr") 0.5)))
+
+  (test-case "a resume past #:max-epochs changes nothing"
+    (with-temporary-directory (dir #:template "later-~a")
+      (define later (saved-with dir (list retuned) #:max-epochs 2))
+      (check-refused-untouched #rx"past #:max-epochs 1" later "past #:max-epochs" #:max-epochs 1)))
+
+  (test-case "a resume without the saved current-generator changes nothing"
+    (with-temporary-directory (dir #:template "generated-~a")
+      (define generated
+        (parameterize ([current-generator (make-generator 13)])
+          (saved-with dir (list retuned))))
+      (check-refused-untouched #rx"current-generator" generated "no current-generator")))
+
   (test-case "every resume error names the checkpoint's path"
     (with-temporary-directory (dir #:template "named-~a")
       (define path (saved-with dir '()))
@@ -99,15 +130,6 @@
       (define weights (saved-with dir '() #:name "weights.ckpt" #:weights-only? #t))
       (check-names-path #rx"contains only the model" weights (lambda () (resume (Small) weights))
                         "weights-only")
-      (define later (saved-with dir '() #:name "later.ckpt" #:max-epochs 2))
-      (check-names-path #rx"past #:max-epochs 1" later
-                        (lambda () (resume (Small) later #:max-epochs 1))
-                        "past #:max-epochs")
-      (define generated
-        (parameterize ([current-generator (make-generator 13)])
-          (saved-with dir '() #:name "generated.ckpt")))
-      (check-names-path #rx"current-generator" generated (lambda () (resume (Small) generated))
-                        "no current-generator")
       (define unfit
         (saved-with dir (list (reshaping "unfit" (edit-at '("optimizer_states") (list (hash)))))
                     #:name "unfit.ckpt"))

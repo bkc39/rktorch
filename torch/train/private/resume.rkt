@@ -14,14 +14,15 @@
          (only-in "book.rkt" restore-book-state! saved-book?)
          (only-in "dispatch.rkt" call-callback call-callbacks call-trainer warn-train!)
          (only-in "format.rkt" read-checkpoint-file)
-         (only-in "restore.rkt" restore-rng-bundle!)
+         (only-in "restore.rkt" check-current-generator! restore-rng-bundle!)
          (only-in "state.rkt"
                   run-book run-callbacks run-device run-entry run-grad-scaler run-optimizers
                   run-scheduler-configs run-trainer set-run-batches-stepped! set-run-epoch!
                   set-run-eval-batches! set-run-global-step!)
          (only-in "types.rkt" callback-state-key not-implemented scheduler-config-scheduler))
 
-(provide checkpoint-source
+(provide check-resume-epoch!
+         checkpoint-source
          restore-modules!
          restore-rng!
          restore-training-state!)
@@ -74,13 +75,13 @@
 (define (scaler-state? v)
   (contract-first-order-passes? grad-scaler-state/c v))
 
-(define (check-training-state! check! tree)
+(define (check-training-state! check! path tree)
   (when (hash-has-key? tree "optimizer_states")
     (check! '("optimizer_states") states?)
     (check! '("lr_schedulers") states?)
     (check! '("rng" "racket") racket-generator-state?)
     (check! '("rng" "cpu") cpu-generator-state?)
-    (check! '("rng" "current_generator") saved-generator?))
+    (check-current-generator! (check! '("rng" "current_generator") saved-generator?) path))
   (for ([key (in-list '("metric_book" "MixedPrecision"))]
         [ok? (in-list (list saved-book? scaler-state?))]
         #:when (hash-has-key? tree key))
@@ -93,7 +94,7 @@
   (for ([key (in-list '("epoch" "batches_that_stepped" "eval_batches"))])
     (check! (fit-loop-key key) exact-nonnegative-integer?))
   (check! (fit-loop-key "epoch_end_logged") boolean?)
-  (check-training-state! check! tree)
+  (check-training-state! check! path tree)
   (match (check! (fit-loop-key "phase") string?)
     [(or "epoch-end" "fit-end") (void)]
     [(and phase (or "batch-end" "validation-end" "exception"))
@@ -104,6 +105,18 @@
                           " end, an exception and the fit's end, so it cannot be resumed")
       "phase" phase
       "path" path)]))
+
+(define (resumed-epoch tree)
+  (match-define (hash-table ("phase" phase) ("epoch" saved)) (fit-loop tree))
+  (if (equal? phase "epoch-end") (add1 saved) saved))
+
+(define (check-resume-epoch! ckpt max-epochs)
+  (match-define (source path tree) ckpt)
+  (define epoch (resumed-epoch tree))
+  (when (and max-epochs (> epoch max-epochs))
+    (raise-arguments-error
+     'fit (format "the checkpoint resumes at epoch ~a, past #:max-epochs ~a" epoch max-epochs)
+     "path" path)))
 
 (define (checkpoint-source who path)
   (define tree (read-checkpoint-file who path))
@@ -211,20 +224,19 @@
                                       " on-train-epoch-end")
                        path)))
 
-(define (restore-training-state! r ckpt max-epochs)
+(define (restore-training-state! r ckpt)
   (match-define (source path tree) ckpt)
   (define scaler (run-grad-scaler r))
   (define scaler-state (hash-ref tree "MixedPrecision" #f))
   (when (and scaler scaler-state)
     (with-path-noted path (load-grad-scaler-state! scaler scaler-state)))
   (define loop (fit-loop tree))
-  (match-define (hash-table ("phase" phase) ("epoch" saved-epoch)
-                            ("batches_that_stepped" stepped) ("eval_batches" evals))
+  (match-define (hash-table ("phase" phase) ("batches_that_stepped" stepped)
+                            ("eval_batches" evals))
     loop)
   (unless (hash-ref loop "epoch_end_logged" #t)
     (warn-inexact-resume! path))
-  (define epoch (if (equal? phase "epoch-end") (add1 saved-epoch) saved-epoch))
-  (set-run-epoch! r epoch)
+  (set-run-epoch! r (resumed-epoch tree))
   (set-run-global-step! r (hash-ref tree "global_step"))
   (set-run-batches-stepped! r stepped)
   (set-run-eval-batches! r evals)
@@ -232,10 +244,6 @@
                        (hash-ref tree "callback_metrics")
                        (hash-ref tree "metric_book" #f)
                        #:close-train-epoch? (equal? phase "epoch-end"))
-  (when (and max-epochs (> epoch max-epochs))
-    (raise-arguments-error
-     'fit (format "the checkpoint resumes at epoch ~a, past #:max-epochs ~a" epoch max-epochs)
-     "path" path))
   (define tr (run-trainer r))
   (restore-each! path tree "optimizer_states" "optimizer" (run-optimizers r)
                  (lambda (opt state) (load-optimizer-state! opt tr state)))

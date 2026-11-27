@@ -19,7 +19,8 @@
          (only-in "precision.rkt"
                   backward-pass! call-in-precision check-clippable! configure-precision!
                   count-step! window-step!)
-         (only-in "resume.rkt" restore-modules! restore-rng! restore-training-state!)
+         (only-in "resume.rkt"
+                  check-resume-epoch! restore-modules! restore-rng! restore-training-state!)
          (only-in "state.rkt"
                   run-accumulate run-batches-stepped run-book run-callbacks run-device
                   run-epoch run-global-step run-loggers run-optimizers run-scheduler-configs
@@ -75,6 +76,8 @@
   (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
   (define (unless-fast v fast-v) (if fast fast-v v))
   (define epochs (unless-fast max-epochs 1))
+  (when checkpoint
+    (check-resume-epoch! checkpoint epochs))
   (define steps (or fast max-steps))
   (define train-count (limited-batches train (or fast limit-train)))
   (plan device train val callbacks
@@ -246,7 +249,7 @@
     (log-hyperparameters! r)
     (call-hooks r 'on-fit-start)
     (when (plan-checkpoint p)
-      (restore-training-state! r (plan-checkpoint p) (plan-max-epochs p)))
+      (restore-training-state! r (plan-checkpoint p)))
     (when (and (plan-val p) (positive? (plan-sanity p)))
       (call-callbacks r 'on-sanity-check-start (run-callbacks r))
       (validate! r p 'sanity-check (min (plan-sanity p) (plan-val-count p)))
