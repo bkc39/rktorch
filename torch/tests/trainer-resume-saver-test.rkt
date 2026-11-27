@@ -19,13 +19,12 @@
       (when (zero? (run-epoch run))
         (set! tag 1))))
 
-  (define (tagged-world callbacks)
-    (lambda (_dir)
-      (define g (make-generator 5))
-      (world (Tagged)
-             (dataloader (tensor-dataset (randn 4 2 #:generator g) (randn 4 1 #:generator g))
-                         #:batch-size 2)
-             #f callbacks '() (box '()))))
+  (define ((tagged-world callbacks) _dir)
+    (define g (make-generator 5))
+    (world (Tagged)
+           (dataloader (tensor-dataset (randn 4 2 #:generator g) (randn 4 1 #:generator g))
+                       #:batch-size 2)
+           #f callbacks '() (box '())))
 
   (define tag-dropper
     (lambda-callback #:on-save-checkpoint

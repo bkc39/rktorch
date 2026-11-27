@@ -105,8 +105,8 @@
 
   (test-case "T3-L3: a malformed tree is refused before any hook, naming the path and the key"
     (with-temporary-directory (dir #:template "malformed-~a")
-      (define (set-entry key v) (lambda (tree) (hash-set! tree key v)))
-      (define (remove-entry key) (lambda (tree) (hash-remove! tree key)))
+      (define ((set-entry key v) tree) (hash-set! tree key v))
+      (define ((remove-entry key) tree) (hash-remove! tree key))
       (for ([malformed (in-list
                         (list (cons "loops" (remove-entry "loops"))
                               (cons "loops" (set-entry "loops" (hash)))
