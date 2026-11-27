@@ -333,7 +333,9 @@ hashes come back immutable and of the same comparison.}
                                [path path-string?]
                                [#:device device (or/c #f device?) #f]
                                [#:strict? strict? boolean? #t]
-                               [#:init-args init-args (hash/c symbol? any/c #:immutable #t) (hasheq)])
+                               [#:init-args init-args
+                                (hash/c symbol? any/c #:immutable #t)
+                                (hasheq)])
          trainer?]{
 Lightning's @tt{load_from_checkpoint}: applies @racket[make-trainer] to the
 @racket[define-init] arguments the checkpoint saved, with @racket[init-args]
@@ -353,17 +355,18 @@ on the @racket['rktorch-train] topic naming them and the path. Saved rest values
 never reach @racket[make-trainer], as Lightning never passes saved @tt{*args};
 an @racket[init-args] entry under the rest formal's name is passed after the
 saved positional arguments when @racket[make-trainer] takes a rest argument, so
-it fills any optional positionals first. Arguments are matched by position and keyword, not by name, so a
-positional formal that became a keyword keeps its default. A keyword
-@racket[make-trainer] takes that the checkpoint did not save comes from the
-@racket[init-args] entry under its name (@racket[#:lr] from @racket['lr]); a
-required one without an entry raises naming it and the path. A count of
-positional arguments @racket[make-trainer] does not accept raises naming the
-count, the arity it accepts and the path; a procedure that takes the saved arguments and supplies
-the others can be passed instead. A name in @racket[init-args] that is
-neither is ignored, as Lightning ignores a keyword its constructor does not
-take. A checkpoint whose hooks removed @tt{hyper_parameters} or
-@tt{trainer_hparams} loads them as empty, as Lightning's @tt{.get} does.
+it fills any optional positionals first. Arguments are matched by position and
+keyword, not by name, so a positional formal that became a keyword keeps its
+default. A keyword @racket[make-trainer] takes that the checkpoint did not save
+comes from the @racket[init-args] entry under its name (@racket[#:lr] from
+@racket['lr]); a required one without an entry raises naming it and the path. A
+count of positional arguments @racket[make-trainer] does not accept raises
+naming the count, the arity it accepts and the path; a procedure that takes the
+saved arguments and supplies the others can be passed instead. A name in
+@racket[init-args] that is neither is ignored, as Lightning ignores a keyword
+its constructor does not take. A checkpoint whose hooks removed
+@tt{hyper_parameters} or @tt{trainer_hparams} loads them as empty, as
+Lightning's @tt{.get} does.
 
 @examples[#:eval train-eval
 (define-trainer Kept (net rate)

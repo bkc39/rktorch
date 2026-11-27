@@ -191,8 +191,9 @@
       (define-values (args warnings) (loaded Narrow path))
       (check-equal? args '(1 1/3))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"takes no positional depth, keyword #:tag, rest more saved in .*old[.]ckpt"
-                          (car warnings))))
+      (check-regexp-match
+       #rx"takes no positional depth, keyword #:tag, rest more saved in .*old[.]ckpt"
+       (car warnings))))
 
   (test-case "the drop warning names only formals the checkpoint saved a value for"
     (with-temporary-directory (dir #:template "unsaved-drop-~a")
@@ -209,7 +210,8 @@
       (define-values (args warnings) (loaded Plain path))
       (check-equal? args '(1))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"constructor takes no rest more saved in .*old[.]ckpt" (car warnings))))
+      (check-regexp-match #rx"constructor takes no rest more saved in .*old[.]ckpt"
+                          (car warnings))))
 
   (test-case "a saved rest formal's values do not fill optional positionals, as Lightning's *args"
     (with-temporary-directory (dir #:template "rest-optional-~a")
@@ -243,7 +245,8 @@
       (define path (saved-from (Taller 1 2) dir))
       (define one-or-three (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)]))
       (check-exn/contract
-       #rx"load-from-checkpoint: .*not accept the number.*wrap.*saved: 2.*accepts: '[(]1 3[)].*old[.]ckpt"
+       (pregexp (string-append "load-from-checkpoint: .*not accept the number.*wrap"
+                               ".*saved: 2.*accepts: '[(]1 3[)].*old[.]ckpt"))
        (lambda () (load-from-checkpoint one-or-three path)))))
 
   (test-case "a renamed keyword: the old one is dropped, the new one comes from #:init-args"
@@ -255,7 +258,8 @@
       (check-equal? args '(1 0.2))
       (check-regexp-match #rx"#:rate" (car warnings))
       (check-exn/contract
-       #rx"load-from-checkpoint: .*not accept the number of positional.*saved: 1.*accepts: 2.*old[.]ckpt"
+       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+                               ".*saved: 1.*accepts: 2.*old[.]ckpt"))
        (lambda () (load-from-checkpoint Taller path)))))
 
   (define (saved-with dir name edit)

@@ -84,7 +84,8 @@
     (with-temporary-directory (dir #:template "held-~a")
       (define path (build-path dir "h.ckpt"))
       (fit tr (loader 2 #:width 1) #:max-epochs 1 #:logger #f
-           #:callbacks (list (lambda-callback #:on-train-end (lambda (r) (save-checkpoint! r path)))))
+           #:callbacks (list (lambda-callback
+                              #:on-train-end (lambda (r) (save-checkpoint! r path)))))
       (check-equal? (tensor-shape (hash-ref (hash-ref (read-checkpoint path) "hyper_parameters")
                                             "data"))
                     '(1000 1000))))
