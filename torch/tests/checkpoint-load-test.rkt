@@ -158,6 +158,18 @@
     (define-optimizers (sgd (parameters net) #:lr 0.1))
     (define-training-step (x y) (mse-loss (net x) y)))
 
+  (define-trainer Keyed (net)
+    (define-init (width #:depth [d 1] #:rate [r 0.1])
+      (set-box! given (list width d r))
+      (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Optional (net)
+    (define-init (width [depth 1]) (set-box! given (list width depth)) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
   (define (saved-from tr dir)
     (define path (build-path dir "old.ckpt"))
     (void (fit tr (toy-loader 2) #:max-epochs 1 #:logger #f
@@ -178,7 +190,8 @@
       (define-values (args warnings) (loaded Narrow path))
       (check-equal? args '(1 1/3))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"depth, #:tag, more.*old[.]ckpt" (car warnings))))
+      (check-regexp-match #rx"takes no positional depth, keyword #:tag, rest more saved in .*old[.]ckpt"
+                          (car warnings))))
 
   (test-case "a rest formal the constructor does not take is dropped"
     (with-temporary-directory (dir #:template "rest-drop-~a")
@@ -186,7 +199,31 @@
       (define-values (args warnings) (loaded Plain path))
       (check-equal? args '(1))
       (check-equal? (length warnings) 1)
-      (check-regexp-match #rx"constructor takes no more saved in .*old[.]ckpt" (car warnings))))
+      (check-regexp-match #rx"constructor takes no rest more saved in .*old[.]ckpt" (car warnings))))
+
+  (test-case "a saved rest formal's values do not fill optional positionals, as Lightning's *args"
+    (with-temporary-directory (dir #:template "rest-optional-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define-values (args warnings) (loaded Optional path))
+      (check-equal? args '(1 1))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"takes no rest more saved in" (car warnings))))
+
+  (test-case "a positional that became a keyword keeps its default; the warning says positional"
+    (with-temporary-directory (dir #:template "became-keyword-~a")
+      (define path (saved-from (Old 1 3 #:rate 1/3) dir))
+      (define-values (args warnings) (loaded Keyed path))
+      (check-equal? args '(1 1 1/3))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"takes no positional depth, keyword #:tag saved in" (car warnings))))
+
+  (test-case "a positional count the constructor's arity leaves out raises the named error"
+    (with-temporary-directory (dir #:template "gap-~a")
+      (define path (saved-from (Taller 1 2) dir))
+      (check-exn/contract #rx"load-from-checkpoint:.*wrap.*saved: 2.*old[.]ckpt"
+                          (lambda ()
+                            (load-from-checkpoint (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)])
+                                                  path)))))
 
   (test-case "a renamed keyword: the old one is dropped, the new one comes from #:init-args"
     (with-temporary-directory (dir #:template "renamed-~a")
@@ -196,8 +233,8 @@
       (define-values (args warnings) (loaded Renamed path #:init-args (hasheq 'lr 0.2)))
       (check-equal? args '(1 0.2))
       (check-regexp-match #rx"#:rate" (car warnings))
-      (check-exn #rx"load-from-checkpoint:.*positional.*old[.]ckpt"
-                 (lambda () (load-from-checkpoint Taller path)))))
+      (check-exn/contract #rx"load-from-checkpoint:.*positional.*wrap.*saved: 1.*old[.]ckpt"
+                          (lambda () (load-from-checkpoint Taller path)))))
 
   (define (saved-with dir name edit)
     (define path (build-path dir name))

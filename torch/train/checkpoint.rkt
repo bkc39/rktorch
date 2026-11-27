@@ -2,8 +2,8 @@
 
 (require (only-in racket/contract/base
                   -> ->* any/c flat-named-contract hash/c or/c unconstrained-domain->)
-         (only-in racket/list partition take)
-         (only-in racket/match match match*)
+         (only-in racket/list partition split-at)
+         (only-in racket/match match match* match-define match-lambda)
          (only-in racket/string string-join)
          (only-in "../foreign.rkt" device? to)
          (only-in "../nn/grad-scaler.rkt" grad-scaler-state-dict)
@@ -148,7 +148,7 @@
   (-> path-string? (hash/c string? checkpoint-value/c #:immutable #t))
   (read-checkpoint-file 'read-checkpoint path))
 
-(define (entry tree key ok? path #:default [default #f])
+(define (checkpoint-entry tree key ok? path #:default [default #f])
   (match (hash-ref tree key default)
     [(? ok? v) v]
     [_ (raise-arguments-error 'load-from-checkpoint "the checkpoint's entry is missing or malformed"
@@ -169,13 +169,27 @@
 (define (keyword-name kw)
   (string->symbol (keyword->string kw)))
 
-(define (positional-range make-trainer)
-  (define mask (procedure-arity-mask make-trainer))
-  (values (sub1 (integer-length (bitwise-and mask (- mask))))
-          (if (negative? mask) +inf.0 (sub1 (integer-length mask)))))
+(define (saved-formals tree path)
+  (for/fold ([keywords '()] [positionals '()] [rest #f]
+             #:result (values (reverse keywords) (reverse positionals) rest))
+            ([f (in-list (checkpoint-entry tree "init_formals" formals? path))])
+    (match f
+      [(list "keyword" (and text (regexp #rx"^#:(.*)$" (list _ (app string->keyword kw)))) id)
+       (values (cons (list kw text id) keywords) positionals rest)]
+      [(list "positional" id) (values keywords (cons id positionals) rest)]
+      [(list "rest" id) (values keywords positionals id)])))
+
+(define (positional-limit proc)
+  (let most ([arity (procedure-arity proc)])
+    (match arity
+      [(? exact-nonnegative-integer? n) n]
+      [(arity-at-least _) #f]
+      [(list arities ...)
+       (define limits (map most arities))
+       (and (andmap values limits) (apply max 0 limits))])))
 
 (define (init-call make-trainer tree overrides path)
-  (define saved (entry tree "hyper_parameters" string-keyed? path #:default (hash)))
+  (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
   (define (missing formal)
     (raise-arguments-error 'load-from-checkpoint
                            "the checkpoint did not save this init argument; pass it in #:init-args"
@@ -193,48 +207,42 @@
       [v (raise-arguments-error 'load-from-checkpoint "a rest formal's value must be a list"
                                 "formal" (string->symbol id)
                                 "value" v)]))
+  (define-values (keyword-formals positional-ids rest-id) (saved-formals tree path))
   (define-values (required accepted) (procedure-keywords make-trainer))
-  (define-values (fewest most) (positional-range make-trainer))
-  (define-values (keywords positional dropped)
-    (for/fold ([keywords '()] [positional '()] [dropped '()]
-               #:result (values keywords positional (reverse dropped)))
-              ([f (in-list (entry tree "init_formals" formals? path))])
-      (define room (- most (length positional)))
-      (match f
-        [(list "keyword" (regexp #rx"^#:(.*)$" (list _ (app string->keyword kw))) id)
-         #:when (or (not accepted) (memq kw accepted))
-         (values (cons (cons kw (value-of id)) keywords) positional dropped)]
-        [(list "positional" id)
-         #:when (positive? room)
-         (values keywords (append positional (list (value-of id))) dropped)]
-        [(list "rest" id)
-         #:when (positive? room)
-         (define vs (rest-values id))
-         (define fits? (<= (length vs) room))
-         (values keywords
-                 (append positional (if fits? vs (take vs room)))
-                 (if fits? dropped (cons id dropped)))]
-        [(list "rest" id)
-         #:when (null? (hash-ref saved id #f))
-         (values keywords positional dropped)]
-        [(list "keyword" text _) (values keywords positional (cons text dropped))]
-        [(list _ id) (values keywords positional (cons id dropped))])))
+  (define-values (taken-keywords untaken-keywords)
+    (partition (lambda (f) (or (not accepted) (memq (car f) accepted))) keyword-formals))
+  (define limit (positional-limit make-trainer))
+  (define saved-count (length positional-ids))
+  (define-values (passed-ids extra-ids)
+    (split-at positional-ids (if limit (min limit saved-count) saved-count)))
+  (define positional
+    (append (map value-of passed-ids) (if (and rest-id (not limit)) (rest-values rest-id) '())))
+  (unless (procedure-arity-includes? make-trainer (length positional) #t)
+    (raise-arguments-error 'load-from-checkpoint
+                           (string-append "the constructor does not take as many positional"
+                                          " arguments as the checkpoint saved; wrap it in a"
+                                          " procedure that takes them")
+                           "saved" (length positional)
+                           "path" path))
+  (define dropped
+    (append (map (lambda (id) (string-append "positional " id)) extra-ids)
+            (map (match-lambda [(list _ text _) (string-append "keyword " text)]) untaken-keywords)
+            (if (and rest-id limit (not (null? (hash-ref saved rest-id #f))))
+                (list (string-append "rest " rest-id))
+                '())))
+  (unless (null? dropped)
+    (log-rktorch-train-warning
+     "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
+     (string-join dropped ", ") path))
+  (define keywords
+    (for/list ([f (in-list taken-keywords)])
+      (match-define (list kw _ id) f)
+      (cons kw (value-of id))))
   (define given
     (for/list ([kw (in-list (or accepted required))]
                #:unless (assq kw keywords)
                #:when (or (memq kw required) (hash-has-key? overrides (keyword-name kw))))
       (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing kw))))))
-  (when (< (length positional) fewest)
-    (raise-arguments-error 'load-from-checkpoint
-                           (string-append "the constructor takes more positional arguments"
-                                          " than the checkpoint saved")
-                           "required" fewest
-                           "saved" (length positional)
-                           "path" path))
-  (unless (null? dropped)
-    (log-rktorch-train-warning
-     "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
-     (string-join dropped ", ") path))
   (define sorted (sort (append keywords given) keyword<? #:key car))
   (values (map car sorted) (map cdr sorted) positional))
 
@@ -261,8 +269,10 @@
   (define tree (read-checkpoint-file 'load-from-checkpoint path))
   (define-values (kws kw-values positional) (init-call make-trainer tree init-args path))
   (define tr (keyword-apply make-trainer kws kw-values positional))
-  (restore-hparams! tr (entry tree "trainer_hparams" string-keyed? path #:default (hash)) path)
-  (define (counter key) (entry tree key exact-nonnegative-integer? path #:default 0))
+  (restore-hparams! tr
+                    (checkpoint-entry tree "trainer_hparams" string-keyed? path #:default (hash))
+                    path)
+  (define (counter key) (checkpoint-entry tree key exact-nonnegative-integer? path #:default 0))
   (define r (fresh-run tr #f (trainer-device tr)
                        #:epoch (counter "epoch")
                        #:global-step (counter "global_step")))
