@@ -6,7 +6,7 @@
          (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  * + cat detach device dtype max min reshape tensor->list tensor? to
+                  * + cat detach device dtype max min numel reshape tensor->list tensor? to
                   zeros-like))
 
 (provide accumulators
@@ -189,7 +189,7 @@
 
 (define reducers '(mean sum max min))
 
-(define (metric-value? v) (or (real? v) (tensor? v)))
+(define (metric-value? v) (or (real? v) (and (tensor? v) (= (numel v) 1))))
 
 (define (weight? w) (and (real? w) (positive? w)))
 

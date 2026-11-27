@@ -168,6 +168,7 @@
           (list '("rng" "current_generator") 5)
           (list '("metric_book") (hash "train" 1))
           (epoch-entry "value" "x")
+          (epoch-entry "value" (zeros 2))
           (epoch-entry "reduce" "mean")
           (epoch-entry "weight" -1)
           (epoch-entry "logger" 1)
