@@ -318,8 +318,9 @@ saw, with every hash immutable and every tensor on the CPU.}
 The values a checkpoint holds: booleans, exact rationals, flonums (including
 infinities, NaN and @racket[-0.0]), strings, interned symbols, tensors of dtype
 @racket['float32], @racket['float64], @racket['float16], @racket['bfloat16],
-@racket['int64], @racket['uint8] or @racket['bool], pairs and lists of these, and @racket[eq?], @racket[eqv?] or @racket[equal?] hashes of these
-that hold their keys strongly and whose string keys do not begin with @tt{$}. An
+@racket['int64], @racket['uint8] or @racket['bool], pairs and lists of these,
+and @racket[eq?], @racket[eqv?] or @racket[equal?] hashes of these that hold
+their keys strongly and whose string keys do not begin with @tt{$}. An
 @racket[eq?] hash's keys must keep their identity through a read: interned
 symbols, fixnums, booleans and @racket['()]; an @racket[eqv?] hash's may also be
 flonums and exact rationals. No key may hold a tensor or a mutable hash, which a
