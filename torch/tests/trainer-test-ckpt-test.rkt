@@ -47,4 +47,5 @@
       (define (outputs tr #:ckpt-path [path #f])
         (map tensor->list (predict tr (toy-loader 4) #:ckpt-path path)))
       (check-equal? (outputs (Tested) #:ckpt-path path) (outputs trained))
-      (check-not-equal? (outputs (Tested)) (outputs trained) "the restore is what made them equal"))))
+      (check-not-equal? (outputs (Tested)) (outputs trained)
+                        "the restore is what made them equal"))))

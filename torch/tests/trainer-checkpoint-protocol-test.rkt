@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
+           (only-in racket/match match-define)
            rackunit
            (only-in "../main.rkt" cuda-available? current-generator make-generator)
            (only-in "../nn.rkt" Linear mse-loss parameters save-state! sgd step-lr)
@@ -39,7 +40,8 @@
       (define state (make-hash (list (list "a" 1 2.5 'x) (cons "b" (make-hasheq '((k . "v")))))))
       (define path (saved-with dir (list (keeper "keep" state (box #f)))))
       (define seen (box #f))
-      (define-values (_warnings _err) (resume-capturing (Small) path (list (keeper "keep" state seen))))
+      (define-values (_warnings _err)
+        (resume-capturing (Small) path (list (keeper "keep" state seen))))
       (check-equal? (unbox seen) (hash "a" (list 1 2.5 'x) "b" (hasheq 'k "v")))
       (check-true (immutable? (unbox seen)))
       (check-true (immutable? (hash-ref (unbox seen) "b")))))
@@ -177,7 +179,7 @@
                                            #:on-train-start (lambda (_r) (set-box! started #t)))))))
       (check-false (unbox started) "no training ran")))
 
-  (test-case "C3: a mid-epoch checkpoint is refused at fit entry until mid-epoch resume lands"
+  (test-case "a mid-epoch checkpoint is refused at fit entry until mid-epoch resume lands"
     (with-temporary-directory (dir #:template "mid-epoch-~a")
       (define batch-end (build-path dir "batch-end.ckpt"))
       (define validation-end (build-path dir "validation-end.ckpt"))
@@ -189,11 +191,15 @@
                                         (save-checkpoint! r batch-end)))
                                     #:on-validation-end
                                     (lambda (r) (save-checkpoint! r validation-end))))))
-      (for ([path (list batch-end validation-end)] [phase (list #rx"batch-end" #rx"validation-end")])
+      (for ([mid (in-list (list (cons batch-end #rx"batch-end")
+                                (cons validation-end #rx"validation-end")))])
+        (match-define (cons path phase) mid)
         (define seen (box '()))
-        (check-exn (lambda (e) (and (exn:fail:unsupported? e)
-                                    (regexp-match? phase (exn-message e))
-                                    (regexp-match? #rx"mid-epoch.*not implemented" (exn-message e))))
+        (check-exn (lambda (e)
+                     (define message (exn-message e))
+                     (and (exn:fail:unsupported? e)
+                          (regexp-match? phase message)
+                          (regexp-match? #rx"mid-epoch.*not implemented" message)))
                    (lambda ()
                      (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f #:ckpt-path path
                           #:callbacks (list (lambda-callback
@@ -201,7 +207,7 @@
                                                        (set-box! seen '(setup))))))))
         (check-equal? (unbox seen) '() (format "~a" path)))))
 
-  (test-case "C3: a checkpoint saved after the fit resumes at the epoch it ended on"
+  (test-case "a checkpoint saved after the fit resumes at the epoch it ended on"
     (with-temporary-directory (dir #:template "fit-end-~a")
       (define path (build-path dir "end.ckpt"))
       (void (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f
@@ -212,7 +218,8 @@
         (fit (Small) (toy-loader 4) #:max-epochs 3 #:logger #f #:ckpt-path path
              #:callbacks (list (lambda-callback
                                 #:on-train-epoch-start
-                                (lambda (r) (set-box! epochs (cons (run-epoch r) (unbox epochs))))))))
+                                (lambda (r)
+                                  (set-box! epochs (cons (run-epoch r) (unbox epochs))))))))
       (check-equal? (unbox epochs) '(2))
       (check-equal? (run-global-step r) 6)))
 
@@ -221,7 +228,7 @@
     (define-optimizers (sgd (parameters net) #:lr 0.1))
     (define-training-step (x y) (mse-loss (net x) y)))
 
-  (test-case "C3: a saved hyperparameter the trainer does not define warns and is skipped"
+  (test-case "a saved hyperparameter the trainer does not define warns and is skipped"
     (with-temporary-directory (dir #:template "hparams-~a")
       (define path (saved-with dir '()))
       (define-values (warnings err) (resume-capturing (Unparameterized) path '()))
