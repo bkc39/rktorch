@@ -13,7 +13,7 @@
          (only-in "harness.rkt" rotate)
          (only-in "flags.rkt" flag-count flag-counts flag-positive require-one-aten-thread!)
          (only-in "m1-clocks.rkt" gc-overlap-ms with-gc-log)
-         (only-in "op-cost-measure.rkt" condition condition-op sample-condition)
+         (only-in "op-cost-measure.rkt" condition condition-layer condition-op sample-condition)
          (only-in "op-cost-ops.rkt"
                   add-scalar/c add/c build-case narrow/c op-case-layer tensors-per-call zeros-on/c))
 
@@ -37,11 +37,7 @@
 
 (struct kept-store (handles count) #:mutable)
 
-(define kept-stores (box '()))
-
-(define freeing (box '()))
-
-(define freeing-ready (make-semaphore 0))
+(struct keeper (batch stores freeing ready pending peak freer))
 
 (define (push! b v)
   (let retry ()
@@ -54,44 +50,66 @@
     (define old (unbox b))
     (if (box-cas! b old '()) old (retry))))
 
-(define freer
-  (delay
-    (thread (lambda ()
-              (let loop ()
-                (semaphore-wait freeing-ready)
-                (for ([item (in-list (reverse (take-all! freeing)))])
-                  (match item
-                    [(? semaphore? done) (semaphore-post done)]
-                    [handles (for-each tr-tensor-free/unwrapped handles)]))
-                (loop)))
-            #:pool 'own)))
+(define (add! b d)
+  (let retry ()
+    (define old (unbox b))
+    (define new (+ old d))
+    (if (box-cas! b old new) new (retry))))
 
-(define (hand-off! item)
-  (force freer)
-  (push! freeing item)
-  (semaphore-post freeing-ready))
+(define (raise-to! b v)
+  (let retry ()
+    (define old (unbox b))
+    (unless (or (>= old v) (box-cas! b old v))
+      (retry))))
 
-(define (fresh-kept-store)
-  (define store (kept-store '() 0))
-  (push! kept-stores store)
-  store)
+(define (make-keeper #:free [free tr-tensor-free/unwrapped] #:batch [batch kept-batch])
+  (define freeing (box '()))
+  (define ready (make-semaphore 0))
+  (define pending (box 0))
+  (define freer
+    (delay
+      (thread (lambda ()
+                (let loop ()
+                  (semaphore-wait ready)
+                  (for ([item (in-list (reverse (take-all! freeing)))])
+                    (match item
+                      [(? semaphore? done) (semaphore-post done)]
+                      [handles
+                       (for-each free handles)
+                       (add! pending (- (length handles)))]))
+                  (loop)))
+              #:pool 'own)))
+  (keeper batch (box '()) freeing ready pending (box 0) freer))
 
-(define (keep! store h)
+(define kept (make-keeper))
+
+(define (post! k item)
+  (push! (keeper-freeing k) item)
+  (semaphore-post (keeper-ready k)))
+
+(define (hand-off! k store)
   (match-define (kept-store handles count) store)
-  (cond
-    [(= (add1 count) kept-batch)
-     (hand-off! (cons h handles))
-     (set-kept-store-handles! store '())
-     (set-kept-store-count! store 0)]
-    [else
-     (set-kept-store-handles! store (cons h handles))
-     (set-kept-store-count! store (add1 count))]))
+  (set-kept-store-handles! store '())
+  (set-kept-store-count! store 0)
+  (raise-to! (keeper-peak k) (add! (keeper-pending k) count))
+  (post! k handles))
 
-(define (free-kept!)
-  (for ([store (in-list (take-all! kept-stores))])
-    (hand-off! (kept-store-handles store)))
+(define (keeping k)
+  (force (keeper-freer k))
+  (define store (kept-store '() 0))
+  (push! (keeper-stores k) store)
+  (lambda (h)
+    (set-kept-store-handles! store (cons h (kept-store-handles store)))
+    (set-kept-store-count! store (add1 (kept-store-count store)))
+    (when (= (kept-store-count store) (keeper-batch k))
+      (hand-off! k store))))
+
+(define (free-kept! [k kept])
+  (force (keeper-freer k))
+  (for ([store (in-list (unbox (keeper-stores k)))])
+    (hand-off! k store))
   (define done (make-semaphore 0))
-  (hand-off! done)
+  (post! k done)
   (semaphore-wait done))
 
 (define (guarded h)
@@ -106,13 +124,12 @@
 (define ((waking f) . args)
   (begin0 (apply f args) (wake-after-collection!)))
 
-(define (layered c-call layer)
+(define (layered c-call layer keep)
   (match layer
     ['kept
-     (define store (fresh-kept-store))
      (lambda args
        (define h (apply c-call args))
-       (when h (keep! store h)))]
+       (when h (keep h)))]
     ['raw (lambda args (tr-tensor-free/unwrapped (apply c-call args)))]
     ['guardian (waking (lambda args (with-uninterruptible (guarded (apply c-call args)))))]
     ['lifetimes (lambda args (with-uninterruptible (in-lifetimes (apply c-call args))))]
@@ -122,7 +139,7 @@
                           (when t (account! t))
                           t))]))
 
-(define (mix-layer layer)
+(define (mix-layer layer #:keeper [k kept])
   (define x (randn 3 40 40))
   (define a (randn 8 8))
   (define b (randn 8 8))
@@ -137,10 +154,11 @@
        (zeros 8 8)
        (void))]
     [_
-     (define narrow* (layered narrow/c layer))
-     (define add* (layered add/c layer))
-     (define scalar* (layered add-scalar/c layer))
-     (define zeros* (layered zeros-on/c layer))
+     (define keep (and (eq? layer 'kept) (keeping k)))
+     (define narrow* (layered narrow/c layer keep))
+     (define add* (layered add/c layer keep))
+     (define scalar* (layered add-scalar/c layer keep))
+     (define zeros* (layered zeros-on/c layer keep))
      (lambda ()
        (narrow* x 1 4 32)
        (add* a b)
@@ -151,23 +169,28 @@
 (define (chain-thunk)
   (op-case-layer (build-case 'cifar-chain) 'facade))
 
-(define (registration-conditions threads)
+(define (registration-conditions threads #:keeper [k kept])
   (append*
    (for/list ([n (in-list threads)])
      (append (for/list ([l (in-list mix-layers)])
-               (condition 'mix l n (lambda () (mix-layer l))))
+               (condition 'mix l n (lambda () (mix-layer l #:keeper k))))
              (list (condition 'cifar-chain 'facade n chain-thunk))))))
 
 (define (chain-tensors)
   (tensors-per-call (chain-thunk)))
 
-(define (registration-record c seconds rep)
+(define (registration-record c seconds rep #:keeper [k kept])
+  (set-box! (keeper-peak k) (unbox (keeper-pending k)))
   (define-values (r events) (with-gc-log () (sample-condition c seconds #:rep rep)))
-  (free-kept!)
-  (hash-set* r
-             'ops_per_call (if (eq? (condition-op c) 'mix) mix-ops 1)
-             'gc_real_ms (gc-overlap-ms events (hash-ref r 'window_start_ms)
-                                        (hash-ref r 'window_end_ms))))
+  (define backlog
+    (if (eq? (condition-layer c) 'kept)
+        (list 'kept_pending_peak (unbox (keeper-peak k)) 'kept_batch (keeper-batch k))
+        '()))
+  (free-kept! k)
+  (apply hash-set* r
+         'ops_per_call (if (eq? (condition-op c) 'mix) mix-ops 1)
+         'gc_real_ms (gc-overlap-ms events (hash-ref r 'window_start_ms) (hash-ref r 'window_end_ms))
+         backlog))
 
 (define (registration-records threads reps seconds #:emit emit)
   (define (emitted r) (emit r) r)
@@ -201,7 +224,7 @@
 (module+ test
   (require rackunit
            (only-in "op-cost-ops.rkt" crossings-per-call)
-           (only-in "summary-m1.rkt" registration-rows))
+           (only-in "summary-m1.rkt" m1-markdown registration-rows))
 
   (test-case "every mix layer crosses once per op, and only the registering layers leave tensors"
     (for ([l (in-list mix-layers)] #:unless (eq? l 'facade))
@@ -213,15 +236,54 @@
     (free-kept!))
 
   (test-case "the kept layer hands its handles off the calling thread in batches, the rest at the end"
-    (define call (mix-layer 'kept))
-    (define (held) (for/sum ([s (in-list (unbox kept-stores))]) (kept-store-count s)))
+    (define k (make-keeper #:batch (* 2 mix-ops)))
+    (define call (mix-layer 'kept #:keeper k))
+    (define (held) (for/sum ([s (in-list (unbox (keeper-stores k)))]) (kept-store-count s)))
+    (call)
+    (check-equal? (held) mix-ops)
+    (call)
+    (check-equal? (held) 0 "a full batch went to the freeing thread")
+    (call)
+    (free-kept! k)
+    (check-equal? (held) 0)
+    (check-equal? (unbox (keeper-pending k)) 0)
+    (check-equal? (unbox (keeper-freeing k)) '()))
+
+  (test-case "a store free-kept! emptied hands each handle to the freer once, the next batch too"
+    (define seen (make-hasheq))
+    (define (free h)
+      (hash-update! seen h add1 0)
+      (when (= (hash-ref seen h) 1)
+        (tr-tensor-free/unwrapped h)))
+    (define k (make-keeper #:batch (* 2 mix-ops) #:free free))
+    (define call (mix-layer 'kept #:keeper k))
+    (call)
+    (free-kept! k)
     (for ([_ (in-range 3)]) (call))
-    (check-equal? (held) (* 3 mix-ops))
-    (for ([_ (in-range kept-batch)]) (call))
-    (check-equal? (held) (* 3 mix-ops) "a full batch went to the freeing thread")
-    (free-kept!)
-    (check-equal? (unbox kept-stores) '())
-    (check-equal? (unbox freeing) '()))
+    (free-kept! k)
+    (check-equal? (hash-count seen) (* 4 mix-ops) "every kept handle reached the freer")
+    (check-equal? (filter (lambda (n) (> n 1)) (hash-values seen)) '() "and none twice"))
+
+  (test-case "a freer that falls behind records its backlog, and the summary flags the free piece"
+    (define batch (* 2 mix-ops))
+    (define (stalled-free h)
+      (let stall ()
+        (when (<= (unbox (keeper-peak k)) (* 3 batch))
+          (sleep 0.001)
+          (stall)))
+      (tr-tensor-free/unwrapped h))
+    (define k (make-keeper #:batch batch #:free stalled-free))
+    (define records
+      (for/list ([c (in-list (registration-conditions '(1) #:keeper k))]
+                 #:when (memq (condition-layer c) '(raw kept)))
+        (registration-record c 0.1 0 #:keeper k)))
+    (match-define (list kept-record) (filter (lambda (r) (equal? (hash-ref r 'layer) "kept")) records))
+    (define peak (hash-ref kept-record 'kept_pending_peak))
+    (check-true (> peak (* 3 batch)) (format "peak ~a" peak))
+    (check-equal? (hash-ref kept-record 'kept_batch) batch)
+    (define-values (_threads _layers _pieces _chain backlog) (registration-rows records))
+    (check-equal? backlog (list (cons peak #t)))
+    (check-regexp-match #rx"\\| free \\| [^|]* \\(backlog\\) \\|" (m1-markdown records)))
 
   (test-case "settings read counts and seconds, and refuse what is not one"
     (check-equal? (registration-settings (vector "--threads" "1,4" "--seconds" "0.5"))
@@ -237,7 +299,7 @@
       (check-true (positive? (hash-ref r 'ops)) (hash-ref r 'layer))
       (check-true (<= 0 (hash-ref r 'gc_real_ms) (hash-ref r 'elapsed_ms))
                   "only collections inside the timed window count"))
-    (define-values (_threads _layers pieces _chain) (registration-rows ops))
+    (define-values (_threads _layers pieces _chain _backlog) (registration-rows ops))
     (for ([p (in-list pieces)])
       (match-define (list name (list us free kb)) p)
       (check-true (andmap real? (list us free kb)) (format "~a has its two layers" name)))))

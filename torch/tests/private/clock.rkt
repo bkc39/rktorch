@@ -29,9 +29,12 @@
 (define (timespec->milliseconds ts)
   (+ (* 1000.0 (timespec-sec ts)) (/ (timespec-nsec ts) 1e6)))
 
+(define (thread-id-binding name)
+  (get-ffi-obj name #f (_fun -> _int) (lambda () (lambda () #f))))
+
 (define os-thread-id
   (match host-platform
-    ['linux (get-ffi-obj "gettid" #f (_fun -> _int))]
+    ['linux (thread-id-binding "gettid")]
     ['macosx
      (define threadid
        (get-ffi-obj "pthread_threadid_np" #f
@@ -46,6 +49,30 @@
     (check-equal? (map (lambda (os) (clock-id 'thread-cputime os)) '(linux macosx freebsd))
                   '(3 16 #f))
     (check-equal? (map (lambda (os) (clock-id 'monotonic os)) '(linux macosx)) '(1 6)))
+
+  (test-case "the thread clock stays still while another OS thread spins, where the OS has one"
+    (define id (clock-id 'thread-cputime))
+    (define (cpu-ms)
+      (define ts (make-timespec 0 0))
+      (clock-gettime id ts)
+      (timespec->milliseconds ts))
+    (when id
+      (define c₀ (cpu-ms))
+      (define spinner
+        (thread (lambda ()
+                  (define s₀ (cpu-ms))
+                  (let spin ()
+                    (when (< (- (cpu-ms) s₀) 50.0)
+                      (spin))))
+                #:pool 'own))
+      (thread-wait spinner)
+      (define moved (- (cpu-ms) c₀))
+      (check-true (< moved 5.0) (format "this thread's clock moved ~a ms" moved))))
+
+  (test-case "a libc without the thread-id symbol reads no id rather than failing to load"
+    (check-false ((thread-id-binding "rktorch_no_such_gettid")))
+    (when (eq? host-platform 'linux)
+      (check-true (exact-positive-integer? ((thread-id-binding "gettid"))))))
 
   (test-case "two live threads on their own OS threads read different ids, each the same twice"
     (define ready (make-semaphore 0))

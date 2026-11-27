@@ -803,15 +803,19 @@ racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
 - **Registration.** `scripts/bench/m1-registration.rkt` runs a four-op
   mix (narrow, add 8×8, scalar add, zeros 8×8) at 1, 2, 4 and 8 threads,
   as `scripts/bench/op-cost.rkt`'s ladder does, at the layers kept
-  (handles freed off the measured thread, by a freeing thread in
-  batches of 16384 and the rest after the window, so the native heap
-  stays bounded), raw (freed inline), guardian only,
+  (handles freed off the measured thread, by one freeing thread in
+  batches of 16384 per measured thread and the rest after the window;
+  its record has `kept_pending_peak`, the most handles waiting on that
+  thread), raw (freed inline), guardian only,
   `lifetimes` set only, registered (both), accounted and facade, and the
   CIFAR chain. Each piece is a difference of two layers that pay the
   same free on the measured thread (guardian and registered against
-  kept, `lifetimes` against raw, the inline free itself as raw against
-  kept), in µs per op with and without the real time of the collections
-  inside the timed window, and in KB per op.
+  kept, `lifetimes` against raw, the inline free as raw against kept),
+  in µs per op with and without the real time of the collections inside
+  the timed window, and in KB per op. The free piece is net of kept's
+  own cost of reusing memory late and from another OS thread; a cell is
+  marked `(backlog)` where the freeing thread fell more than a batch per
+  measured thread behind.
 
 Records go to `--out-dir` as `m1-<tree>-<racket>-<stamp>.jsonl`; the
 summary has the split, GC against live entries per trip, and the

@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list append* remove-duplicates)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match* match-define)
          (only-in racket/string string-join)
          (only-in "harness.rkt" list-median)
          (only-in "markdown.rkt" column-table num ref table whole)
@@ -201,24 +201,48 @@
               (for/list ([key (in-list '(us gc-free kb))])
                 (minus (at "mix" (symbol->string top) n key)
                        (at "mix" (symbol->string base) n key)))))))
+  (define (backlog n)
+    (define kept
+      (filter (lambda (r)
+                (and (equal? (ref r 'op) "mix") (equal? (ref r 'layer) "kept")
+                     (equal? (ref r 'threads) n) (real? (ref r 'kept_pending_peak))))
+              ops))
+    (match kept
+      ['() #f]
+      [_
+       (define peak (apply max (map (lambda (r) (ref r 'kept_pending_peak)) kept)))
+       (define limit (* (max 1 n) (apply min (map (lambda (r) (ref r 'kept_batch)) kept))))
+       (cons peak (> peak limit))]))
   (values threads layers pieces
-          (for/list ([n (in-list threads)]) (at "cifar-chain" "facade" n 'us))))
+          (for/list ([n (in-list threads)]) (at "cifar-chain" "facade" n 'us))
+          (map backlog threads)))
 
 (define (triple-text t)
   (match-define (list us free kb) t)
   (format "~a / ~a / ~a" (num us 2) (num free 2) (num kb 2)))
 
 (define (registration-markdown records)
-  (define-values (threads layers pieces chain) (registration-rows records))
+  (define-values (threads layers pieces chain backlog) (registration-rows records))
   (define by-threads (map (lambda (n) (format "~a threads" n)) threads))
   (define (rows xs)
     (for/list ([x (in-list xs)])
       (match-define (cons name triples) x)
-      (cons name (map triple-text triples))))
+      (cons name
+            (for/list ([t (in-list triples)] [b (in-list backlog)])
+              (match* (name b)
+                [("free" (cons _ #t)) (string-append (triple-text t) " (backlog)")]
+                [(_ _) (triple-text t)])))))
+  (define peaks
+    (cons "kept backlog peak, handles"
+          (map (lambda (b) (num (and b (car b)) 0)) backlog)))
   (string-append
    "### Registration and accounting per op, the loader's op mix\n\n"
-   (table (cons "µs/op, excl. GC / KB/op" by-threads) (rows layers)) "\n\n"
+   (table (cons "µs/op, excl. GC / KB/op" by-threads) (append (rows layers) (list peaks))) "\n\n"
    (table (cons "piece" by-threads) (rows pieces)) "\n\n"
+   (if (ormap (lambda (b) (and b (cdr b))) backlog)
+       (string-append "(backlog): kept's freeing thread fell more than a batch per thread behind, "
+                      "so free is biased low there.\n\n")
+       "")
    (table (cons "cifar chain, µs/sample" by-threads) (list (cons "facade" (map num chain))))
    "\n"))
 
