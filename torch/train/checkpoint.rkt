@@ -198,22 +198,24 @@
               ([f (in-list (entry tree "init_formals" formals? path))])
       (define room (- most (length positional)))
       (match f
-        [(list "keyword" (and text (regexp #rx"^#:(.*)$" (list _ name))) id)
-         (define kw (string->keyword name))
-         (if (or (not accepted) (memq kw accepted))
-             (values (cons (cons kw (value-of id)) keywords) positional dropped)
-             (values keywords positional (cons text dropped)))]
+        [(list "keyword" (regexp #rx"^#:(.*)$" (list _ (app string->keyword kw))) id)
+         #:when (or (not accepted) (memq kw accepted))
+         (values (cons (cons kw (value-of id)) keywords) positional dropped)]
         [(list "positional" id)
-         (if (positive? room)
-             (values keywords (append positional (list (value-of id))) dropped)
-             (values keywords positional (cons id dropped)))]
+         #:when (positive? room)
+         (values keywords (append positional (list (value-of id))) dropped)]
         [(list "rest" id)
-         (define vs (if (positive? room) (rest-values id) (hash-ref saved id #f)))
-         (cond
-           [(and (list? vs) (<= (length vs) room)) (values keywords (append positional vs) dropped)]
-           [(positive? room)
-            (values keywords (append positional (take vs room)) (cons id dropped))]
-           [else (values keywords positional (cons id dropped))])])))
+         #:when (positive? room)
+         (define vs (rest-values id))
+         (define fits? (<= (length vs) room))
+         (values keywords
+                 (append positional (if fits? vs (take vs room)))
+                 (if fits? dropped (cons id dropped)))]
+        [(list "rest" id)
+         #:when (null? (hash-ref saved id #f))
+         (values keywords positional dropped)]
+        [(list "keyword" text _) (values keywords positional (cons text dropped))]
+        [(list _ id) (values keywords positional (cons id dropped))])))
   (define given
     (for/list ([kw (in-list (or accepted required))]
                #:unless (assq kw keywords)
