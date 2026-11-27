@@ -232,10 +232,10 @@
   (test-case "a positional count the constructor's arity leaves out raises the named error"
     (with-temporary-directory (dir #:template "gap-~a")
       (define path (saved-from (Taller 1 2) dir))
-      (check-exn/contract #rx"load-from-checkpoint:.*wrap.*saved: 2.*old[.]ckpt"
-                          (lambda ()
-                            (load-from-checkpoint (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)])
-                                                  path)))))
+      (define one-or-three (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)]))
+      (check-exn/contract
+       #rx"load-from-checkpoint: .*not accept the number.*wrap.*saved: 2.*accepts: '[(]1 3[)].*old[.]ckpt"
+       (lambda () (load-from-checkpoint one-or-three path)))))
 
   (test-case "a renamed keyword: the old one is dropped, the new one comes from #:init-args"
     (with-temporary-directory (dir #:template "renamed-~a")
@@ -245,8 +245,9 @@
       (define-values (args warnings) (loaded Renamed path #:init-args (hasheq 'lr 0.2)))
       (check-equal? args '(1 0.2))
       (check-regexp-match #rx"#:rate" (car warnings))
-      (check-exn/contract #rx"load-from-checkpoint:.*positional.*wrap.*saved: 1.*old[.]ckpt"
-                          (lambda () (load-from-checkpoint Taller path)))))
+      (check-exn/contract
+       #rx"load-from-checkpoint: .*not accept the number of positional.*saved: 1.*accepts: 2.*old[.]ckpt"
+       (lambda () (load-from-checkpoint Taller path)))))
 
   (define (saved-with dir name edit)
     (define path (build-path dir name))

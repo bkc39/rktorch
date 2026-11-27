@@ -218,10 +218,11 @@
     (append (map value-of passed-ids) (if rest-given? (rest-values rest-id) '())))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
     (raise-arguments-error 'load-from-checkpoint
-                           (string-append "the constructor does not take as many positional"
-                                          " arguments as the checkpoint saved; wrap it in a"
-                                          " procedure that takes them")
+                           (string-append "the constructor does not accept the number of"
+                                          " positional arguments the checkpoint saved; wrap it"
+                                          " in a procedure that takes them")
                            "saved" (length positional)
+                           "accepts" (procedure-arity make-trainer)
                            "path" path))
   (define dropped
     (append (map (lambda (id) (string-append "positional " id)) extra-ids)
