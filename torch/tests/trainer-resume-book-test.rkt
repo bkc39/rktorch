@@ -48,13 +48,14 @@
     (define g (make-generator seed))
     (tensor-dataset (randn n 2 #:generator g) (randn n 1 #:generator g)))
 
+  (define logged-keys '(train-loss train-mean rare val-loss epoch-tag))
+
   (define (epoch-start-reader seen)
     (lambda-callback
      #:on-train-epoch-start
      (lambda (r)
        (set-box! seen (cons (list (run-epoch r)
-                                  (for/list ([key (in-list '(train-loss train-mean rare val-loss epoch-tag))])
-                                    (run-metric r key))
+                                  (for/list ([key (in-list logged-keys)]) (run-metric r key))
                                   (run-metrics r))
                             (unbox seen))))))
 
@@ -69,15 +70,17 @@
     (values (reverse (unbox seen)) (collecting-steps l)))
 
   (define (straight-and-split dir #:drop-book? [drop-book? #f] #:saver [saver epoch-end-saver])
-    (define-values (straight-reads straight-rows) (go (build-path dir "straight") 4 #f #:saver saver))
+    (define-values (straight-reads straight-rows)
+      (go (build-path dir "straight") 4 #f #:saver saver))
     (define split (build-path dir "split"))
     (define-values (first-reads first-rows) (go split 2 #f #:drop-book? drop-book? #:saver saver))
     (define-values (later warnings)
       (call-with-logged-warnings
        (lambda ()
          (parameterize ([current-error-port (open-output-nowhere)])
-           (call-with-values (lambda () (go split 4 (build-path split "epoch=1.ckpt") #:saver saver))
-                             list)))))
+           (call-with-values
+            (lambda () (go split 4 (build-path split "epoch=1.ckpt") #:saver saver))
+            list)))))
     (match-define (list later-reads later-rows) later)
     (values straight-reads (append first-reads later-reads)
             straight-rows (append first-rows later-rows)
@@ -101,7 +104,8 @@
   (test-case "a step value pending at the epoch-end save is published in the resumed run's row"
     (with-legs
      (lambda (dir)
-       (define-values (_straight _split straight-rows split-rows _warnings) (straight-and-split dir))
+       (define-values (_straight _split straight-rows split-rows _warnings)
+         (straight-and-split dir))
        (check-equal? (map car split-rows) (map car straight-rows) "the row steps")
        (check-equal? split-rows straight-rows))))
 
@@ -119,7 +123,7 @@
                        (values (string->symbol k) v))
                      "the run-metrics table is the saved callback_metrics"))))
 
-  (test-case "a plain saver's epoch-end file resumes with a warning and the trainer's epoch-end values stale"
+  (test-case "a plain saver's epoch-end file resumes with a warning, the trainer's epoch-end logs stale"
     (with-legs
      (lambda (dir)
        (define-values (straight split straight-rows split-rows warnings)
@@ -134,4 +138,23 @@
        (check-equal? (epoch-tags straight) '(#f 0.0 1.0 2.0))
        (check-equal? (epoch-tags split) '(#f 0.0 0.0 2.0)
                      "the resumed epoch reads the value the trainer logged an epoch earlier")
-       (check-equal? split-rows straight-rows)))))
+       (check-equal? split-rows straight-rows))))
+
+  (define odd-key (string->uninterned-symbol "odd"))
+
+  (define-trainer Odd (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y)
+      (define loss (mse-loss (net x) y))
+      (log! odd-key loss)
+      loss))
+
+  (test-case "a value logged under an uninterned symbol is saved under its name"
+    (with-temporary-directory (dir #:template "odd-~a")
+      (define path (build-path dir "odd.ckpt"))
+      (void (fit (Odd) (dataloader (data 4 1) #:batch-size 2) #:max-epochs 1 #:logger #f
+                 #:callbacks (list (lambda-callback
+                                    #:on-train-end (lambda (r) (save-checkpoint! r path))))))
+      (define train (~> path read-checkpoint (hash-ref "metric_book") (hash-ref "train")))
+      (check-true (for/or ([table (in-hash-values train)]) (hash-has-key? table "odd"))))))

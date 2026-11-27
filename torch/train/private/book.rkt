@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list remove-duplicates)
-         (only-in racket/match match match-define match-lambda)
+         (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   * + cat detach device dtype max min reshape tensor->list tensor? to
@@ -19,7 +19,8 @@
          read-epoch!
          read-groups
          read-steps!
-         restore-book-state!)
+         restore-book-state!
+         saved-book?)
 
 (struct logged (logger? both?))
 
@@ -174,49 +175,73 @@
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
 
-(define (frozen table [state-of values])
-  (for/hasheq ([(k v) (in-hash table)]) (values k (state-of v))))
+(struct field-shape (names accessors make))
 
-(define (pending-state p)
-  (hash "value" (pending-value p) "logger" (logged-logger? p) "both" (logged-both? p)))
+(define pending-shape
+  (field-shape '("logger" "both" "value") (list logged-logger? logged-both? pending-value) pending))
 
-(define (entry-state e)
-  (hash "value" (entry-value e) "weight" (entry-weight e) "reduce" (entry-reduce e)
-        "logger" (logged-logger? e) "both" (logged-both? e)))
+(define entry-shape
+  (field-shape '("logger" "both" "value" "weight" "reduce")
+               (list logged-logger? logged-both? entry-value entry-weight entry-reduce)
+               entry))
+
+(define ledger-fields
+  (list (list "steps" ledger-steps pending-shape)
+        (list "epoch" ledger-epoch entry-shape)
+        (list "stepped" ledger-stepped #f)
+        (list "latest" ledger-latest #f)
+        (list "closed" ledger-closed #f)))
+
+(define (shape-state shape v)
+  (match shape
+    [#f v]
+    [(field-shape names accessors _)
+     (for/hash ([name (in-list names)] [get (in-list accessors)]) (values name (get v)))]))
+
+(define (state-shape shape saved)
+  (match shape
+    [#f saved]
+    [(field-shape names _ make)
+     (apply make (for/list ([name (in-list names)]) (hash-ref saved name)))]))
+
+(define (shape-state? shape saved)
+  (match shape
+    [#f #t]
+    [(field-shape names _ _)
+     (and (hash? saved) (andmap (lambda (name) (hash-has-key? saved name)) names))]))
 
 (define (ledger-state l)
-  (hash "steps" (frozen (ledger-steps l) pending-state)
-        "epoch" (frozen (ledger-epoch l) entry-state)
-        "stepped" (~> l ledger-stepped hash-keys (sort symbol<?))
-        "latest" (frozen (ledger-latest l))
-        "closed" (frozen (ledger-closed l))))
+  (for/hash ([field (in-list ledger-fields)])
+    (match-define (list name table-of shape) field)
+    (values name (for/hash ([(k v) (in-hash (table-of l))])
+                   (values (symbol->string k) (shape-state shape v))))))
 
 (define (book-state b)
   (hash "train" (ledger-state (book-train b)) "eval" (ledger-state (book-eval b))))
 
-(define (refill! table saved [make values])
+(define (saved-ledger? saved)
+  (for/and ([field (in-list ledger-fields)])
+    (match-define (list name _ shape) field)
+    (match (and (hash? saved) (hash-ref saved name #f))
+      [(? hash? table) (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))]
+      [_ #f])))
+
+(define (saved-book? saved)
+  (and (hash? saved) (saved-ledger? (hash-ref saved "train" #f))
+       (saved-ledger? (hash-ref saved "eval" #f))))
+
+(define (refill! table saved [load values])
   (hash-clear! table)
   (for ([(k v) (in-hash saved)])
-    (hash-set! table k (make v))))
+    (hash-set! table (string->symbol k) (load v))))
 
 (define (restore-ledger! l saved)
-  (match-define (hash-table ("steps" steps) ("epoch" epoch) ("stepped" stepped)
-                            ("latest" latest) ("closed" closed))
-    saved)
-  (refill! (ledger-steps l) steps
-           (match-lambda
-             [(hash-table ("value" v) ("logger" logger?) ("both" both?)) (pending logger? both? v)]))
-  (refill! (ledger-epoch l) epoch
-           (match-lambda
-             [(hash-table ("value" v) ("weight" w) ("reduce" reduce) ("logger" logger?)
-                          ("both" both?))
-              (entry logger? both? v w reduce)]))
-  (refill! (ledger-stepped l) (for/hasheq ([k (in-list stepped)]) (values k #t)))
-  (refill! (ledger-latest l) latest)
-  (refill! (ledger-closed l) closed))
+  (for ([field (in-list ledger-fields)])
+    (match-define (list name table-of shape) field)
+    (refill! (table-of l) (hash-ref saved name) (lambda (v) (state-shape shape v)))))
 
 (define (restore-book-state! b metrics saved #:close-train-epoch? close?)
-  (refill! (book-host b) (for/hasheq ([(k v) (in-hash metrics)]) (values (string->symbol k) v)))
+  (refill! (book-host b) metrics)
   (when saved
     (restore-ledger! (book-train b) (hash-ref saved "train"))
     (restore-ledger! (book-eval b) (hash-ref saved "eval")))
