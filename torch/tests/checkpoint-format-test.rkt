@@ -5,7 +5,7 @@
            (only-in json jsexpr->string)
            (only-in racket/file file->bytes)
            (only-in racket/list filter-map make-list)
-           (only-in racket/match match match-define match-lambda)
+           (only-in racket/match match-lambda)
            (only-in racket/runtime-path define-runtime-path)
            (only-in racket/string string-prefix?)
            rackunit
@@ -162,36 +162,38 @@
             (save-checkpoint! r over))
           (check-equal? (header-bytes over) size))))))
 
+  (struct estimate-case (label value header-limit text-length))
+
   (test-case "a shared string or a bignum is counted at its length before any text is built"
     (with-temporary-directory (dir #:template "estimate-~a")
       (define path (build-path dir "big.ckpt"))
       (define value (box #f))
-      (define cases
-        (list (list "the save itself" "a" 1 0)
-              (list "a shared string" (make-list 1000 (make-string 10000 #\a)) 100000 10000000)
-              (list "a bignum" (expt 10 1000000) 100000 1000001)))
+      (define plain (estimate-case "the save itself" "a" 1 0))
+      (define big
+        (list (estimate-case "a shared string" (make-list 1000 (make-string 10000 #\a))
+                             100000 10000000)
+              (estimate-case "a bignum" (expt 10 1000000) 100000 1000001)))
       (define allocated (make-hash))
       (void
        (call-with-live-run
         #:callbacks (list (stored value))
         (lambda (r)
-          (for ([c (in-list cases)])
-            (match-define (list label big limit _) c)
-            (set-box! value big)
+          (for ([c (in-list (cons plain big))])
+            (set-box! value (estimate-case-value c))
             (collect-garbage)
             (define before (current-memory-use 'cumulative))
+            (define limit (estimate-case-header-limit c))
             (check-exn/contract #rx"100 MB header limit"
                                 (lambda ()
                                   (parameterize ([current-header-limit limit])
                                     (save-checkpoint! r path)))
-                                label)
-            (hash-set! allocated label (- (current-memory-use 'cumulative) before))))))
-      (define save-cost (hash-ref allocated "the save itself"))
-      (check-equal? (for/list ([c (in-list (cdr cases))]
-                               #:unless (match c
-                                          [(list label _ _ text-length)
-                                           (< (- (hash-ref allocated label) save-cost) text-length)]))
-                      (car c))
+                                (estimate-case-label c))
+            (hash-set! allocated c (- (current-memory-use 'cumulative) before))))))
+      (define save-cost (hash-ref allocated plain))
+      (check-equal? (for/list ([c (in-list big)]
+                               #:unless (< (- (hash-ref allocated c) save-cost)
+                                           (estimate-case-text-length c)))
+                      (estimate-case-label c))
                     '()
                     "refused without writing the text out")
       (check-equal? (directory-list dir) '())))
