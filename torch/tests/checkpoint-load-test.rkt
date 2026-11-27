@@ -6,11 +6,13 @@
            (only-in "../nn.rkt" Linear Sequential mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
+           (only-in "../train/private/state.rkt" run-outcome)
            (only-in "private/checkpoint-kit.rkt" check-exn/contract)
            (only-in "private/comparable.rkt" host-bytes layer-bytes)
            (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
   (define observed (box #f))
+  (define loading-run (box #f))
 
   (define-trainer Shaped (net scale enc)
     (define-init (hidden #:scale [s 1.0] #:encoder [encoder (Linear 2 2)])
@@ -22,6 +24,7 @@
     (define-forward (x) (* (net (enc x)) scale))
     (define-training-step (x y) (mse-loss (net (enc x)) y))
     (define-hook (on-load-checkpoint _ckpt)
+      (set-box! loading-run run)
       (set-box! observed (list (run-stage run) (run-epoch run) (run-global-step run)
                                (run-optimizers run)))))
 
@@ -60,7 +63,8 @@
       (define tree (read-checkpoint path))
       (check-equal? (unbox observed)
                     (list #f (hash-ref tree "epoch") (hash-ref tree "global_step") '())
-                    "on-load-checkpoint sees a run that has not started")))
+                    "on-load-checkpoint sees a run that has not started")
+      (check-eq? (run-outcome (unbox loading-run)) 'loaded)))
 
   (test-case "T3-L22: keyword and positional init args are reapplied, init-args replace them"
     (with-temporary-directory (dir #:template "init-~a")

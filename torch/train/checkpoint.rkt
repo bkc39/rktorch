@@ -39,7 +39,7 @@
   (match (run-outcome r)
     [#f (run-hook r)]
     ['success 'on-fit-end]
-    ['failure #f]))
+    [(or 'failure 'loaded) #f]))
 
 (define (phase r)
   (match (and (eq? (run-entry r) 'fit) (not (eq? (run-current-stage r) 'sanity-check))
