@@ -227,6 +227,18 @@
       (define path (saved-with dir (list (reshaping "weightless" (edit-at keys v)))))
       (check-pred run? (resume (Small) path))))
 
+  (test-case "a saved current-generator state with no current-generator to go to warns"
+    (with-temporary-directory (dir #:template "cleared-~a")
+      (define path
+        (parameterize ([current-generator (make-generator 13)])
+          (saved-with dir '())))
+      (define clearing (lambda-callback #:on-fit-start (lambda (_r) (current-generator #f))))
+      (define-values (_run warnings)
+        (parameterize ([current-generator (make-generator 13)])
+          (call-with-logged-warnings
+           (lambda () (resume (Small) path #:callbacks (list clearing))))))
+      (check-match warnings (list (regexp #rx"current-generator.*not restored")))))
+
   (test-case "a malformed current-generator state is refused before any hook, the generator kept"
     (call-with-process-deadline
      60

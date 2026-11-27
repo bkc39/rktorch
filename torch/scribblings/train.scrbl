@@ -233,8 +233,8 @@ the callback states are restored, as in Lightning.
        values, logging book, RNG states, grad-scaler state or optimizer and
        scheduler states are missing or malformed; one that resumes at an epoch
        above @racket[#:max-epochs]; one saved under a
-       @racket[current-generator] when the fit has none, or has one on another
-       device.}
+       @racket[current-generator] when the one in effect as @racket[fit] is
+       called is @racket[#f] or on another device.}
  @item{Refused as it is restored: a trainer that does not hold the
        checkpoint's parameters and buffers, strictly, which leaves its
        parameters and hyperparameters unchanged; a trainer that configures a
@@ -245,8 +245,10 @@ the callback states are restored, as in Lightning.
        restored, since before any hook only its dtype and shape are checked.
        Every refusal names the file and keeps the error's kind.}
  @item{Skipped with a warning on the @racket['rktorch-train] topic and stderr:
-       a saved hyperparameter the trainer does not define, and a callback
-       state no callback claims. A save that is not @racket[#:weights-only?],
+       a saved hyperparameter the trainer does not define, a callback
+       state no callback claims, and a saved @racket[current-generator] state
+       when a hook has set the parameter to @racket[#f] by the time it is
+       restored. A save that is not @racket[#:weights-only?],
        from a @racket[#:kind checkpoint] or @racket[#:kind monitor] callback
        in @tt{on-train-epoch-end}, warns in the saving run when that callback
        or a later one logs after it in the same hook.}

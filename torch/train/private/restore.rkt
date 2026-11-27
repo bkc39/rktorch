@@ -4,8 +4,9 @@
          (only-in threading ~>)
          (only-in "../../foreign.rkt" cpu-device device-index device-type)
          (only-in "../../foreign/generator.rkt"
-                  current-generator generator-device generator-state rng-state
-                  set-generator-state! set-rng-state!))
+                  current-generator generator? generator-device generator-state rng-state
+                  set-generator-state! set-rng-state!)
+         (only-in "dispatch.rkt" warn-train!))
 
 (provide check-current-generator!
          restore-rng-bundle!
@@ -46,8 +47,12 @@
 
 (define (restore-current-generator! saved)
   (match* (saved (current-generator))
-    [((hash-table ("state" state)) (? values g)) (set-generator-state! g state)]
-    [(_ _) (void)]))
+    [(#f _) (void)]
+    [((hash-table ("state" state)) (? generator? g)) (set-generator-state! g state)]
+    [(_ #f)
+     (warn-train! (string-append "fit: the checkpoint's current-generator state is not restored:"
+                                 " a hook left this fit without a current-generator, so the"
+                                 " resume is not exact"))]))
 
 (define (restore-rng-bundle! bundle [device (cpu-device)])
   (define type (device-type device))
