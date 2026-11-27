@@ -37,15 +37,16 @@
      (refuse "the checkpoint was saved under a current-generator, and this fit has none"
              "saved generator's device" form)]
     [((hash-table ("device" form) ("state" state)) g)
-     (unless (equal? (device-form (generator-device g)) form)
+     (define here (~> g generator-device device-form))
+     (unless (equal? here form)
        (refuse "the checkpoint's current-generator is on another device"
                "saved generator's device" form
-               "current-generator's device" (device-form (generator-device g))))
+               "current-generator's device" here))
      (set-generator-state! g state)]))
 
 (define (restore-rng-bundle! bundle [device (cpu-device)] #:path [path #f])
   (define racket-state
-    (~> (hash-ref bundle "racket") list->vector vector->pseudo-random-generator
+    (~> bundle (hash-ref "racket") list->vector vector->pseudo-random-generator
         pseudo-random-generator->vector))
   (restore-current-generator! (hash-ref bundle "current_generator" #f) path)
   (set-rng-state! (hash-ref bundle "cpu"))
