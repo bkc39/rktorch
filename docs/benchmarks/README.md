@@ -750,3 +750,50 @@ version.
 A 9.1 run needs a checkout whose `compiled/` and `PLTUSERHOME` are 9.1's:
 a separate worktree with Racket 9.1 first on `PATH` and its packages
 installed as `nix/matrix/racket-cell.sh install` does.
+
+## M1: where the multi-worker loss goes (#555)
+
+`scripts/bench/m1.rkt` attributes the loss a loader takes at w workers
+against an ideal w0 ÷ w. It reuses M0's blocks, arms, outside-load rule
+and `cell-args`, with one rktorch arm per block that times itself
+(`scripts/bench/m1-cell.rkt`) and PyTorch's `DataLoader` beside it at a
+default trip (`py` at w0, `py persistent` at w > 0):
+
+```bash
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export RKTORCH_CIFAR10_PNG_DIR=~/.racket/rktorch/cifar10-png
+nix develop -c taskset -c 0-8 racket scripts/bench/m1.rkt --tree master --rounds 5
+nix develop -c taskset -c 0-8 racket scripts/bench/m1.rkt --rounds 2 --trips 32,64,128
+nix develop -c taskset -c 0-8 racket scripts/bench/m1-registration.rkt > registration.jsonl
+racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
+```
+
+- **Cells.** `cifar-png` and `jpeg` (M0's) at `--workers` (0, 4, 7) and
+  `--trips` (`-`, Racket's own collect trip, or MB). A trip cell has no
+  PyTorch arm.
+- **Spans.** The rktorch arm wraps the dataset and the collate, and
+  steps the traversal itself, so every batch build, collate, `next` and
+  step is a span with its OS thread, wall clock and that thread's CPU
+  clock (`CLOCK_THREAD_CPUTIME_ID`). Each collection comes from the `GC`
+  log topic with its mode, real interval, CPU and the ledger's live
+  entries when the listener saw it; a span's GC time is the collections'
+  overlap with it, since a collection stops every thread.
+- **The split.** Per sample, worker-summed and ÷ w: the build's CPU, GC
+  and other off-CPU time against w0's, the workers' idle time before
+  their first build, between builds, after their last and for workers
+  that built nothing, less main's serial w0 work. The terms sum to the
+  loss by construction; what they leave open is the CPU growth and the
+  off-CPU time, which the registration probe prices.
+- **Counts.** One more traversal at w0 counts registered tensors,
+  ledger charges and native crossings per sample, through the race and
+  crossing hooks; it is not timed.
+- **Registration.** `scripts/bench/m1-registration.rkt` runs a four-op
+  mix (narrow, add 8×8, scalar add, zeros 8×8) at 1, 2, 4 and 8 threads,
+  as `scripts/bench/op-cost.rkt`'s ladder does, at the layers raw, guardian only,
+  `lifetimes` set only, registered (both), accounted and facade, and the
+  CIFAR chain. Each piece is a difference of two layers, in µs per op
+  with and without its collections' real time, and in KB per op.
+
+Records go to `--out-dir` as `m1-<tree>-<racket>-<stamp>.jsonl`; the
+summary has the split, GC against live entries per trip, and the
+registration pieces.

@@ -52,6 +52,18 @@
       (strided ds (quotient n samples) samples)
       ds))
 
+(define/contract-out (cifar-folder-dataset root pipeline #:samples [samples #f])
+  (->* (path-string? (or/c "per-sample" "batched")) (#:samples (or/c #f exact-positive-integer?))
+       (values dataset? procedure?))
+  (define train (build-path root "train"))
+  (define-values (images collate)
+    (match pipeline
+      ["per-sample" (values (image-folder train #:transform per-sample #:device (cpu-device))
+                            default-collate)]
+      ["batched" (values (image-folder train #:transform convert-image-dtype #:device (cpu-device))
+                         augmented-batch)]))
+  (values (spread-subset images samples) collate))
+
 (define/contract-out (cifar-folder-loader root pipeline generator
                                          #:batch batch #:workers workers
                                          #:drop-last? [drop-last? #f]
@@ -60,14 +72,8 @@
                      #:batch exact-positive-integer? #:workers exact-nonnegative-integer?)
        (#:drop-last? boolean? #:samples (or/c #f exact-positive-integer?))
        any/c)
-  (define train (build-path root "train"))
-  (define-values (images collate)
-    (match pipeline
-      ["per-sample" (values (image-folder train #:transform per-sample #:device (cpu-device))
-                            default-collate)]
-      ["batched" (values (image-folder train #:transform convert-image-dtype #:device (cpu-device))
-                         augmented-batch)]))
-  (dataloader (spread-subset images samples) #:batch-size batch #:shuffle? #t #:drop-last? drop-last? #:collate collate
+  (define-values (images collate) (cifar-folder-dataset root pipeline #:samples samples))
+  (dataloader images #:batch-size batch #:shuffle? #t #:drop-last? drop-last? #:collate collate
               #:generator generator #:workers workers))
 
 (define-logger rktorch-step)
