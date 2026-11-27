@@ -187,7 +187,7 @@
 (define (ledger-state l)
   (hash "steps" (frozen (ledger-steps l) pending-state)
         "epoch" (frozen (ledger-epoch l) entry-state)
-        "stepped" (sort (hash-keys (ledger-stepped l)) symbol<?)
+        "stepped" (~> l ledger-stepped hash-keys (sort symbol<?))
         "latest" (frozen (ledger-latest l))
         "closed" (frozen (ledger-closed l))))
 

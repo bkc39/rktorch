@@ -85,10 +85,9 @@
     (lambda-callback #:state-key (format "reshape-~a" key)
                      #:on-save-checkpoint (lambda (_r tree) (edit tree))))
 
-  (define (fit-loop-set field v)
-    (lambda (tree)
-      (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
-      (hash-set! tree "loops" (hash "fit_loop" (hash-set loop field v)))))
+  (define ((fit-loop-set field v) tree)
+    (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
+    (hash-set! tree "loops" (hash "fit_loop" (hash-set loop field v))))
 
   (define-trainer Tested (net lr)
     (define-init () (set! net (Linear 2 1)) (set! lr 0.1))
