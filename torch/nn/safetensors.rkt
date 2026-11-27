@@ -28,9 +28,8 @@
     [#f #f]))
 
 (define (tag-width tag)
-  (match (tag-entry tag)
-    [(list _ _ width) width]
-    [#f (raise-arguments-error 'tag-width "not a safetensors dtype tag" "tag" tag)]))
+  (match-define (list _ _ width) (tag-entry tag))
+  width)
 
 (define (encode who name t)
   (match (assq (dtype t) tags)

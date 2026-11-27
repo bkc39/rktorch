@@ -49,10 +49,10 @@
   (define (build make kws mode net)
     (apply-keywords make (append kws (mode-keywords mode)) (parameters net)))
 
-  (define (steps! opt net n)
+  (define (steps! opt net n #:device [dev 'cpu])
     (for ([_ (in-range n)])
       (zero-grads! opt)
-      (~> (net x) (mse-loss y) backward!)
+      (~> (to x dev) net (mse-loss (to y dev)) backward!)
       (step! opt)))
 
   (test-case "T3-L10: 3 steps, dict, load into a fresh optimizer, 2 more steps on both"
@@ -193,22 +193,19 @@
     (define net (fresh-net))
     (define opt (adam (parameters net) #:lr 0.01))
     (steps! opt net 1)
-    (check-equal? (remove-duplicates (slot-devices (optimizer-state-dict opt net))) (list (cpu-device)))
+    (check-equal? (remove-duplicates (slot-devices (optimizer-state-dict opt net)))
+                  (list (cpu-device)))
     (when (cuda-available?)
       (define on-gpu (to (fresh-net) 'cuda))
       (define gpu-opt (adam (parameters on-gpu) #:lr 0.01))
-      (define (gpu-steps! o n)
-        (zero-grads! o)
-        (~> (to x 'cuda) n (mse-loss (to y 'cuda)) backward!)
-        (step! o))
-      (gpu-steps! gpu-opt on-gpu)
+      (steps! gpu-opt on-gpu 1 #:device 'cuda)
       (define saved (optimizer-state-dict gpu-opt on-gpu))
       (check-equal? (remove-duplicates (slot-devices saved)) (list (cpu-device)))
       (define twin (layer-copy on-gpu))
       (define twin-opt (adam (parameters twin) #:lr 0.01))
       (load-optimizer-state! twin-opt twin saved)
-      (gpu-steps! gpu-opt on-gpu)
-      (gpu-steps! twin-opt twin)
+      (steps! gpu-opt on-gpu 1 #:device 'cuda)
+      (steps! twin-opt twin 1 #:device 'cuda)
       (check-equal? (layer-bytes twin) (layer-bytes on-gpu))))
 
   (define (adam-after-steps net)
@@ -264,7 +261,8 @@
     (check-refused "an injected failure" opt net
                    (~> saved
                        (update-group (lambda (grp) (hash-set grp "lr" 0.5)))
-                       (hash-update "state" (lambda (st) (hash-update st "weight" fails-without-grad))))
+                       (hash-update "state"
+                                    (lambda (st) (hash-update st "weight" fails-without-grad))))
                    #rx"injected failure"))
 
   (test-case "T3-L10: a floating slot takes its parameter's dtype, as torch's load does"
@@ -297,7 +295,8 @@
     (check-refused "a slot the optimizer does not keep" opt net
                    (hash-update saved "state"
                                 (lambda (st)
-                                  (hash-update st "weight" (lambda (sl) (hash-remove sl "exp_avg")))))
+                                  (hash-update st "weight"
+                                               (lambda (sl) (hash-remove sl "exp_avg")))))
                    #rx"weight")
     (check-refused "a state for a parameter outside the optimizer" opt net
                    (hash-update saved "state" (lambda (st) (hash-set st "ghost" (hash))))
@@ -322,24 +321,30 @@
     (steps! twin-opt twin 1)
     (check-equal? (layer-bytes twin) (layer-bytes net) (format "~a: parameters" label)))
 
-  (define ((builder make kws mode) net)
+  (define ((recipe make kws mode) net)
     (build make kws mode net))
 
-  (test-case "T3-L10: a group state the optimizer reached itself loads, as torch's does"
+  (test-case "T3-L10: nesterov with its momentum set to 0 loads, as torch's does"
     (for ([mode (in-list '(loop foreach fused))])
-      (define nesterov (builder sgd '((#:lr . 0.1) (#:momentum . 0.9) (#:nesterov? . #t)) mode))
+      (define nesterov (recipe sgd '((#:lr . 0.1) (#:momentum . 0.9) (#:nesterov? . #t)) mode))
       (define net (fresh-net))
       (define opt (nesterov net))
       (steps! opt net 2)
       (param-group-set! opt 0 'momentum 0.0)
       (steps! opt net 1)
-      (check-reloads (format "nesterov, momentum set to 0, ~a" mode) opt net nesterov)
-      (define plain (builder sgd '((#:lr . 0.1)) mode))
+      (check-reloads (format "nesterov, momentum set to 0, ~a" mode) opt net nesterov)))
+
+  (test-case "T3-L10: nesterov turned on without momentum loads, as torch's does"
+    (for ([mode (in-list '(loop foreach fused))])
+      (define plain (recipe sgd '((#:lr . 0.1)) mode))
+      (define net (fresh-net))
       (define turned-on (plain net))
       (param-group-set! turned-on 0 'nesterov? #t)
       (steps! turned-on net 1)
-      (check-reloads (format "nesterov turned on without momentum, ~a" mode) turned-on net plain))
-    (define plain (builder sgd '((#:lr . 0.1)) 'foreach))
+      (check-reloads (format "nesterov turned on without momentum, ~a" mode) turned-on net plain)))
+
+  (test-case "T3-L10: a negative rate a scheduler reached loads, as torch's does"
+    (define plain (recipe sgd '((#:lr . 0.1)) 'foreach))
     (define net (fresh-net))
     (define cosine (plain net))
     (define annealing (cosine-annealing-lr cosine #:t-max 4 #:eta-min -0.2))
@@ -362,9 +367,11 @@
                 ((lr 0.0 0.01) (alpha 0.0 0.5 0.99) (eps 0.0 1e-8) (momentum 0.0 0.9)
                                (weight-decay 0.0 0.01)))))
 
-  (test-case "T3-L10: any state reached through param-group-set! and steps loads into its own optimizer"
-    (define rng (make-pseudo-random-generator))
-    (parameterize ([current-pseudo-random-generator rng])
+  (define (pick xs)
+    (list-ref xs (random (length xs))))
+
+  (test-case "T3-L10: any state param-group-set! and steps reach loads"
+    (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
       (random-seed 386)
       (for* ([c (in-list settable)]
              #:do [(match-define (list make kws modes keys) c)]
@@ -374,13 +381,13 @@
         (define opt (build make kws mode net))
         (define writes
           (for/list ([_ (in-range 6)])
-            (match-define (cons key vs) (list-ref keys (random (length keys))))
-            (define v (list-ref vs (random (length vs))))
+            (match-define (cons key vs) (pick keys))
+            (define v (pick vs))
             (param-group-set! opt 0 key v)
             (steps! opt net (random 2))
             (cons key v)))
         (check-reloads (format "~a ~a after ~s" (object-name make) mode writes) opt net
-                       (builder make kws mode)))))
+                       (recipe make kws mode)))))
 
   (test-case "T3-L10: torch's per-parameter rmsprop step loads and is ignored"
     (for ([mode (in-list '(loop foreach))])

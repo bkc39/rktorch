@@ -80,7 +80,8 @@
     (define chained (scheduler-state-dict (fresh chain-of)))
     (check-refused "an inner state that does not fit" chain-of
                    (hash-update chained "_schedulers"
-                                (match-lambda [(list first _) (list first (hash-set plain "base_lrs" '()))]))
+                                (match-lambda
+                                  [(list first _) (list first (hash-set plain "base_lrs" '()))]))
                    #rx"_schedulers\\[1\\].*base_lrs"))
 
   (test-case "T3-L12: an exact one-cycle base survives a state round trip exact"
@@ -108,6 +109,7 @@
     (void (rates s 2))
     (define state (scheduler-state-dict s))
     (for ([t-cur (in-list '(1.5 2.0 -1))])
-      (check-exn blames-this-test? (lambda () (load-scheduler-state! s (hash-set state "T_cur" t-cur)))
+      (check-exn blames-this-test?
+                 (lambda () (load-scheduler-state! s (hash-set state "T_cur" t-cur)))
                  (format "T_cur ~a" t-cur))
       (check-equal? (scheduler-state-dict s) state (format "T_cur ~a: unchanged" t-cur)))))

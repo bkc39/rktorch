@@ -104,10 +104,12 @@
       (make-file-or-directory-link (build-path "real" "new.safetensors") link)
       (save-state! (fixture-model) link)
       (check-true (link-exists? link) "the link is still a link")
-      (check-equal? (file->bytes (build-path dir "real" "new.safetensors")) (file->bytes master-file))
+      (check-equal? (file->bytes (build-path dir "real" "new.safetensors"))
+                    (file->bytes master-file))
       (parameterize ([current-directory dir])
         (save-state! (fixture-model) "relative.safetensors"))
-      (check-equal? (file->bytes (build-path dir "relative.safetensors")) (file->bytes master-file))))
+      (check-equal? (file->bytes (build-path dir "relative.safetensors"))
+                    (file->bytes master-file))))
 
   (test-case "a missing directory or a link loop raises a filesystem error, as master did"
     (with-temporary-directory (dir #:template "save-state-~a")
@@ -115,7 +117,8 @@
                  (lambda () (save-state! (fixture-model) (build-path dir "nope" "m.safetensors"))))
       (make-file-or-directory-link "loop2" (build-path dir "loop1"))
       (make-file-or-directory-link "loop1" (build-path dir "loop2"))
-      (check-exn (lambda (e) (and (exn:fail:filesystem? e) (regexp-match? #rx"loop1" (exn-message e))))
+      (check-exn (lambda (e)
+                   (and (exn:fail:filesystem? e) (regexp-match? #rx"loop1" (exn-message e))))
                  (lambda () (save-state! (fixture-model) (build-path dir "loop1"))))
       (check-equal? (directory-names dir) '("loop1" "loop2"))))
 
