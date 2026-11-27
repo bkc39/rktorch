@@ -12,10 +12,15 @@
          (only-in "../run.rkt" state-key/c)
          (only-in "types.rkt"
                   callback? make-scheduler-config scheduler-config-scheduler
-                  scheduler-config?))
+                  scheduler-config?)
+         (only-in "value.rkt" checkpoint-value?))
 
-(provide checked-hparam
+(provide captured-arguments
+         checked-hparam
          checked-hparams!
+         formal-name
+         init-capture-kept
+         init-capture-shapes
          readable-arguments)
 
 (define (optimizer-only? v)
@@ -85,8 +90,22 @@
   (or (real? v) (string? v) (symbol? v) (boolean? v)
       (and (list? v) (andmap readable? v))))
 
-(define (readable-arguments names vals)
-  (for/hasheq ([name (in-list names)] [v (in-list vals)] #:when (readable? v))
+(struct init-capture (shapes kept))
+
+(define (formal-name shape)
+  (match shape
+    [(list _ name) name]
+    [(list 'keyword _ name) name]))
+
+(define (captured-arguments shapes vals)
+  (init-capture shapes
+                (for/hasheq ([shape (in-list shapes)]
+                             [v (in-list vals)]
+                             #:when (checkpoint-value? v))
+                  (values (formal-name shape) v))))
+
+(define (readable-arguments captured)
+  (for/hasheq ([(name v) (in-hash (init-capture-kept captured))] #:when (readable? v))
     (values name v)))
 
 (define/contract-out (checked-state-key key)

@@ -2,13 +2,6 @@
 
 #|review: ignore|#
 
-(define c2-legs
-  '("checkpoint-codec-test.rkt"
-    "checkpoint-format-parity-test.rkt"
-    "checkpoint-format-test.rkt"
-    "checkpoint-load-test.rkt"
-    "trainer-hook-order-save-test.rkt"))
-
 (define c3-legs
   '("rng-bundle-test.rkt"
     "trainer-checkpoint-protocol-test.rkt"
@@ -30,4 +23,4 @@
   '("trainer-resume-cuda-test.rkt"
     "trainer-resume-generator-test.rkt"))
 
-(define test-omit-paths (append c2-legs c3-legs c4-legs c5-legs c6-legs))
+(define test-omit-paths (append c3-legs c4-legs c5-legs c6-legs))

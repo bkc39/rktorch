@@ -26,6 +26,7 @@
              [stepping-batches #:auto]
              [current-stage #:auto]
              [batch-index #:auto]
+             [train-batch-index #:auto]
              [hook #:auto]
              [stepped? #:auto]
              [step-pending? #:auto]
@@ -34,7 +35,8 @@
              [stop? #:auto]
              [set-up? #:auto]
              [torn-down? #:auto]
-             [finished? #:auto])
+             [finished? #:auto]
+             [outcome #:auto])
   #:auto-value #f
   #:mutable
   #:name run-struct

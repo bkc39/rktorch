@@ -71,10 +71,8 @@
     (check-exn exn:fail:unsupported?
                (lambda () (model-checkpoint #:dirpath "ck" #:monitor 'val-loss #:save-top-k 3))))
 
-  (test-case "the checkpoint functions raise exn:fail:unsupported until T3"
-    (for ([call (list (lambda () (read-checkpoint "a.ckpt"))
-                      (lambda () (load-from-checkpoint Tiny "a.ckpt"))
-                      (lambda () (on-exception-checkpoint #:dirpath "ck")))])
+  (test-case "the checkpoint callbacks raise exn:fail:unsupported until T3"
+    (for ([call (list (lambda () (on-exception-checkpoint #:dirpath "ck")))])
       (check-exn (lambda (e) (and (exn:fail:unsupported? e)
                                   (regexp-match? #rx"not implemented until T3 \\(#386\\)"
                                                  (exn-message e))))

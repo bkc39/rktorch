@@ -14,13 +14,14 @@
          (only-in "state.rkt"
                   run-book run-callbacks run-epoch run-hook run-loggers
                   run-set-up? run-torn-down? run-trainer set-run-batch-size!
-                  set-run-callbacks! set-run-finished?! set-run-hook! set-run-set-up?!
-                  set-run-torn-down?!)
+                  set-run-callbacks! set-run-finished?! set-run-hook! set-run-outcome!
+                  set-run-set-up?! set-run-torn-down?!)
          (only-in "types.rkt"
                   callback-hook callback-kind callback-state-key callback-type
                   trainer-hook))
 
-(provide call-callbacks
+(provide call-callback
+         call-callbacks
          call-hooks
          call-trainer
          call-trainer/values
@@ -154,6 +155,7 @@
 
 (define (finish! r status)
   (set-run-finished?! r #t)
+  (set-run-outcome! r status)
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
 
@@ -181,6 +183,7 @@
     (when (and (run-set-up? r) (not (run-torn-down? r)))
       (logged-attempt 'teardown (lambda () (tear-down! r stage))))
     (set-run-finished?! r #t)
+    (set-run-outcome! r 'failure)
     (when absorb-break?
       (with-handlers ([exn:break? void])
         (parameterize-break #t (sleep 0))))))

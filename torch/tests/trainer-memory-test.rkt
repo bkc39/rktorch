@@ -7,8 +7,9 @@
            (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign.rkt" cpu-device detach native-memory-use requires-grad?)
-           (only-in "../main.rkt" ones sum zeros)
+           (only-in "../main.rkt" ones sum tensor-shape tensor? zeros)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
+           (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/trainer-kit.rkt"
                     collecting-hparams collecting-logger collecting-metrics)
@@ -75,14 +76,32 @@
     (define-optimizers (sgd (parameters net) #:lr 0.01))
     (define-training-step (x y) (mse-loss (net x) y)))
 
-  (test-case "a trainer keeps no init argument that is not readable"
+  (test-case "a trainer keeps a tensor init argument for its checkpoints"
     (define held (make-weak-box (zeros 1000 1000)))
     (define tr (Holding (weak-box-value held) "kept"))
     (collect!)
-    (check-false (weak-box-value held))
-    (define l (collecting-logger))
-    (fit tr (loader 2 #:width 1) #:max-epochs 1 #:logger l)
-    (check-equal? (collecting-hparams l) (list (hasheq 'label "kept"))))
+    (check-pred tensor? (weak-box-value held))
+    (with-temporary-directory (dir #:template "held-~a")
+      (define path (build-path dir "h.ckpt"))
+      (fit tr (loader 2 #:width 1) #:max-epochs 1 #:logger #f
+           #:callbacks (list (lambda-callback
+                              #:on-train-end (lambda (r) (save-checkpoint! r path)))))
+      (check-equal? (tensor-shape (hash-ref (hash-ref (read-checkpoint path) "hyper_parameters")
+                                            "data"))
+                    '(1000 1000))))
+
+  (test-case "a trainer keeps no init argument a checkpoint cannot hold"
+    (define (closure-over-tensor)
+      (define t (zeros 1000 1000))
+      (lambda () t))
+    (for ([make-held (list (lambda () (Linear 4 4)) closure-over-tensor)])
+      (define held (make-weak-box (make-held)))
+      (define tr (Holding (weak-box-value held) "kept"))
+      (collect!)
+      (check-false (weak-box-value held))
+      (define l (collecting-logger))
+      (fit tr (loader 2 #:width 1) #:max-epochs 1 #:logger l)
+      (check-equal? (collecting-hparams l) (list (hasheq 'label "kept")))))
 
   (define-trainer Wide (net mode weak kept)
     (define-init (m w)

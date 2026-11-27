@@ -19,8 +19,8 @@
          (only-in (submod "../nn/layer.rkt" private) define-layer*)
          (only-in "logging.rkt" run-log!)
          (only-in "private/checks.rkt"
-                  checked-hparams! checked-state-key configured-callbacks configured-optimizers
-                  readable-arguments training-step-result)
+                  captured-arguments checked-hparams! checked-state-key configured-callbacks
+                  configured-optimizers readable-arguments training-step-result)
          (only-in "private/types.rkt"
                   callback-property callback? prop:callback prop:trainer trainer-info
                   trainer?))
@@ -200,14 +200,15 @@
                                                 (attribute formals.rest?)))]
       #:fail-when (and problem #'id) problem))
 
-  (define (capture args ids)
-    #`(set! #,args (let ([given (readable-arguments '#,ids (list #,@ids))])
+  (define (capture args shapes ids)
+    #`(set! #,args (let ([given (captured-arguments '#,shapes (list #,@ids))])
                      (lambda () given))))
 
   (define (init-clauses init-form args field-decls #:check check)
     (syntax-parse (or init-form #`(define-init #,@field-decls))
       [(_ formals:init-formals body ...)
-       #`(#:init formals #,(capture args (attribute formals.id)) body ... #,check)]))
+       #`(#:init formals #,(capture args (attribute formals.shapes) (attribute formals.id))
+          body ... #,check)]))
 
   (define (callback-init-clauses init-form)
     (syntax-parse (or init-form #'(_))
@@ -249,7 +250,9 @@
               (~? (~@ #:predicate opt.pred))
               #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
               #:method (hyperparameters)
-              (hash-set* (args) (~@ 'hparam hparam) ...)
+              (hash-set* (readable-arguments (args)) (~@ 'hparam hparam) ...)
+              #:method (init-arguments)
+              (args)
               #:method (set-hyperparameter! key value)
               (case key
                 [(hparam) (set! hparam value)] ...)
