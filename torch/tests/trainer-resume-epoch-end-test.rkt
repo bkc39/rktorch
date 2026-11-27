@@ -64,6 +64,19 @@
       (log! 'tag (exact->inexact (run-epoch run)))
       (save-checkpoint! run (epoch-path dir run "late"))))
 
+  (define-callback weights-saver (dir)
+    #:kind checkpoint
+    (define-init (d) (set! dir d))
+    (define-hook (on-train-epoch-end)
+      (save-checkpoint! run (epoch-path dir run "weights") #:weights-only? #t)))
+
+  (define-callback save-then-log (dir)
+    #:kind checkpoint
+    (define-init (d) (set! dir d))
+    (define-hook (on-train-epoch-end)
+      (save-checkpoint! run (epoch-path dir run))
+      (log! 'tag (exact->inexact (run-epoch run)))))
+
   (struct legs (straight split saving resuming))
 
   (define (go dir trainer-of callbacks-of max-epochs ckpt)
@@ -122,6 +135,21 @@
       (check-equal? (length saving) 1 "one warning in the saving run")
       (check-regexp-match #rx"saver[0-9]* callback logged in on-train-epoch-end after"
                           (car saving))))
+
+  (test-case "a weights-only save followed by a callback that logs does not warn"
+    (with-temporary-directory (dir #:template "weights-~a")
+      (match-define (list _ warnings)
+        (go dir plain (lambda (d) (list (weights-saver d) (checkpoint-tagger))) 2 #f))
+      (check-equal? warnings '())))
+
+  (test-case "a callback that logs after its own save is told to log before saving"
+    (match-define (legs _ split saving _) (resumed plain (lambda (d) (list (save-then-log d)))))
+    (check-equal? split '(#f 0.0 0.0 2.0) "the resumed epoch reads a stale tag")
+    (check-equal? (length saving) 1 "one warning in the saving run")
+    (check-regexp-match #rx"save-then-log[0-9]* callback logged in on-train-epoch-end after"
+                        (car saving))
+    (check-regexp-match #rx"log before saving" (car saving))
+    (check-false (regexp-match? #rx"list the saving callback last" (car saving))))
 
   (test-case "a saver listed after every callback that logs resumes exactly, without a warning"
     (match-define (legs straight split saving resuming)

@@ -241,8 +241,10 @@ the callback states are restored, as in Lightning.
        Every refusal names the file and keeps the error's kind.}
  @item{Skipped with a warning on the @racket['rktorch-train] topic and stderr:
        a saved hyperparameter the trainer does not define, and a callback
-       state no callback claims. A save in @tt{on-train-epoch-end} followed,
-       in the same hook, by a callback that logs warns in the saving run.}
+       state no callback claims. A save that is not @racket[#:weights-only?],
+       from a @racket[#:kind checkpoint] or @racket[#:kind monitor] callback
+       in @tt{on-train-epoch-end}, warns in the saving run when that callback
+       or a later one logs after it in the same hook.}
  @item{Restored: the default streams, @racket[current-generator]'s and
        Racket's @racket[current-pseudo-random-generator], so a resumed fit
        draws what the uninterrupted one would have, which Lightning does not

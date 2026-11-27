@@ -107,8 +107,8 @@
            (cons "callback_metrics" (string-keyed (book-metrics (run-book r)))))))
   (for ([(k v) (in-hash (init-entries tr))])
     (hash-set! tree k v))
-  (note-epoch-end-save! r)
   (unless weights-only?
+    (note-epoch-end-save! r)
     (hash-set! tree "rng" (rng-bundle (run-device r))))
   tree)
 
