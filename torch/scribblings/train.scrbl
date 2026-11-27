@@ -223,29 +223,42 @@ where Lightning raises at the clip.
 ]
 
 @racket[#:ckpt-path] resumes from a checkpoint; @secref["train-hooks"] says
-what is restored at which hook. The file is read and its format checked before
-any hook runs, and a checkpoint taken outside an epoch end and the fit's end
-raises there, as does a checkpoint whose loop counters or hyperparameters are
-missing or malformed. The trainer must hold the checkpoint's parameters and
-buffers, strictly, or the fit raises with its parameters and hyperparameters
-unchanged; it must configure as many optimizers and schedulers; a @racket[#:weights-only?]
-checkpoint raises when the optimizers are restored, with Lightning's message. A
-saved hyperparameter the trainer does not define and a callback state no
-callback claims are skipped with a warning on the @racket['rktorch-train] topic
-and stderr. The default streams, @racket[current-generator]'s and Racket's
-@racket[current-pseudo-random-generator] are restored too, so a resumed fit
-draws what the uninterrupted one would have, which Lightning does not do; a
-checkpoint saved under a @racket[current-generator] needs one on the same
-device. The values logged and not yet published are restored with what
-@racket[run-metric] and @racket[run-metrics] read, so the rows logged after the
-resume and the values read are the uninterrupted fit's. The sanity check runs
-on a resumed fit, after the callback states are restored, as in Lightning. A
-loader's own @racket[#:generator] is not saved: a callback whose
-@tt{state-dict} answers its @racket[generator-state] and whose
-@tt{load-state!} calls @racket[set-generator-state!] carries it. A checkpoint
-from an epoch end resumes at the next epoch and one from the fit's end at the
-epoch it ended on; the fit then runs to @racket[#:max-epochs], and a restored
-epoch above @racket[#:max-epochs] raises.
+what is restored at which hook. A checkpoint from an epoch end resumes at the
+next epoch and one from the fit's end at the epoch it ended on; the fit then
+runs to @racket[#:max-epochs]. The sanity check runs on a resumed fit, after
+the callback states are restored, as in Lightning.
+@itemlist[
+ @item{Refused before any hook runs: a checkpoint taken outside an epoch end
+       and the fit's end, and one whose loop counters, hyperparameters, logged
+       values, logging book, RNG states or optimizer and scheduler lists are
+       missing or malformed.}
+ @item{Refused as it is restored: a trainer that does not hold the
+       checkpoint's parameters and buffers, strictly, which leaves its
+       parameters and hyperparameters unchanged; a trainer that configures a
+       different number of optimizers or schedulers, or an optimizer of another
+       kind; a @racket[#:weights-only?] checkpoint, with Lightning's message
+       when the optimizers are restored; a restored epoch above @racket[#:max-epochs].
+       Every refusal names the file.}
+ @item{Skipped with a warning on the @racket['rktorch-train] topic and stderr:
+       a saved hyperparameter the trainer does not define, and a callback
+       state no callback claims.}
+ @item{Restored: the default streams, @racket[current-generator]'s and
+       Racket's @racket[current-pseudo-random-generator], so a resumed fit
+       draws what the uninterrupted one would have, which Lightning does not
+       do; a checkpoint saved under a @racket[current-generator] needs one on
+       the same device. The values logged and not yet published are restored
+       with what @racket[run-metric] and @racket[run-metrics] read, so the rows
+       logged after the resume and the values read are the uninterrupted
+       fit's.}
+ @item{Not restored: a loader's own @racket[#:generator]; a callback whose
+       @tt{state-dict} answers its @racket[generator-state] and whose
+       @tt{load-state!} calls @racket[set-generator-state!] carries it. Nor
+       what was logged after the save: a save in @tt{on-train-epoch-end}
+       from a plain callback or the trainer's own hook runs before the
+       trainer's and the later callbacks' @tt{on-train-epoch-end} logging, so
+       the resumed epoch reads the values logged an epoch earlier, and the fit
+       warns. A @racket[#:kind checkpoint] callback, or
+       @racket[model-checkpoint], saves after that logging.}]
 
 @examples[#:eval train-eval
 (define-trainer Resumed (net)
@@ -254,9 +267,11 @@ epoch above @racket[#:max-epochs] raises.
   (define-training-step (x y) (mse-loss (net x) y)))
 (define resume-path (build-path (find-system-path 'temp-dir) "resumed.ckpt"))
 (define resume-data (dataloader (tensor-dataset (randn 8 2) (randn 8 1)) #:batch-size 4))
-(define (save-each-epoch r) (save-checkpoint! r resume-path))
+(define-callback epoch-saver ()
+  #:kind checkpoint
+  (define-hook (on-train-epoch-end) (save-checkpoint! run resume-path)))
 (void (fit (Resumed) resume-data #:max-epochs 2 #:logger #f
-           #:callbacks (list (lambda-callback #:on-train-epoch-end save-each-epoch))))
+           #:callbacks (list (epoch-saver))))
 (define resumed (fit (Resumed) resume-data #:max-epochs 3 #:logger #f
                      #:ckpt-path resume-path))
 (list (run-epoch resumed) (run-global-step resumed))

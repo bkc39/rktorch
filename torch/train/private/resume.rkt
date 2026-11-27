@@ -141,6 +141,13 @@
   (match-define (hash-table ("phase" phase) ("epoch" saved-epoch)
                             ("batches_that_stepped" stepped) ("eval_batches" evals))
     (fit-loop tree))
+  (unless (hash-ref (fit-loop tree) "epoch_end_logged" #t)
+    (warn-train! (format (string-append "fit: the checkpoint ~a was saved before the trainer's"
+                                        " on-train-epoch-end ran, so the values logged there"
+                                        " are not in it and the resume is not exact; save from"
+                                        " a #:kind checkpoint callback or model-checkpoint for"
+                                        " an exact resume")
+                         path)))
   (define epoch (if (equal? phase "epoch-end") (add1 saved-epoch) saved-epoch))
   (set-run-epoch! r epoch)
   (set-run-global-step! r (hash-ref tree "global_step"))

@@ -1,14 +1,18 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/list last)
+           (only-in racket/match match-define match-lambda)
+           (only-in racket/port open-output-nowhere)
            rackunit
+           (only-in threading ~>)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in "../main.rkt" make-generator manual-seed! randn)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
-           (only-in "private/trainer-kit.rkt" collecting-logger collecting-steps))
+           (only-in "private/trainer-kit.rkt"
+                    call-with-logged-warnings collecting-logger collecting-steps))
 
   (define-trainer Logging (net)
     (define-init () (set! net (Linear 2 1)))
@@ -21,7 +25,9 @@
         (log! 'rare loss))
       loss)
     (define-validation-step (x y)
-      (log! 'val-loss (mse-loss (net x) y))))
+      (log! 'val-loss (mse-loss (net x) y)))
+    (define-hook (on-train-epoch-end)
+      (log! 'epoch-tag (exact->inexact (run-epoch run)))))
 
   (define-callback epoch-end-saver (dir drop-book?)
     #:kind checkpoint
@@ -30,7 +36,13 @@
       (when drop-book?
         (hash-remove! tree "metric_book")))
     (define-hook (on-train-epoch-end)
-      (save-checkpoint! run (build-path dir (format "epoch=~a.ckpt" (run-epoch run))))))
+      (save-checkpoint! run (epoch-path dir run))))
+
+  (define (epoch-path dir r)
+    (build-path dir (format "epoch=~a.ckpt" (run-epoch r))))
+
+  (define (plain-saver dir _drop-book?)
+    (lambda-callback #:on-train-epoch-end (lambda (r) (save-checkpoint! r (epoch-path dir r)))))
 
   (define (data n seed)
     (define g (make-generator seed))
@@ -41,28 +53,35 @@
      #:on-train-epoch-start
      (lambda (r)
        (set-box! seen (cons (list (run-epoch r)
-                                  (for/list ([key (in-list '(train-loss train-mean rare val-loss))])
+                                  (for/list ([key (in-list '(train-loss train-mean rare val-loss epoch-tag))])
                                     (run-metric r key))
                                   (run-metrics r))
                             (unbox seen))))))
 
-  (define (go dir max-epochs ckpt #:drop-book? [drop-book? #f])
+  (define (go dir max-epochs ckpt #:drop-book? [drop-book? #f] #:saver [saver epoch-end-saver])
     (manual-seed! 0)
     (define seen (box '()))
     (define l (collecting-logger))
     (fit (Logging) (dataloader (data 8 1) #:batch-size 2)
          #:val (dataloader (data 6 2) #:batch-size 2)
          #:max-epochs max-epochs #:logger l #:log-every-n-steps 3 #:ckpt-path ckpt
-         #:callbacks (list (epoch-start-reader seen) (epoch-end-saver dir drop-book?)))
+         #:callbacks (list (epoch-start-reader seen) (saver dir drop-book?)))
     (values (reverse (unbox seen)) (collecting-steps l)))
 
-  (define (straight-and-split dir #:drop-book? [drop-book? #f])
-    (define-values (straight-reads straight-rows) (go (build-path dir "straight") 4 #f))
+  (define (straight-and-split dir #:drop-book? [drop-book? #f] #:saver [saver epoch-end-saver])
+    (define-values (straight-reads straight-rows) (go (build-path dir "straight") 4 #f #:saver saver))
     (define split (build-path dir "split"))
-    (define-values (first-reads first-rows) (go split 2 #f #:drop-book? drop-book?))
-    (define-values (later-reads later-rows) (go split 4 (build-path split "epoch=1.ckpt")))
+    (define-values (first-reads first-rows) (go split 2 #f #:drop-book? drop-book? #:saver saver))
+    (define-values (later warnings)
+      (call-with-logged-warnings
+       (lambda ()
+         (parameterize ([current-error-port (open-output-nowhere)])
+           (call-with-values (lambda () (go split 4 (build-path split "epoch=1.ckpt") #:saver saver))
+                             list)))))
+    (match-define (list later-reads later-rows) later)
     (values straight-reads (append first-reads later-reads)
-            straight-rows (append first-rows later-rows)))
+            straight-rows (append first-rows later-rows)
+            warnings))
 
   (define (with-legs proc)
     (with-temporary-directory (dir #:template "book-~a")
@@ -73,20 +92,23 @@
   (test-case "after an epoch-end resume run-metric reads what the straight run reads"
     (with-legs
      (lambda (dir)
-       (define-values (straight split _straight-rows _split-rows) (straight-and-split dir))
-       (check-equal? split straight))))
+       (define-values (straight split _straight-rows _split-rows warnings) (straight-and-split dir))
+       (check-equal? split straight)
+       (check-equal? warnings '() "a checkpoint-kind save resumes without a warning")
+       (check-true (~> (build-path dir "split" "epoch=1.ckpt") read-checkpoint (hash-ref "loops")
+                       (hash-ref "fit_loop") (hash-ref "epoch_end_logged"))))))
 
   (test-case "a step value pending at the epoch-end save is published in the resumed run's row"
     (with-legs
      (lambda (dir)
-       (define-values (_straight _split straight-rows split-rows) (straight-and-split dir))
+       (define-values (_straight _split straight-rows split-rows _warnings) (straight-and-split dir))
        (check-equal? (map car split-rows) (map car straight-rows) "the row steps")
        (check-equal? split-rows straight-rows))))
 
   (test-case "a checkpoint without a metric_book entry resumes from its callback_metrics"
     (with-legs
      (lambda (dir)
-       (define-values (_straight split _straight-rows _split-rows)
+       (define-values (_straight split _straight-rows _split-rows _warnings)
          (straight-and-split dir #:drop-book? #t))
        (define ckpt (read-checkpoint (build-path dir "split" "epoch=1.ckpt")))
        (check-false (hash-has-key? ckpt "metric_book"))
@@ -95,4 +117,21 @@
        (check-equal? table
                      (for/hasheq ([(k v) (in-hash (hash-ref ckpt "callback_metrics"))])
                        (values (string->symbol k) v))
-                     "the run-metrics table is the saved callback_metrics")))))
+                     "the run-metrics table is the saved callback_metrics"))))
+
+  (test-case "a plain saver's epoch-end file resumes with a warning and the trainer's epoch-end values stale"
+    (with-legs
+     (lambda (dir)
+       (define-values (straight split straight-rows split-rows warnings)
+         (straight-and-split dir #:saver plain-saver))
+       (define path (path->string (build-path dir "split" "epoch=1.ckpt")))
+       (check-equal? (length warnings) 1)
+       (check-regexp-match (regexp-quote path) (car warnings))
+       (check-regexp-match #rx"before the trainer's on-train-epoch-end" (car warnings))
+       (check-false (~> (read-checkpoint path) (hash-ref "loops") (hash-ref "fit_loop")
+                        (hash-ref "epoch_end_logged")))
+       (define (epoch-tags reads) (map (match-lambda [(list _ named _) (last named)]) reads))
+       (check-equal? (epoch-tags straight) '(#f 0.0 1.0 2.0))
+       (check-equal? (epoch-tags split) '(#f 0.0 0.0 2.0)
+                     "the resumed epoch reads the value the trainer logged an epoch earlier")
+       (check-equal? split-rows straight-rows)))))

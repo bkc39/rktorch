@@ -20,7 +20,8 @@
                   callback-hook callback-kind callback-state-key callback-type
                   trainer-hook))
 
-(provide call-callback
+(provide after-trainer-hook?
+         call-callback
          call-callbacks
          call-hooks
          call-trainer
@@ -66,6 +67,8 @@
 
 (define (late? cb) (memq (callback-kind cb) '(monitor checkpoint)))
 
+(define after-trainer-hook? (make-parameter #f))
+
 (define (call-hooks r name . args)
   (define h (hook-named name))
   (define cbs (if (memq 'callback (hook-sides h)) (run-callbacks r) '()))
@@ -73,9 +76,11 @@
   (match (hook-order h)
     ['by-kind
      (define-values (late early) (partition late? cbs))
-     (apply call-callbacks r name early args)
-     (trainer!)
-     (apply call-callbacks r name late args)]
+     (parameterize ([after-trainer-hook? #f])
+       (apply call-callbacks r name early args)
+       (trainer!))
+     (parameterize ([after-trainer-hook? #t])
+       (apply call-callbacks r name late args))]
     ['trainer-first
      (trainer!)
      (apply call-callbacks r name cbs args)]
