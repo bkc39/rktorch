@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base
                   -> ->* any/c flat-named-contract hash/c or/c unconstrained-domain->)
          (only-in racket/list filter-map partition split-at)
-         (only-in racket/match match match* match-define match-lambda)
+         (only-in racket/match match match* match-lambda)
          (only-in racket/string string-join)
          (only-in "../foreign.rkt" device? to)
          (only-in "../nn/grad-scaler.rkt" grad-scaler-state-dict)
@@ -206,15 +206,19 @@
                               "formal" (string->symbol id)
                               "value" v)]))
 
+(define (rest-passed? make-trainer overrides rest-id)
+  (and rest-id
+       (not (positional-limit make-trainer))
+       (hash-has-key? overrides (string->symbol rest-id))))
+
 (define (positional-args make-trainer value-of overrides positional-ids rest-id path)
   (define limit (positional-limit make-trainer))
   (define saved-count (length positional-ids))
   (define-values (passed-ids extra-ids)
     (split-at positional-ids (if limit (min limit saved-count) saved-count)))
-  (define rest-given?
-    (and rest-id (not limit) (hash-has-key? overrides (string->symbol rest-id))))
   (define positional
-    (append (map value-of passed-ids) (if rest-given? (rest-values value-of rest-id) '())))
+    (append (map value-of passed-ids)
+            (if (rest-passed? make-trainer overrides rest-id) (rest-values value-of rest-id) '())))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
     (raise-arguments-error 'load-from-checkpoint
                            (string-append "the constructor does not accept the number of"
@@ -223,26 +227,23 @@
                            "saved" (length positional)
                            "accepts" (procedure-arity make-trainer)
                            "path" path))
-  (values positional extra-ids (and (not rest-given?) rest-id)))
+  (values positional extra-ids))
 
 (define (keyword-args make-trainer value-of overrides keyword-formals path)
   (define-values (required accepted) (procedure-keywords make-trainer))
   (define-values (taken untaken)
     (partition (match-lambda [(list kw _ _) (or (not accepted) (memq kw accepted))])
                keyword-formals))
-  (define saved
-    (for/list ([f (in-list taken)])
-      (match-define (list kw _ id) f)
-      (cons kw (value-of id))))
+  (define recorded (map (match-lambda [(list kw _ id) (cons kw (value-of id))]) taken))
   (define given
     (for/list ([kw (in-list (or accepted required))]
-               #:unless (assq kw saved)
+               #:unless (assq kw recorded)
                #:when (or (memq kw required) (hash-has-key? overrides (keyword-name kw))))
       (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing-init-arg kw path))))))
-  (define sorted (sort (append saved given) keyword<? #:key car))
+  (define sorted (sort (append recorded given) keyword<? #:key car))
   (values (map car sorted) (map cdr sorted) untaken))
 
-(define (warn-dropped! saved path extra-ids untaken-keywords rest-id)
+(define (warn-dropped! make-trainer saved overrides path extra-ids untaken-keywords rest-id)
   (define (saved? id) (hash-has-key? saved id))
   (define dropped
     (append (filter-map (lambda (id) (and (saved? id) (string-append "positional " id)))
@@ -250,7 +251,9 @@
             (filter-map (match-lambda
                           [(list _ text id) (and (saved? id) (string-append "keyword " text))])
                         untaken-keywords)
-            (if (and rest-id (pair? (hash-ref saved rest-id '())))
+            (if (and rest-id
+                     (not (rest-passed? make-trainer overrides rest-id))
+                     (pair? (hash-ref saved rest-id '())))
                 (list (string-append "rest " rest-id))
                 '())))
   (unless (null? dropped)
@@ -262,11 +265,11 @@
   (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
   (define value-of (init-value saved overrides path))
   (define-values (keyword-formals positional-ids rest-id) (saved-formals tree path))
-  (define-values (positional extra-ids dropped-rest-id)
+  (define-values (positional extra-ids)
     (positional-args make-trainer value-of overrides positional-ids rest-id path))
   (define-values (kws kw-values untaken-keywords)
     (keyword-args make-trainer value-of overrides keyword-formals path))
-  (warn-dropped! saved path extra-ids untaken-keywords dropped-rest-id)
+  (warn-dropped! make-trainer saved overrides path extra-ids untaken-keywords rest-id)
   (values kws kw-values positional))
 
 (define (restore-hparams! tr saved path)

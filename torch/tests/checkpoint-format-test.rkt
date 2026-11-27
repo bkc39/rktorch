@@ -169,7 +169,7 @@
       (define path (build-path dir "big.ckpt"))
       (define value (box #f))
       (define plain (estimate-case "the save itself" "a" 1 0))
-      (define big
+      (define big-cases
         (list (estimate-case "a shared string" (make-list 1000 (make-string 10000 #\a))
                              100000 10000000)
               (estimate-case "a bignum" (expt 10 1000000) 100000 1000001)))
@@ -178,7 +178,7 @@
        (call-with-live-run
         #:callbacks (list (stored value))
         (lambda (r)
-          (for ([c (in-list (cons plain big))])
+          (for ([c (in-list (cons plain big-cases))])
             (set-box! value (estimate-case-value c))
             (collect-garbage)
             (define before (current-memory-use 'cumulative))
@@ -190,7 +190,7 @@
                                 (estimate-case-label c))
             (hash-set! allocated c (- (current-memory-use 'cumulative) before))))))
       (define save-cost (hash-ref allocated plain))
-      (check-equal? (for/list ([c (in-list big)]
+      (check-equal? (for/list ([c (in-list big-cases)]
                                #:unless (< (- (hash-ref allocated c) save-cost)
                                            (estimate-case-text-length c)))
                       (estimate-case-label c))
