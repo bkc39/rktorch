@@ -8,13 +8,20 @@
            (only-in racket/string string-replace string-trim)
            (only-in racket/system system*)
            rackunit
+           (only-in torch/tests/private/platform os*->platform)
            (only-in "harness.rkt" with-temporary-path))
 
   (define-runtime-path writer "cifar-folder.rkt")
   (define-runtime-path resolver "python/cache_dirs.py")
   (define-runtime-path twins "python")
 
-  (define host-platform (if (eq? (system-type 'os) 'macosx) "darwin" "linux"))
+  (define (cache-platform os*)
+    (if (eq? (os*->platform os*) 'macosx) "darwin" "linux"))
+
+  (define host-platform (cache-platform (system-type 'os*)))
+
+  (test-case "the cache layout follows the os* name, which a nix-built darwin Racket says as darwin"
+    (check-equal? (map cache-platform '(darwin macosx linux)) '("darwin" "darwin" "linux")))
 
   (define (racket-cache platform)
     (if (equal? platform "darwin") "Library/Caches/Racket" ".cache/racket"))
