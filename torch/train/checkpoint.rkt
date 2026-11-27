@@ -206,25 +206,22 @@
                               "formal" (string->symbol id)
                               "value" v)]))
 
-(define (rest-passed? make-trainer overrides rest-id)
-  (and rest-id
-       (not (positional-limit make-trainer))
-       (hash-has-key? overrides (string->symbol rest-id))))
+(define (rest-passed? limit overrides rest-id)
+  (and rest-id (not limit) (hash-has-key? overrides (string->symbol rest-id))))
 
-(define (positional-args make-trainer value-of overrides positional-ids rest-id path)
-  (define limit (positional-limit make-trainer))
+(define (positional-args make-trainer limit value-of overrides positional-ids rest-id path)
   (define saved-count (length positional-ids))
   (define-values (passed-ids extra-ids)
     (split-at positional-ids (if limit (min limit saved-count) saved-count)))
   (define given
-    (if (rest-passed? make-trainer overrides rest-id) (rest-values value-of rest-id) '()))
+    (if (rest-passed? limit overrides rest-id) (rest-values value-of rest-id) '()))
   (define positional (append (map value-of passed-ids) given))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
     (apply raise-arguments-error
            'load-from-checkpoint
            (string-append "the constructor does not accept the number of positional arguments"
                           " the checkpoint saved; wrap it in a procedure that takes them")
-           "saved" (length passed-ids)
+           "saved" saved-count
            (append (if (null? given) '() (list "given" (length given)))
                    (list "accepts" (procedure-arity make-trainer)
                          "path" path))))
@@ -244,7 +241,7 @@
   (define sorted (sort (append recorded given) keyword<? #:key car))
   (values (map car sorted) (map cdr sorted) untaken))
 
-(define (warn-dropped! make-trainer saved overrides path extra-ids untaken-keywords rest-id)
+(define (warn-dropped! limit saved overrides path extra-ids untaken-keywords rest-id)
   (define (saved? id) (hash-has-key? saved id))
   (define untaken
     (append (filter-map (lambda (id) (and (saved? id) (string-append "positional " id)))
@@ -255,9 +252,9 @@
   (define clauses
     (append (if (null? untaken)
                 '()
-                (list (string-append "the constructor takes no " (string-join untaken ", "))))
+                (list (string-join untaken ", " #:before-first "the constructor takes no ")))
             (if (and rest-id
-                     (not (rest-passed? make-trainer overrides rest-id))
+                     (not (rest-passed? limit overrides rest-id))
                      (pair? (hash-ref saved rest-id '())))
                 (list (string-append "saved rest values for " rest-id " are never passed"))
                 '())))
@@ -270,11 +267,12 @@
   (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
   (define value-of (init-value saved overrides path))
   (define-values (keyword-formals positional-ids rest-id) (saved-formals tree path))
+  (define limit (positional-limit make-trainer))
   (define-values (positional extra-ids)
-    (positional-args make-trainer value-of overrides positional-ids rest-id path))
+    (positional-args make-trainer limit value-of overrides positional-ids rest-id path))
   (define-values (kws kw-values untaken-keywords)
     (keyword-args make-trainer value-of overrides keyword-formals path))
-  (warn-dropped! make-trainer saved overrides path extra-ids untaken-keywords rest-id)
+  (warn-dropped! limit saved overrides path extra-ids untaken-keywords rest-id)
   (values kws kw-values positional))
 
 (define (restore-hparams! tr saved path)
