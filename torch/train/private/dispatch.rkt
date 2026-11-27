@@ -154,7 +154,7 @@
   (publish! r (read-epoch! (run-book r) loop) step #:epoch? #t))
 
 (define (finish! r status)
-  (set-run-finished?! r #t)
+  (set-run-finished?! r status)
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
 

@@ -197,12 +197,55 @@
 
   (define load-refusal (box #f))
 
-  (test-case "a run that has not started or has finished is not saved, as Lightning's"
+  (test-case "an exception-phase save names the training batch that failed"
+    (with-temporary-directory (dir #:template "exception-~a")
+      (define path (build-path dir "x.ckpt"))
+      (define seen (box 0))
+      (check-exn #rx"boom"
+                 (lambda ()
+                   (fit (Small) (toy-loader 6) #:max-epochs 1 #:logger #f
+                        #:callbacks
+                        (list (lambda-callback
+                               #:on-train-batch-end
+                               (lambda (_r . _)
+                                 (set-box! seen (add1 (unbox seen)))
+                                 (when (= (unbox seen) 2) (error "boom")))
+                               #:on-exception (lambda (r _e) (save-checkpoint! r path)))))))
+      (define loop (hash-ref (hash-ref (read-checkpoint path) "loops") "fit_loop"))
+      (check-equal? (map (curry hash-ref loop) '("phase" "batch_index")) '("exception" 1))))
+
+  (test-case "a run that has not started is not saved, as Lightning's"
     (with-temporary-directory (dir #:template "unstarted-~a")
       (define path (build-path dir "s.ckpt"))
-      (define-values (_tree finished) (saved-at path #:trainer (Loading)))
-      (check-exn #rx"save-checkpoint!.*contract violation"
-                 (lambda () (save-checkpoint! finished (build-path dir "after.ckpt"))))
+      (define-values (_tree _run) (saved-at path #:trainer (Loading)))
       (void (load-from-checkpoint Loading path))
       (check-regexp-match #rx"save-checkpoint!.*contract violation" (unbox load-refusal))
-      (check-equal? (directory-list dir) (list (string->path "s.ckpt"))))))
+      (check-equal? (directory-list dir) (list (string->path "s.ckpt")))))
+
+  (test-case "a run saved after fit has returned is the one saved at its end, as Lightning's"
+    (with-temporary-directory (dir #:template "after-~a")
+      (define at-end (build-path dir "end.ckpt"))
+      (define after (build-path dir "after.ckpt"))
+      (define r
+        (fit (Small) (toy-loader 4) #:max-epochs 2 #:logger #f
+             #:callbacks (list (lambda-callback
+                                #:on-fit-end (lambda (r) (save-checkpoint! r at-end))))))
+      (save-checkpoint! r after)
+      (define-values (end back) (values (read-checkpoint at-end) (read-checkpoint after)))
+      (check-equal? (hash-ref (hash-ref (hash-ref back "loops") "fit_loop") "phase") "fit-end")
+      (for ([key (in-list '("loops" "epoch" "global_step" "hyper_parameters" "lr_schedulers"))])
+        (check-equal? (hash-ref back key) (hash-ref end key) key))
+      (check-equal? (comparable (hash-ref back "optimizer_states"))
+                    (comparable (hash-ref end "optimizer_states")))
+      (define failed (box #f))
+      (check-exn #rx"boom"
+                 (lambda ()
+                   (fit (Small) (toy-loader 4) #:max-epochs 1 #:logger #f
+                        #:callbacks (list (lambda-callback
+                                           #:on-train-batch-end
+                                           (lambda (r . _) (set-box! failed r) (error "boom")))))))
+      (save-checkpoint! (unbox failed) after)
+      (check-equal? (hash-ref (hash-ref (hash-ref (read-checkpoint after) "loops") "fit_loop")
+                              "phase")
+                    "other"
+                    "a failed fit's run is saved, but not as resumable"))))

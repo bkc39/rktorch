@@ -2,8 +2,8 @@
 
 (require (only-in racket/contract/base
                   -> ->* any/c flat-named-contract hash/c or/c unconstrained-domain->)
-         (only-in racket/list append* partition)
-         (only-in racket/match match match* match-define)
+         (only-in racket/list partition take)
+         (only-in racket/match match match*)
          (only-in racket/string string-join)
          (only-in "../foreign.rkt" device? to)
          (only-in "../nn/grad-scaler.rkt" grad-scaler-state-dict)
@@ -19,9 +19,9 @@
          (only-in "private/format.rkt" read-checkpoint-file write-checkpoint!)
          (only-in "private/restore.rkt" rng-bundle)
          (only-in "private/state.rkt"
-                  fresh-run live? run-batches-stepped run-book run-callbacks
+                  fresh-run run? run-batches-stepped run-book run-callbacks
                   run-current-stage run-device run-entry run-epoch run-eval-batches
-                  run-global-step run-grad-scaler run-hook run-optimizers
+                  run-finished? run-global-step run-grad-scaler run-hook run-optimizers
                   run-scheduler-configs run-train-batch-index run-trainer set-run-finished?!)
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
@@ -36,7 +36,10 @@
 
 (define (phase r)
   (match (and (eq? (run-entry r) 'fit) (not (eq? (run-current-stage r) 'sanity-check))
-              (run-hook r))
+              (match (run-finished? r)
+                ['success 'on-fit-end]
+                [#f (run-hook r)]
+                [_ #f]))
     ['on-train-epoch-end "epoch-end"]
     ['on-train-batch-end "batch-end"]
     ['on-validation-end "validation-end"]
@@ -52,7 +55,7 @@
           "batches_that_stepped" (run-batches-stepped r)
           "eval_batches" (run-eval-batches r)))
   (match* (at (run-train-batch-index r))
-    [((or "batch-end" "validation-end") (? exact-integer? i)) (hash-set counters "batch_index" i)]
+    [((or "batch-end" "validation-end" "exception") (? exact-integer? i)) (hash-set counters "batch_index" i)]
     [(_ _) counters]))
 
 (define (string-keyed h)
@@ -78,15 +81,17 @@
   (apply raise-arguments-error 'save-checkpoint! message
          (append fields (list "key path" key-path "value" part))))
 
+(define (check-value! v message . fields)
+  (match (value-problem v)
+    [(cons key-path part) (apply refused message key-path part fields)]
+    [_ (void)]))
+
 (define (callback-states r)
   (for/hash ([cb (in-list (run-callbacks r))] #:when (callback-hook cb 'state-dict))
     (define state (call-callback r cb 'state-dict '()))
-    (match (value-problem state)
-      [(cons path part)
-       (refused "a callback's state-dict is not a checkpoint-value/c" path part
-                "callback" (callback-type cb)
-                "state key" (callback-state-key cb))]
-      [_ (void)])
+    (check-value! state "a callback's state-dict is not a checkpoint-value/c"
+                  "callback" (callback-type cb)
+                  "state key" (callback-state-key cb))
     (values (callback-state-key cb) state)))
 
 (define (model-state r)
@@ -115,25 +120,23 @@
 (define (check-tree! tree)
   (for ([k (in-hash-keys tree)] #:unless (string? k))
     (refused "a top-level key of the checkpoint is not a string" (list k) k))
-  (match (value-problem tree)
-    [(cons key-path part)
-     (refused "a value in the checkpoint is not a checkpoint-value/c" key-path part)]
-    [_ (void)]))
+  (check-value! tree "a value in the checkpoint is not a checkpoint-value/c"))
 
-(define active-run/c
-  (flat-named-contract 'active-run/c (lambda (r) (and (live? r) (run-entry r) #t))))
+(define started-run/c
+  (flat-named-contract 'started-run/c (lambda (r) (and (run? r) (run-entry r) #t))))
 
 (define/contract-out (save-checkpoint! r path #:weights-only? [weights-only? #f]) ;; noqa
-  (->* (active-run/c path-string?) (#:weights-only? boolean?) void?)
+  (->* (started-run/c path-string?) (#:weights-only? boolean?) void?)
   (when (saving?)
     (raise-arguments-error 'save-checkpoint! "called while a checkpoint is being saved"
                            "path" path))
   (parameterize ([saving? #t])
-    (define tree
-      (hash-copy (if weights-only? (model-state r) (with-training-state r (model-state r)))))
-    (if weights-only?
-        (call-trainer r 'on-save-checkpoint tree)
-        (call-hooks r 'on-save-checkpoint tree))
+    (define-values (built on-save)
+      (if weights-only?
+          (values (model-state r) call-trainer)
+          (values (with-training-state r (model-state r)) call-hooks)))
+    (define tree (hash-copy built))
+    (on-save r 'on-save-checkpoint tree)
     (check-tree! tree)
     (write-checkpoint! 'save-checkpoint! path tree)))
 
@@ -141,36 +144,91 @@
   (-> path-string? (hash/c string? checkpoint-value/c #:immutable #t))
   (read-checkpoint-file 'read-checkpoint path))
 
-(define (init-call tree overrides)
-  (define saved (hash-ref tree "hyper_parameters"))
+(define (entry tree key ok? path #:default [default #f])
+  (match (hash-ref tree key default)
+    [(? ok? v) v]
+    [_ (raise-arguments-error 'load-from-checkpoint "the checkpoint's entry is missing or malformed"
+                              "key" key
+                              "path" path)]))
+
+(define (string-keyed? v)
+  (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))
+
+(define (formals? v)
+  (and (list? v)
+       (for/and ([f (in-list v)])
+         (match f
+           [(list (or "positional" "rest") (? string?)) #t]
+           [(list "keyword" (regexp #rx"^#:.") (? string?)) #t]
+           [_ #f]))))
+
+(define (keyword-name kw)
+  (string->symbol (keyword->string kw)))
+
+(define (positional-range make-trainer)
+  (define mask (procedure-arity-mask make-trainer))
+  (values (sub1 (integer-length (bitwise-and mask (- mask))))
+          (if (negative? mask) +inf.0 (sub1 (integer-length mask)))))
+
+(define (init-call make-trainer tree overrides path)
+  (define saved (entry tree "hyper_parameters" string-keyed? path #:default (hash)))
+  (define (missing formal)
+    (raise-arguments-error 'load-from-checkpoint
+                           "the checkpoint did not save this init argument; pass it in #:init-args"
+                           "formal" formal
+                           "path" path))
   (define (value-of id)
     (define name (string->symbol id))
     (cond
       [(hash-has-key? overrides name) (hash-ref overrides name)]
       [(hash-has-key? saved id) (hash-ref saved id)]
-      [else (raise-arguments-error
-             'load-from-checkpoint
-             "the checkpoint did not save this init argument; pass it in #:init-args"
-             "formal" name)]))
+      [else (missing name)]))
   (define (rest-values id)
     (match (value-of id)
       [(? list? vs) vs]
       [v (raise-arguments-error 'load-from-checkpoint "a rest formal's value must be a list"
                                 "formal" (string->symbol id)
                                 "value" v)]))
-  (define formals (hash-ref tree "init_formals"))
-  (define keywords
-    (sort (for/list ([f (in-list formals)] #:when (equal? (car f) "keyword"))
-            (match-define (list _ kw id) f)
-            (cons (string->keyword (substring kw 2)) (value-of id)))
-          keyword<? #:key car))
-  (define positional
-    (append* (for/list ([f (in-list formals)])
-               (match f
-                 [(list "positional" id) (list (value-of id))]
-                 [(list "rest" id) (rest-values id)]
-                 [_ '()]))))
-  (values (map car keywords) (map cdr keywords) positional))
+  (define-values (required accepted) (procedure-keywords make-trainer))
+  (define-values (fewest most) (positional-range make-trainer))
+  (define-values (keywords positional dropped)
+    (for/fold ([keywords '()] [positional '()] [dropped '()]
+               #:result (values keywords positional (reverse dropped)))
+              ([f (in-list (entry tree "init_formals" formals? path))])
+      (define room (- most (length positional)))
+      (match f
+        [(list "keyword" (and text (regexp #rx"^#:(.*)$" (list _ name))) id)
+         (define kw (string->keyword name))
+         (if (or (not accepted) (memq kw accepted))
+             (values (cons (cons kw (value-of id)) keywords) positional dropped)
+             (values keywords positional (cons text dropped)))]
+        [(list "positional" id)
+         (if (positive? room)
+             (values keywords (append positional (list (value-of id))) dropped)
+             (values keywords positional (cons id dropped)))]
+        [(list "rest" id)
+         (define vs (if (positive? room) (rest-values id) (hash-ref saved id #f)))
+         (cond
+           [(and (list? vs) (<= (length vs) room)) (values keywords (append positional vs) dropped)]
+           [(positive? room)
+            (values keywords (append positional (take vs room)) (cons id dropped))]
+           [else (values keywords positional (cons id dropped))])])))
+  (define given
+    (for/list ([kw (in-list (or accepted required))]
+               #:unless (assq kw keywords)
+               #:when (or (memq kw required) (hash-has-key? overrides (keyword-name kw))))
+      (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing kw))))))
+  (when (< (length positional) fewest)
+    (raise-arguments-error 'load-from-checkpoint
+                           "the constructor takes more positional arguments than the checkpoint saved"
+                           "required" fewest
+                           "saved" (length positional)
+                           "path" path))
+  (unless (null? dropped)
+    (log-rktorch-train-warning "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
+                               (string-join dropped ", ") path))
+  (define sorted (sort (append keywords given) keyword<? #:key car))
+  (values (map car sorted) (map cdr sorted) positional))
 
 (define (restore-hparams! tr saved path)
   (define-values (known unknown)
@@ -193,12 +251,13 @@
         #:init-args (hash/c symbol? any/c #:immutable #t))
        trainer?)
   (define tree (read-checkpoint-file 'load-from-checkpoint path))
-  (define-values (kws kw-values positional) (init-call tree init-args))
+  (define-values (kws kw-values positional) (init-call make-trainer tree init-args path))
   (define tr (keyword-apply make-trainer kws kw-values positional))
-  (restore-hparams! tr (hash-ref tree "trainer_hparams") path)
+  (restore-hparams! tr (entry tree "trainer_hparams" string-keyed? path #:default (hash)) path)
+  (define (counter key) (entry tree key exact-nonnegative-integer? path #:default 0))
   (define r (fresh-run tr #f (trainer-device tr)
-                       #:epoch (hash-ref tree "epoch")
-                       #:global-step (hash-ref tree "global_step")))
+                       #:epoch (counter "epoch")
+                       #:global-step (counter "global_step")))
   (call-trainer r 'on-load-checkpoint tree)
   (set-run-finished?! r #t)
   (load-state! tr path #:strict? strict?
