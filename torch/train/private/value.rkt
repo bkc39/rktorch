@@ -134,47 +134,44 @@
                                'entries (for/list ([k (in-list (keys-in-a-fixed-order v))])
                                           (list (encode k) (encode (hash-ref v k)))))])))])))
 
-(define (malformed j)
-  (raise-arguments-error 'read-checkpoint "malformed checkpoint value" "value" j))
-
-(define (tagged-number j tag ok?)
-  (match (hash-ref j tag)
-    [(? string? s)
-     (match (string->number s 10)
-       [(? ok? x) x]
-       [_ (malformed j)])]
-    [_ (malformed j)]))
-
-(define (decode-value j tensor-named)
+(define (decode-value j tensor-named malformed)
+  (define (payload j tag ok?)
+    (match (hash-ref j tag)
+      [(? ok? x) x]
+      [_ (malformed)]))
+  (define (tagged-number j tag ok?)
+    (match (string->number (payload j tag string?) 10)
+      [(? ok? x) x]
+      [_ (malformed)]))
   (let decode ([j j])
     (match j
       [(or #t #f (? string?) (? exact-integer?) (? flonum?)) j]
       [(? list?) (map decode j)]
       [(? hash?)
        (match (hash-keys j)
-         [(list '$tensor) (tensor-named (hash-ref j '$tensor))]
-         [(list '$symbol) (string->symbol (hash-ref j '$symbol))]
+         [(list '$tensor) (tensor-named (payload j '$tensor string?))]
+         [(list '$symbol) (string->symbol (payload j '$symbol string?))]
          [(list '$float)
           (tagged-number j '$float (lambda (x) (and (flonum? x) (special-float? x))))]
          [(list '$rational) (tagged-number j '$rational exact-rational?)]
          [(list '$pair)
           (match (hash-ref j '$pair)
             [(list a d) (cons (decode a) (decode d))]
-            [_ (malformed j)])]
+            [_ (malformed)])]
          [(or (list '$hash 'entries) (list 'entries '$hash))
           (define pairs
-            (for/list ([e (in-list (hash-ref j 'entries))])
+            (for/list ([e (in-list (payload j 'entries list?))])
               (match e
                 [(list k v) (cons (decode k) (decode v))]
-                [_ (malformed j)])))
+                [_ (malformed)])))
           (match (hash-ref j '$hash)
             ["eq" (make-immutable-hasheq pairs)]
             ["eqv" (make-immutable-hasheqv pairs)]
             ["equal" (make-immutable-hash pairs)]
-            [_ (malformed j)])]
+            [_ (malformed)])]
          [keys
           (for/hash ([k (in-list keys)])
             (define s (symbol->string k))
-            (when (reserved-key? s) (malformed j))
+            (when (reserved-key? s) (malformed))
             (values s (decode (hash-ref j k))))])]
-      [_ (malformed j)])))
+      [_ (malformed)])))

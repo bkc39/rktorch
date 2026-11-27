@@ -57,7 +57,10 @@
         (flush-output out)))
     (rename-file-or-directory temporary path #t)))
 
-(define (write-safetensors! who path entries #:metadata [metadata #f] #:on-written [on-written void])
+(define (write-safetensors! who path entries
+                            #:metadata [metadata #f]
+                            #:on-header [on-header void]
+                            #:on-written [on-written void])
   (define-values (fields chunks)
     (for/fold ([fields '()] [chunks '()] [offset 0] #:result (values fields chunks))
               ([e (in-list entries)])
@@ -78,6 +81,7 @@
                (reverse fields))
          (reverse fields))))
   (define header-bytes (string->bytes/utf-8 (jsexpr->string header)))
+  (on-header header-bytes)
   (call-with-atomic-output-file
    path
    (lambda (out)

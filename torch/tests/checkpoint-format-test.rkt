@@ -2,8 +2,9 @@
 
 (module+ test
   (require (for-syntax racket/base)
+           (only-in json jsexpr->string)
            (only-in racket/file file->bytes)
-           (only-in racket/list filter-map)
+           (only-in racket/list filter-map make-list)
            (only-in racket/match match-lambda)
            (only-in racket/runtime-path define-runtime-path)
            (only-in racket/string string-prefix?)
@@ -13,7 +14,8 @@
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt"
                     call-with-live-run fit-draws saving-callback Small stored)
-           (only-in "private/comparable.rkt" comparable layer-bytes))
+           (only-in "private/comparable.rkt" comparable layer-bytes)
+           (only-in "private/safetensors-reader.rkt" safetensors-metadata))
 
   (define-runtime-path format-module "../train/private/format.rkt")
 
@@ -136,4 +138,101 @@
         (check-exn exn:fail?
                    (lambda () (load-from-checkpoint (lambda () (set-box! built 1) (Small)) path))
                    label)
-        (check-equal? (unbox built) 0 (format "~a: make-trainer was not called" label))))))
+        (check-equal? (unbox built) 0 (format "~a: make-trainer was not called" label)))))
+
+  (define current-header-limit (dynamic-require format-module 'current-header-limit))
+
+  (define (header-bytes path) (header-length (file->bytes path)))
+
+  (test-case "the 100 MB limit is on the safetensors header, checked before any file is made"
+    (with-temporary-directory (dir #:template "limit-~a")
+      (define-values (fits over) (values (build-path dir "fits.ckpt") (build-path dir "over.ckpt")))
+      (void
+       (call-with-live-run
+        #:callbacks (list (stored (box (make-string 1000 #\"))))
+        (lambda (r)
+          (save-checkpoint! r fits)
+          (define size (header-bytes fits))
+          (define text (string-utf-8-length (hash-ref (safetensors-metadata fits) 'checkpoint)))
+          (check-true (< text (sub1 size)) "the escaped header is longer than the text")
+          (check-exn #rx"save-checkpoint!:.*100 MB header limit"
+                     (lambda ()
+                       (parameterize ([current-header-limit (sub1 size)])
+                         (save-checkpoint! r over))))
+          (check-equal? (directory-list dir) (list (string->path "fits.ckpt")))
+          (parameterize ([current-header-limit size])
+            (save-checkpoint! r over))
+          (check-equal? (header-bytes over) size))))))
+
+  (test-case "a shared string or a bignum is counted at its length before any text is built"
+    (with-temporary-directory (dir #:template "estimate-~a")
+      (define path (build-path dir "big.ckpt"))
+      (define value (box #f))
+      (define bigs
+        (hash "a shared string" (make-list 1000 (make-string 10000 #\a))
+              "a bignum" (expt 10 1000000)))
+      (define allocated (make-hash))
+      (void
+       (call-with-live-run
+        #:callbacks (list (stored value))
+        (lambda (r)
+          (for ([(label big) (in-hash bigs)])
+            (set-box! value big)
+            (collect-garbage)
+            (define before (current-memory-use 'cumulative))
+            (check-exn #rx"100 MB header limit"
+                       (lambda ()
+                         (parameterize ([current-header-limit 100000])
+                           (save-checkpoint! r path)))
+                       label)
+            (hash-set! allocated label (- (current-memory-use 'cumulative) before))))))
+      (check-equal? (for/list ([(label n) (in-hash allocated)] #:unless (< n 4000000)) label) '()
+                    "refused without writing the text out")
+      (check-equal? (directory-list dir) '())))
+
+  (define (hand-built dir name text #:entries [entries (hasheq)] #:payload [payload #""])
+    (define meta (hasheq 'format "rktorch-checkpoint" 'version "1" 'checkpoint text))
+    (define header (string->bytes/utf-8 (jsexpr->string (hash-set entries '__metadata__ meta))))
+    (written-file (build-path dir name)
+                  (bytes-append (integer->integer-bytes (bytes-length header) 8 #f #f)
+                                header payload)))
+
+  (define (written-file path bs)
+    (call-with-output-file path (lambda (o) (write-bytes bs o)))
+    path)
+
+  (define (f32-entry shape end)
+    (hasheq '$0 (hasheq 'dtype "F32" 'shape shape 'data_offsets (list 0 end))))
+
+  (test-case "every malformed file is not a rktorch checkpoint, named by the caller and the path"
+    (with-temporary-directory (dir #:template "malformed-~a")
+      (define one-float (f32-entry '(1) 4))
+      (define cases
+        (list (list "metadata not JSON" "{not json" one-float)
+              (list "a $tensor naming a number" "{\"x\":{\"$tensor\":5}}" one-float)
+              (list "a $symbol of a number" "{\"x\":{\"$symbol\":5}}" one-float)
+              (list "entries not a list" "{\"x\":{\"$hash\":\"equal\",\"entries\":5}}" one-float)
+              (list "an unsupported dtype tag" "{\"x\":{\"$tensor\":\"$0\"}}"
+                    (hasheq '$0 (hasheq 'dtype "I32" 'shape '(1) 'data_offsets '(0 4))))
+              (list "a shape the bytes do not fill" "{\"x\":{\"$tensor\":\"$0\"}}"
+                    (f32-entry '(2) 4))
+              (list "an eq? hash with a string key"
+                    "{\"x\":{\"$hash\":\"eq\",\"entries\":[[\"s\",1]]}}" one-float)
+              (list "a tensor key"
+                    "{\"x\":{\"$hash\":\"equal\",\"entries\":[[{\"$tensor\":\"$0\"},1]]}}"
+                    one-float)
+              (list "a top-level key that is not a string"
+                    "{\"$hash\":\"equal\",\"entries\":[[1,2]]}" one-float)
+              (list "a JSON null" "{\"x\":null}" one-float)))
+      (for ([c (in-list cases)] [i (in-naturals)])
+        (define-values (label text entries) (apply values c))
+        (define path
+          (hand-built dir (format "m~a.ckpt" i) text #:entries entries #:payload (make-bytes 4 0)))
+        (for ([who (in-list '(read-checkpoint load-from-checkpoint))])
+          (define rx (pregexp (format "^~a: not a rktorch checkpoint.*path: .*m~a[.]ckpt" who i)))
+          (check-exn (lambda (e) (and (exn:fail:contract? e) (regexp-match? rx (exn-message e))))
+                     (lambda () (if (eq? who 'read-checkpoint)
+                                    (read-checkpoint path)
+                                    (load-from-checkpoint Small path)))
+                     (format "~a, ~a" label who)))))))
+
