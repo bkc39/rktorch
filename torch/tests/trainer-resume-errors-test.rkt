@@ -145,9 +145,9 @@
     (define-hparams lr)
     (define-test-step (x y) (log! 'test-loss (mse-loss (net x) y))))
 
-  (define (epoch-entry field v)
+  (define (epoch-entry . fields)
     (define well-formed (hash "logger" #t "both" #f "value" 1.0 "weight" 2 "reduce" 'mean))
-    (list '("metric_book" "train" "epoch") (hash "k" (hash-set well-formed field v))))
+    (list '("metric_book" "train" "epoch") (hash "k" (apply hash-set* well-formed fields))))
 
   (define malformed-entries
     (list (list '("loops") removed)
@@ -220,6 +220,12 @@
                     #:name "test.ckpt"))
       (check-names-path #rx"cannot be resumed.*trainer_hparams" path
                         (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path)))))
+
+  (test-case "a weight-0 book entry, as a zero-row batch writes, is resumed"
+    (with-temporary-directory (dir #:template "weightless-~a")
+      (match-define (list keys v) (epoch-entry "weight" 0 "reduce" 'sum))
+      (define path (saved-with dir (list (reshaping "weightless" (edit-at keys v)))))
+      (check-pred run? (resume (Small) path))))
 
   (test-case "a malformed current-generator state is refused before any hook, the generator kept"
     (call-with-process-deadline

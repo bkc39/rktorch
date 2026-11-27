@@ -191,7 +191,7 @@
 
 (define (metric-value? v) (or (real? v) (and (tensor? v) (= (numel v) 1))))
 
-(define (weight? w) (and (real? w) (positive? w)))
+(define (weight? w) (and (real? w) (not (negative? w))))
 
 (define (reducer? r) (and (memq r reducers) #t))
 
