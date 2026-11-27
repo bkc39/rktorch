@@ -216,17 +216,18 @@
   (define saved-count (length positional-ids))
   (define-values (passed-ids extra-ids)
     (split-at positional-ids (if limit (min limit saved-count) saved-count)))
-  (define positional
-    (append (map value-of passed-ids)
-            (if (rest-passed? make-trainer overrides rest-id) (rest-values value-of rest-id) '())))
+  (define given
+    (if (rest-passed? make-trainer overrides rest-id) (rest-values value-of rest-id) '()))
+  (define positional (append (map value-of passed-ids) given))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
-    (raise-arguments-error 'load-from-checkpoint
-                           (string-append "the constructor does not accept the number of"
-                                          " positional arguments the checkpoint saved; wrap it"
-                                          " in a procedure that takes them")
-                           "saved" (length positional)
-                           "accepts" (procedure-arity make-trainer)
-                           "path" path))
+    (apply raise-arguments-error
+           'load-from-checkpoint
+           (string-append "the constructor does not accept the number of positional arguments"
+                          " the checkpoint saved; wrap it in a procedure that takes them")
+           "saved" (length passed-ids)
+           (append (if (null? given) '() (list "given" (length given)))
+                   (list "accepts" (procedure-arity make-trainer)
+                         "path" path))))
   (values positional extra-ids))
 
 (define (keyword-args make-trainer value-of overrides keyword-formals path)

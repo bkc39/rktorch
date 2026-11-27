@@ -269,6 +269,15 @@
                                ".*saved: 1.*accepts: 2.*old[.]ckpt"))
        (lambda () (load-from-checkpoint Taller path)))))
 
+  (test-case "the positional-count error counts the saved values apart from #:init-args' rest"
+    (with-temporary-directory (dir #:template "gap-given-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define (deeper w _h _d . _more) (Plain w))
+      (check-exn/contract
+       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+                               ".*saved: 1.*given: 1.*accepts: [(]arity-at-least 3[)].*old[.]ckpt"))
+       (lambda () (load-from-checkpoint deeper path #:init-args (hasheq 'more '(9)))))))
+
   (test-case "a load that raises for a missing keyword logs no drop warning"
     (with-temporary-directory (dir #:template "raised-~a")
       (define path (saved-from (Old 1 2 #:rate 1/3 #:tag 'b) dir))
