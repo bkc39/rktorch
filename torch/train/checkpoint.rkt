@@ -22,7 +22,8 @@
                   fresh-run run? run-batches-stepped run-book run-callbacks
                   run-current-stage run-device run-entry run-epoch run-eval-batches
                   run-global-step run-grad-scaler run-hook run-optimizers run-outcome
-                  run-scheduler-configs run-train-batch-index run-trainer set-run-finished?!)
+                  run-scheduler-configs run-train-batch-index run-trainer set-run-finished?!
+                  set-run-outcome!)
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
                   scheduler-config-scheduler trainer-hook trainer-hparam-names trainer?)
@@ -300,6 +301,7 @@
                        #:global-step (counter "global_step")))
   (call-trainer r 'on-load-checkpoint tree)
   (set-run-finished?! r #t)
+  (set-run-outcome! r 'loaded)
   (load-state! tr path #:strict? strict?
                #:rename (lambda (name)
                           (and (regexp-match? #rx"^state_dict[.]" name)
