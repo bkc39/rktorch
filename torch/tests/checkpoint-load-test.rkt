@@ -194,6 +194,15 @@
       (check-regexp-match #rx"takes no positional depth, keyword #:tag, rest more saved in .*old[.]ckpt"
                           (car warnings))))
 
+  (test-case "the drop warning names only formals the checkpoint saved a value for"
+    (with-temporary-directory (dir #:template "unsaved-drop-~a")
+      (define path (saved-from (Old 1 (lambda () 0) #:tag (lambda () 1)) dir))
+      (check-equal? (hash-ref (read-checkpoint path) "init_dropped") '("depth" "tag"))
+      (define-values (args warnings) (loaded Plain path))
+      (check-equal? args '(1))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"takes no keyword #:rate saved in" (car warnings))))
+
   (test-case "a rest formal the constructor does not take is dropped"
     (with-temporary-directory (dir #:template "rest-drop-~a")
       (define path (saved-from (Spread 1 'a 'b) dir))

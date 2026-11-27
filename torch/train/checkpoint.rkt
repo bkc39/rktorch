@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* any/c flat-named-contract hash/c or/c unconstrained-domain->)
-         (only-in racket/list partition split-at)
+         (only-in racket/list filter-map partition split-at)
          (only-in racket/match match match* match-define match-lambda)
          (only-in racket/string string-join)
          (only-in "../foreign.rkt" device? to)
@@ -224,9 +224,13 @@
                            "saved" (length positional)
                            "accepts" (procedure-arity make-trainer)
                            "path" path))
+  (define (saved? id) (hash-has-key? saved id))
   (define dropped
-    (append (map (lambda (id) (string-append "positional " id)) extra-ids)
-            (map (match-lambda [(list _ text _) (string-append "keyword " text)]) untaken-keywords)
+    (append (filter-map (lambda (id) (and (saved? id) (string-append "positional " id)))
+                        extra-ids)
+            (filter-map (match-lambda
+                          [(list _ text id) (and (saved? id) (string-append "keyword " text))])
+                        untaken-keywords)
             (if (and rest-id (not rest-given?) (pair? (hash-ref saved rest-id '())))
                 (list (string-append "rest " rest-id))
                 '())))
