@@ -6,6 +6,7 @@
 (provide checkpoint-value?
          decode-value
          encode-value
+         string-keyed?
          value-problem)
 
 (define tagged-dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
@@ -42,15 +43,14 @@
   (define (bound-to-identity? k)
     (match k
       [(? tensor?) #t]
-      [(or (? pair?) (? hash?))
-       (hash-ref! identity-bound k
-                  (lambda ()
-                    (match k
-                      [(cons a d) (or (bound-to-identity? a) (bound-to-identity? d))]
-                      [_ (or (not (immutable? k))
-                             (for/or ([(a x) (in-hash k)])
-                               (or (bound-to-identity? a) (bound-to-identity? x))))])))]
+      [(cons a d)
+       (hash-ref! identity-bound k (lambda () (or (bound-to-identity? a) (bound-to-identity? d))))]
+      [(? hash?) (hash-ref! identity-bound k (lambda () (hash-bound-to-identity? k)))]
       [_ #f]))
+  (define (hash-bound-to-identity? h)
+    (or (not (immutable? h))
+        (for/or ([(a x) (in-hash h)])
+          (or (bound-to-identity? a) (bound-to-identity? x)))))
   (define (bad path v) (cons path v))
   (define (node v path walk)
     (cond
@@ -101,8 +101,11 @@
     [(hash-eqv? h) "eqv"]
     [else "equal"]))
 
+(define (string-keyed? v)
+  (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))
+
 (define (object-hash? h)
-  (and (hash-equal? h) (for/and ([k (in-hash-keys h)]) (string? k))))
+  (and (hash-equal? h) (string-keyed? h)))
 
 (define (keys-in-a-fixed-order h)
   (define (printed k)
@@ -140,12 +143,12 @@
                                           (list (encode k) (encode (hash-ref v k)))))])))])))
 
 (define (decode-value j tensor-named malformed)
-  (define (payload j tag ok?)
-    (match (hash-ref j tag)
+  (define (payload tagged tag ok?)
+    (match (hash-ref tagged tag)
       [(? ok? x) x]
       [_ (malformed)]))
-  (define (tagged-number j tag ok?)
-    (match (string->number (payload j tag string?) 10)
+  (define (tagged-number tagged tag ok?)
+    (match (string->number (payload tagged tag string?) 10)
       [(? ok? x) x]
       [_ (malformed)]))
   (let decode ([j j])

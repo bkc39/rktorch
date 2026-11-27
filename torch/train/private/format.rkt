@@ -9,7 +9,7 @@
                   read-safetensors safetensors-header safetensors-metadata
                   safetensors-payload-size safetensors-tensor tag-dtype tag-width
                   write-safetensors!)
-         (only-in "value.rkt" checkpoint-value? decode-value encode-value))
+         (only-in "value.rkt" checkpoint-value? decode-value encode-value string-keyed?))
 
 (provide current-header-limit
          current-write-fault
@@ -31,12 +31,14 @@
        (cons (string-append "state_dict." name) (hash-ref model name)))]
     [_ '()]))
 
+(define decimal-digits-per-bit 3/10)
+
 (define (written-size j)
   (define sizes (make-hasheq))
   (let size ([j j])
     (match j
       [(? string?) (+ 2 (string-length j))]
-      [(? exact-integer?) (add1 (quotient (* 3 (integer-length j)) 10))]
+      [(? exact-integer?) (add1 (floor (* decimal-digits-per-bit (integer-length j))))]
       [(? list?)
        (hash-ref! sizes j (lambda () (for/fold ([n 1]) ([x (in-list j)]) (+ n 1 (size x)))))]
       [(? hash?)
@@ -119,6 +121,6 @@
     (with-handlers ([exn:fail? (lambda (_) (malformed))])
       (string->jsexpr (hash-ref meta "checkpoint"))))
   (define tree (decode-value text tensor-named malformed))
-  (unless (and (hash? tree) (andmap string? (hash-keys tree)) (checkpoint-value? tree))
+  (unless (and (string-keyed? tree) (checkpoint-value? tree))
     (malformed))
   tree)

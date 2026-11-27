@@ -300,7 +300,8 @@ renamed, so a failed save leaves @racket[path] as it was. A run that has not
 started, as in @tt{on-load-checkpoint}, cannot be saved, as Lightning raises
 without a trainer attached; neither can a tree whose safetensors header would
 be over 100 MB. The run @racket[fit] returns can be saved, as Lightning's
-@tt{save_checkpoint} after @tt{fit}, and is saved as at the fit's end.
+@tt{save_checkpoint} after @tt{fit}: its counters, optimizer and callback state
+are the run's at the fit's end, its weights the trainer's current ones.
 
 @racket[#:weights-only?] keeps the model, the hyperparameters and the loop's
 position, as Lightning's @tt{weights_only}; only the trainer's
@@ -322,10 +323,10 @@ that hold their keys strongly and whose string keys do not begin with @tt{$}. An
 @racket[eq?] hash's keys must keep their identity through a read: interned
 symbols, fixnums, booleans and @racket['()]; an @racket[eqv?] hash's may also be
 flonums and exact rationals. No key may hold a tensor or a mutable hash, which a
-read gives back as a different key. A value that contains itself is not one. They read
-back @racket[equal?] but for tensors, each a new CPU tensor of the same dtype,
-shape and elements, one tensor wherever the saved one was held; hashes come
-back immutable and of the same comparison.}
+read gives back as a different key. A value that contains itself is not one.
+They read back @racket[equal?] but for tensors, each a new CPU tensor of the
+same dtype, shape and elements, one tensor wherever the saved one was held;
+hashes come back immutable and of the same comparison.}
 
 @defproc[(load-from-checkpoint [make-trainer (unconstrained-domain-> trainer?)]
                                [path path-string?]

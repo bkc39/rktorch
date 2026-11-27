@@ -251,8 +251,8 @@
                     (lambda (ckpt)
                       (hash-remove! ckpt "hyper_parameters")
                       (hash-remove! ckpt "trainer_hparams"))))
-      (check-exn #rx"load-from-checkpoint:.*formal: 'width.*bare[.]ckpt"
-                 (lambda () (load-from-checkpoint Plain path)))
+      (check-exn/contract #rx"load-from-checkpoint:.*formal: 'width.*bare[.]ckpt"
+                          (lambda () (load-from-checkpoint Plain path)))
       (define back (load-from-checkpoint Plain path #:init-args (hasheq 'width 1)))
       (check-equal? (trainer-hparams back) (hasheq))))
 
@@ -264,6 +264,7 @@
                         (lambda (ckpt) (hash-set! ckpt "epoch" "one")))]
             [i (in-naturals)])
         (define path (saved-with dir (format "f~a.ckpt" i) edit))
-        (check-exn #rx"^load-from-checkpoint: the checkpoint's entry is missing.*f[0-9][.]ckpt"
-                   (lambda () (load-from-checkpoint Plain path))
-                   (format "edit ~a" i))))))
+        (check-exn/contract
+         #rx"^load-from-checkpoint: the checkpoint's entry is missing.*f[0-9][.]ckpt"
+         (lambda () (load-from-checkpoint Plain path))
+         (format "edit ~a" i))))))

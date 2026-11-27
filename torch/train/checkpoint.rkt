@@ -26,7 +26,7 @@
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
                   scheduler-config-scheduler trainer-hook trainer-hparam-names trainer?)
-         (only-in "private/value.rkt" checkpoint-value? value-problem))
+         (only-in "private/value.rkt" checkpoint-value? string-keyed? value-problem))
 
 (define-named-contract checkpoint-value/c checkpoint-value?)
 
@@ -62,7 +62,7 @@
      (hash-set counters "batch_index" i)]
     [(_ _) counters]))
 
-(define (string-keyed h)
+(define (keys->strings h)
   (for/hash ([(k v) (in-hash h)]) (values (symbol->string k) v)))
 
 (define (formal-entry shape)
@@ -75,7 +75,7 @@
   (define captured ((trainer-hook tr 'init-arguments) tr))
   (define kept (init-capture-kept captured))
   (define shapes (init-capture-shapes captured))
-  (hash "hyper_parameters" (string-keyed kept)
+  (hash "hyper_parameters" (keys->strings kept)
         "init_formals" (map formal-entry shapes)
         "init_dropped" (for/list ([shape (in-list shapes)]
                                   #:unless (hash-has-key? kept (formal-name shape)))
@@ -105,8 +105,8 @@
              "global_step" (run-global-step r)
              "state_dict" (make-immutable-hash (state-dict tr))
              "loops" (hash "fit_loop" (fit-loop r))
-             "trainer_hparams" (string-keyed (trainer-hparams tr))
-             "callback_metrics" (string-keyed (book-metrics (run-book r)))))
+             "trainer_hparams" (keys->strings (trainer-hparams tr))
+             "callback_metrics" (keys->strings (book-metrics (run-book r)))))
 
 (define (with-training-state r tree)
   (define full
@@ -154,9 +154,6 @@
     [_ (raise-arguments-error 'load-from-checkpoint "the checkpoint's entry is missing or malformed"
                               "key" key
                               "path" path)]))
-
-(define (string-keyed? v)
-  (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))
 
 (define (formals? v)
   (and (list? v)
