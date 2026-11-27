@@ -1,16 +1,18 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/match match match-define)
            (only-in racket/port open-output-nowhere)
-           (only-in racket/string string-contains?)
+           (only-in racket/string string-contains? string-join)
            rackunit
-           (only-in "../main.rkt" current-generator make-generator)
+           (only-in "../main.rkt" current-generator make-generator zeros)
            (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" saving-callback Small)
-           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
+           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader)
+           (only-in "private/wedge.rkt" call-with-process-deadline))
 
   (define (saved-with dir callbacks #:name [name "e.ckpt"] #:max-epochs [epochs 1]
                       #:weights-only? [weights-only? #f])
@@ -26,8 +28,9 @@
       (fit tr (toy-loader 4) #:max-epochs epochs #:logger #f #:ckpt-path path
            #:callbacks callbacks)))
 
-  (define (check-names-path rx path thunk [message ""])
-    (check-exn (lambda (e) (and (regexp-match? rx (exn-message e))
+  (define (check-names-path rx path thunk [message ""] #:kind [kind? exn:fail:contract?])
+    (check-exn (lambda (e) (and (kind? e)
+                                (regexp-match? rx (exn-message e))
                                 (string-contains? (exn-message e) (path->string path))))
                thunk
                message))
@@ -69,6 +72,22 @@
       (values opt (step-lr opt #:step-size 1)))
     (define-training-step (x y) (mse-loss (net x) y)))
 
+  (define (reshaping key edit)
+    (lambda-callback #:state-key (format "reshape-~a" key)
+                     #:on-save-checkpoint (lambda (_r tree) (edit tree))))
+
+  (define removed (string->uninterned-symbol "removed"))
+
+  (define (path-set h keys v)
+    (match keys
+      [(list k) (if (eq? v removed) (hash-remove h k) (hash-set h k v))]
+      [(cons k more) (hash-set h k (path-set (hash-ref h k) more v))]))
+
+  (define ((edit-at keys v) tree)
+    (define edited (path-set (for/hash ([(k x) (in-hash tree)]) (values k x)) keys v))
+    (hash-clear! tree)
+    (for ([(k x) (in-hash edited)]) (hash-set! tree k x)))
+
   (test-case "every resume error names the checkpoint's path"
     (with-temporary-directory (dir #:template "named-~a")
       (define path (saved-with dir '()))
@@ -88,64 +107,81 @@
         (parameterize ([current-generator (make-generator 13)])
           (saved-with dir '() #:name "generated.ckpt")))
       (check-names-path #rx"current-generator" generated (lambda () (resume (Small) generated))
-                        "no current-generator")))
-
-  (define (reshaping key edit)
-    (lambda-callback #:state-key (format "reshape-~a" key)
-                     #:on-save-checkpoint (lambda (_r tree) (edit tree))))
-
-  (define ((fit-loop-set field v) tree)
-    (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
-    (hash-set! tree "loops" (hash "fit_loop" (hash-set loop field v))))
+                        "no current-generator")
+      (define unfit
+        (saved-with dir (list (reshaping "unfit" (edit-at '("optimizer_states") (list (hash)))))
+                    #:name "unfit.ckpt"))
+      (check-names-path #rx"optimizer" unfit (lambda () (resume (Small) unfit))
+                        "a contract on a loaded state keeps its blame"
+                        #:kind exn:fail:contract:blame?)))
 
   (define-trainer Tested (net lr)
     (define-init () (set! net (Linear 2 1)) (set! lr 0.1))
     (define-hparams lr)
     (define-test-step (x y) (log! 'test-loss (mse-loss (net x) y))))
 
-  (test-case "T3-L3: a malformed tree is refused before any hook, naming the path and the key"
-    (with-temporary-directory (dir #:template "malformed-~a")
-      (define ((set-entry key v) tree) (hash-set! tree key v))
-      (define ((remove-entry key) tree) (hash-remove! tree key))
-      (for ([malformed (in-list
-                        (list (cons "loops" (remove-entry "loops"))
-                              (cons "loops" (set-entry "loops" (hash)))
-                              (cons "phase" (fit-loop-set "phase" 3))
-                              (cons "eval_batches" (fit-loop-set "eval_batches" "many"))
-                              (cons "epoch_end_logged" (fit-loop-set "epoch_end_logged" 1))
-                              (cons "trainer_hparams" (remove-entry "trainer_hparams"))
-                              (cons "trainer_hparams" (set-entry "trainer_hparams" '(lr)))
-                              (cons "global_step" (remove-entry "global_step"))
-                              (cons "callback_metrics"
-                                    (set-entry "callback_metrics" (hash "x" "y")))
-                              (cons "rng" (remove-entry "rng"))
-                              (cons "metric_book" (set-entry "metric_book" (hash "train" 1)))
-                              (cons "optimizer_states" (set-entry "optimizer_states" (hash)))
-                              (cons "lr_schedulers" (set-entry "lr_schedulers" 0))))]
-            [i (in-naturals)])
-        (match-define (cons key edit) malformed)
-        (define path (saved-with dir (list (reshaping i edit)) #:name (format "~a.ckpt" i)))
-        (define seen (box '()))
-        (check-names-path (regexp (string-append "cannot be resumed.*key: \"[a-z_.]*" key))
-                          path
-                          (lambda ()
-                            (resume (Small) path
-                                    #:callbacks (list (lambda-callback
-                                                       #:setup (lambda (_r _stage)
-                                                                 (set-box! seen '(setup)))))))
-                          key)
-        (check-equal? (unbox seen) '() (format "~a: no hook ran" key)))
-      (define path (saved-with dir (list (reshaping "test" (remove-entry "trainer_hparams")))
-                               #:name "test.ckpt"))
+  (define malformed-entries
+    (list (list '("loops") removed)
+          (list '("loops") (hash))
+          (list '("loops" "fit_loop" "phase") 3)
+          (list '("loops" "fit_loop" "eval_batches") "many")
+          (list '("loops" "fit_loop" "epoch_end_logged") 1)
+          (list '("trainer_hparams") removed)
+          (list '("trainer_hparams") '(lr))
+          (list '("global_step") removed)
+          (list '("callback_metrics") (hash "x" "y"))
+          (list '("rng") removed)
+          (list '("rng" "racket") '(1 2))
+          (list '("rng" "racket") (list 1 2 3 4 5 (expt 2 40)))
+          (list '("rng" "cpu") (zeros 3))
+          (list '("rng" "current_generator") 5)
+          (list '("metric_book") (hash "train" 1))
+          (list '("MixedPrecision") (hash "scale" -1.0))
+          (list '("optimizer_states") (hash))
+          (list '("optimizer_states") '(1))
+          (list '("lr_schedulers") 0)
+          (list '("lr_schedulers") '(1))))
+
+  (with-temporary-directory (dir #:template "malformed-~a")
+    (for ([malformed (in-list malformed-entries)] [i (in-naturals)])
+      (match-define (list keys v) malformed)
+      (define key (string-join keys "."))
+      (test-case (format "T3-L3: ~a as ~e is refused before any hook, naming the path and the key"
+                         key v)
+        (call-with-process-deadline
+         60
+         #:what (format "refusing a malformed ~a" key)
+         (lambda ()
+           (define path
+             (saved-with dir (list (reshaping i (edit-at keys v))) #:name (format "~a.ckpt" i)))
+           (define seen (box '()))
+           (check-names-path (regexp (string-append "cannot be resumed.*key: \"" (regexp-quote key)))
+                             path
+                             (lambda ()
+                               (resume (Small) path
+                                       #:callbacks (list (lambda-callback
+                                                          #:setup (lambda (_r _stage)
+                                                                    (set-box! seen '(setup)))))))
+                             key)
+           (check-equal? (unbox seen) '() "no hook ran")
+           (check-pred exact-nonnegative-integer? (random 10) "random returns")))))
+    (test-case "T3-L3: a metric_book is checked in a file without optimizer states"
+      (define path
+        (saved-with dir (list (reshaping "book-only" (edit-at '("metric_book") (hash "train" 1)))
+                              (reshaping "no-optimizers" (edit-at '("optimizer_states") removed)))
+                    #:name "book-only.ckpt"))
+      (check-names-path #rx"cannot be resumed.*key: \"metric_book" path
+                        (lambda () (resume (Small) path))))
+    (test-case "T3-L3: test #:ckpt-path refuses a malformed tree"
+      (define path
+        (saved-with dir (list (reshaping "test" (edit-at '("trainer_hparams") removed)))
+                    #:name "test.ckpt"))
       (check-names-path #rx"cannot be resumed.*trainer_hparams" path
-                        (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path))
-                        "test #:ckpt-path")))
+                        (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path)))))
 
   (test-case "an epoch-end file without epoch_end_logged resumes without a warning"
     (with-temporary-directory (dir #:template "older-~a")
-      (define (drop-logged tree)
-        (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
-        (hash-set! tree "loops" (hash "fit_loop" (hash-remove loop "epoch_end_logged"))))
+      (define drop-logged (edit-at '("loops" "fit_loop" "epoch_end_logged") removed))
       (define path (saved-with dir (list (reshaping "older" drop-logged))))
       (define-values (_run warnings) (call-with-logged-warnings (lambda () (resume (Small) path))))
       (check-equal? warnings '()))))

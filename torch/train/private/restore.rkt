@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/match match match*)
+         (only-in threading ~>)
          (only-in "../../foreign.rkt" cpu-device device-index device-type)
          (only-in "../../foreign/generator.rkt"
                   current-generator generator-device generator-state rng-state
@@ -43,12 +44,13 @@
      (set-generator-state! g state)]))
 
 (define (restore-rng-bundle! bundle [device (cpu-device)] #:path [path #f])
+  (define racket-state
+    (~> (hash-ref bundle "racket") list->vector vector->pseudo-random-generator
+        pseudo-random-generator->vector))
   (restore-current-generator! (hash-ref bundle "current_generator" #f) path)
   (set-rng-state! (hash-ref bundle "cpu"))
   (define type (device-type device))
   (define device-state (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f)))
   (when device-state
     (set-rng-state! device-state #:device device))
-  (vector->pseudo-random-generator!
-   (current-pseudo-random-generator)
-   (list->vector (hash-ref bundle "racket"))))
+  (vector->pseudo-random-generator! (current-pseudo-random-generator) racket-state))

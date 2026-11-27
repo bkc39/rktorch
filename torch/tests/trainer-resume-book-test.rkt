@@ -131,7 +131,7 @@
        (define path (path->string (build-path dir "split" "epoch=1.ckpt")))
        (check-equal? (length warnings) 1)
        (check-regexp-match (regexp-quote path) (car warnings))
-       (check-regexp-match #rx"before the trainer's on-train-epoch-end" (car warnings))
+       (check-regexp-match #rx"before or during the trainer's on-train-epoch-end" (car warnings))
        (check-false (~> (read-checkpoint path) (hash-ref "loops") (hash-ref "fit_loop")
                         (hash-ref "epoch_end_logged")))
        (define (epoch-tags reads) (map (match-lambda [(list _ named _) (last named)]) reads))
