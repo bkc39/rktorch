@@ -1176,33 +1176,79 @@ anything is copied.
 ]
 }
 
-The state functions below are not implemented yet: they raise
-@racket[exn:fail:unsupported].
-
 @deftogether[(@defproc[(optimizer-state-dict [opt optimizer?] [model layer?]) optimizer-state/c]
               @defproc[(load-optimizer-state! [opt optimizer?] [model layer?]
                                               [state optimizer-state/c]) void?]
               @defthing[optimizer-state/c flat-contract?])]{
 @tt{Optimizer.state_dict} and @tt{load_state_dict}, keyed by @racket[model]'s
 parameter names rather than positions, so a reordered model fails loudly. The
-state tensors are the optimizer's own, as in torch, and @racket["step"] is an
-integer in every mode, so a state moves between @racket['loop], @racket['foreach]
-and @racket['fused]. Every hash in a state is an immutable @racket[equal?] hash. Group
-hyperparameters are stored as flonums, so @racket[#:lr 1/10] saves as @racket[0.1];
-a value that bypasses the groups can stay exact, as @racket[one-cycle-lr] with
+state tensors are host copies taken when the dict is built, so a dict held
+across a step still describes the step it was taken at and saving needs no
+second buffer on the device; torch's dict aliases the live device tensors, step
+count included. @racket["step"] is an integer in every mode, so a state moves
+between @racket['loop], @racket['foreach] and @racket['fused]. Every hash in a
+state is an immutable @racket[equal?] hash. Numeric group hyperparameters are
+stored as flonums, so @racket[#:lr 1/10] saves as @racket[0.1]; a value that
+bypasses the groups can stay exact, as @racket[one-cycle-lr] with
 @racket[#:max-lr 1/10 #:div-factor 25] saves an exact @racket[1/250] as its
-@tt{initial_lr} and @tt{base_lrs}. Loading checks everything first and replaces each group's
-hyperparameters; floating tensors go to their parameter's device and dtype, as
-torch does.}
+@tt{initial_lr} and @tt{base_lrs}.
+
+A parameter's slots are those its optimizer can hold, whatever the group's
+momentum is now: sgd may keep a @tt{momentum_buffer}; rmsprop keeps a
+@tt{square_avg} and may keep a @tt{momentum_buffer}; adam and adamw keep
+@tt{exp_avg}, @tt{exp_avg_sq} and @tt{step}. A buffer kept while momentum was
+changed to 0 is loaded and used again when it rises, and a missing sgd buffer
+starts as a copy of the next gradient, as in torch. Torch's per-parameter
+rmsprop @tt{step} loads and is ignored; rktorch does not write one.
+
+Loading checks the state's shape, as torch does: the keys, the slots and their
+tensor shapes must fit the optimizer. Any hyperparameter the optimizer can
+reach loads, such as nesterov with a momentum of 0 or a negative rate from a
+schedule; the only values refused are a negative momentum, weight decay or
+@racket[alpha] and a negative rmsprop @racket[eps], which no write to the
+optimizer can produce. Loading checks everything first, then replaces each
+group's hyperparameters and the slots together, so a load that raises or is
+broken leaves the optimizer unchanged. Slot tensors are copied to their
+parameter's device, and to its dtype when the parameter is floating, an integer
+slot included, as torch casts them, so the loaded state shares no tensor with
+@racket[state]. A load must not overlap a step of the same optimizer in another
+thread, as in torch.
+
+@torch-examples[
+(manual-seed! 0)
+(define tiny (Linear 3 1))
+(define tiny-opt (adam (parameters tiny) #:lr 0.01))
+(zero-grads! tiny-opt)
+(backward! (sum (tiny (ones 2 3))))
+(step! tiny-opt)
+(define saved (optimizer-state-dict tiny-opt tiny))
+(hash-ref (hash-ref saved "state") "bias")
+(hash-ref (car (hash-ref saved "param_groups")) "betas")
+(define fused-twin (adam (parameters tiny) #:lr 0.5 #:fused? #t))
+(load-optimizer-state! fused-twin tiny saved)
+(learning-rate fused-twin)
+]
+}
 
 @deftogether[(@defproc[(scheduler-state-dict [s scheduler?]) scheduler-state/c]
               @defproc[(load-scheduler-state! [s scheduler?] [state scheduler-state/c]) void?]
               @defthing[scheduler-state/c flat-contract?])]{
 @tt{LRScheduler.state_dict}'s progress: @tt{last_epoch}, @tt{base_lrs} and
-@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts and each inner
-scheduler's state for chained and sequential ones. The constructor's arguments
+@tt{_last_lr}, with @tt{T_cur} and @tt{T_i} for warm restarts; @tt{T_cur} is
+an exact count, as torch's is when stepped without an epoch. A chained or
+sequential scheduler keeps @tt{_last_lr} and each inner scheduler's state under
+@tt{_schedulers}, and no @tt{base_lrs}, as torch's do. Both keep
+@tt{last_epoch}, which torch's @tt{ChainedScheduler} does not have, because a
+chain has its own @racket[scheduler-step-count]. The constructor's arguments
 are not saved. Loading leaves the optimizer's rates alone, as torch does; load
-the optimizer's state first.}
+the optimizer's state first.
+
+@torch-examples[
+(define halving (step-lr (sgd (parameters (Linear 2 1)) #:lr 0.1) #:step-size 2 #:gamma 0.5))
+(for ([_ (in-range 3)]) (step! halving))
+(scheduler-state-dict halving)
+]
+}
 
 @deftogether[(@defproc[(grad-scaler-state-dict [s grad-scaler?]) grad-scaler-state/c]
               @defproc[(load-grad-scaler-state! [s grad-scaler?] [state grad-scaler-state/c]) void?]
@@ -1210,7 +1256,13 @@ the optimizer's state first.}
 @tt{GradScaler.state_dict}: @tt{scale}, @tt{growth_factor}, @tt{backoff_factor},
 @tt{growth_interval} and @tt{_growth_tracker}, empty for a disabled scaler.
 Loading into a disabled scaler does nothing; loading an empty state into an
-enabled one raises.}
+enabled one raises.
+
+@torch-examples[
+(grad-scaler-state-dict (grad-scaler #:device 'cpu #:init-scale 1024.0))
+(grad-scaler-state-dict (grad-scaler #:device 'cpu #:enabled? #f))
+]
+}
 
 @deftogether[(@defproc[(ema-n-averaged [e ema?]) exact-nonnegative-integer?]
               @defproc[(set-ema-n-averaged! [e ema?] [n exact-nonnegative-integer?]) void?])]{

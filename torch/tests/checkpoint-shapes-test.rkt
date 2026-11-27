@@ -85,7 +85,7 @@
       (list (list optimizer-state? (hash "state" (hash) "param_groups" (list exact-group)))
             (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(1/10) "_last_lr" '(1/20)))
             (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
-                                         "T_cur" 1/2 "T_i" 3))
+                                         "T_cur" 1 "T_i" 3))
             (list grad-scaler-state? (hash "scale" 65536.0 "growth_factor" 2.0
                                            "backoff_factor" 0.5 "growth_interval" 2000
                                            "_growth_tracker" 0))))
@@ -93,22 +93,29 @@
       (match-define (list shape? v) a)
       (check-true (shape? v) (format "~e" v))
       (check-true (checkpoint-value? v) (format "~e" v)))
-    (check-false (scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
-                                         "_schedulers" (list (hasheq "last_epoch" 0))))
+    (check-false (scheduler-state?
+                  (hash "last_epoch" 0 "_last_lr" '(0.1)
+                        "_schedulers" (list (hasheq "last_epoch" 0 "base_lrs" '(0.1)
+                                                    "_last_lr" '(0.1)))))
                  "an inner schedule keyed by eq?"))
 
   (test-case "scheduler-state/c: last_epoch, base_lrs, _last_lr, restarts and inner schedules"
     (define plain (hash "last_epoch" 3 "base_lrs" '(0.1) "_last_lr" '(0.05)))
     (check-true (scheduler-state? plain))
     (check-true (scheduler-state? (hash-set* plain "T_cur" 1 "T_i" 6)))
-    (check-true (scheduler-state? (hash-set plain "_schedulers" (list plain plain))))
+    (define composite (hash "last_epoch" 3 "_last_lr" '(0.05) "_schedulers" (list plain plain)))
+    (check-true (scheduler-state? composite) "chained and sequential keep no base_lrs, as torch's")
+    (check-false (scheduler-state? (hash-set composite "base_lrs" '(0.1))))
     (check-false (scheduler-state? (hash-set plain "T_cur" 1)) "T_cur without T_i")
     (check-false (scheduler-state? (hash-set* plain "T_cur" 1 "T_i" 0)))
+    (for ([t-cur (in-list '(1/2 1.5 2.0 -1))])
+      (check-false (scheduler-state? (hash-set* plain "T_cur" t-cur "T_i" 6))
+                   (format "T_cur ~a is not an exact count" t-cur)))
     (check-false (scheduler-state? (hash-set plain "last_epoch" 1.0)))
     (check-false (scheduler-state? (hash-remove plain "base_lrs")))
     (check-false (scheduler-state? (hash-set plain "_last_lr" '(a))))
     (check-false (scheduler-state? (hash-set plain "step_size" 2)) "constructor arguments")
-    (check-false (scheduler-state? (hash-set plain "_schedulers" (list (hash)))))
+    (check-false (scheduler-state? (hash-set composite "_schedulers" (list (hash)))))
     (check-false (scheduler-state? (hash-copy plain)) "mutable"))
 
   (test-case "grad-scaler-state/c: empty, or torch's five keys in range"
@@ -119,7 +126,8 @@
     (check-false (grad-scaler-state? (make-hash)) "mutable")
     (check-false (grad-scaler-state? (hash-remove st "_growth_tracker")))
     (check-false (grad-scaler-state? (hash-set st "extra" 1)))
-    (check-false (grad-scaler-state? (hash-set st "scale" 0.0)))
+    (check-true (grad-scaler-state? (hash-set st "scale" 0.0)) "an underflowed scale")
+    (check-false (grad-scaler-state? (hash-set st "scale" -1.0)))
     (check-false (grad-scaler-state? (hash-set st "scale" 65536)) "a flonum scale")
     (check-false (grad-scaler-state? (hash-set st "growth_factor" 1.0)))
     (check-false (grad-scaler-state? (hash-set st "backoff_factor" 1.0)))
@@ -180,8 +188,8 @@
   (test-case "optimizer-state-dict's precondition: the model names every parameter"
     (define net (Linear 2 1))
     (define opt (sgd (parameters net) #:lr 0.1))
-    (check-exn exn:fail:unsupported? (lambda () (optimizer-state-dict opt net))
-               "parameters of the model reach the body")
+    (check-pred optimizer-state? (optimizer-state-dict opt net)
+                "parameters of the model reach the body")
     (check-exn blames-this-test? (lambda () (optimizer-state-dict opt (Linear 2 1))))
     (check-exn blames-this-test?
                (lambda () (load-optimizer-state! opt (Linear 2 1)

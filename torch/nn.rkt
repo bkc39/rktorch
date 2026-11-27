@@ -38,10 +38,10 @@
          "nn/loss.rkt"
          "nn/mode.rkt"
          (only-in "nn/optim.rkt"
-                  adam adam? adamw adamw? gen:optimizer learning-rate lr-optimizer/c
-                  optimizer-param-groups param-group-ref param-group-set! rmsprop rmsprop?
-                  set-learning-rate! sgd sgd? step! zero-grads!)
+                  adam adam? adamw adamw? gen:optimizer lr-optimizer/c rmsprop rmsprop? sgd sgd?
+                  step! zero-grads!)
          (submod "nn/optim.rkt" checked)
+         "nn/optim-hyperparameters.rkt"
          "nn/optim-state.rkt"
          "nn/param-group.rkt"
          "nn/scheduler.rkt"

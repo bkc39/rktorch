@@ -4,8 +4,7 @@
                      ;; whole-module require on purpose
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* ->i >=/c any/c contract-out flat-named-contract listof or/c
-                  unsupplied-arg?)
+                  -> ->* ->i >=/c any/c contract-out flat-named-contract unsupplied-arg?)
          (only-in racket/flonum flexpt)
          (only-in racket/generic define-generics)
          (only-in racket/list group-by)
@@ -19,12 +18,10 @@
          (only-in "../foreign/ops.rkt" move-generation)
          (prefix-in g: (only-in "../generated.rkt"
                                 add-tensor add-tensor! div-scalar! lerp-scalar!))
-         (only-in "../private/contract.rkt" define/checked-out define/contract-out supplied-or)
+         (only-in "../private/contract.rkt" define/checked-out define/contract-out)
          (only-in "../private/step-log.rkt" log-optimizer-step!)
          (only-in "optim-groups.rkt"
-                  group-store store-count store-groups store-params store-partition store-ref
-                  store-set! store-set-all!)
-         (only-in "param-group.rkt" hyperparameter-key/c param-group?)
+                  group-store store-count store-groups store-params store-partition)
          (only-in (submod "param-group.rkt" private)
                   floating-params/c groups-distinct? groups-keys-within? groups-setting-holds?
                   param-group-settings param-group-tensors params/c)
@@ -55,8 +52,12 @@
            call-with-gradient-buckets
            (struct-out gradient-bucket)
            optimizer-fused?
+           optimizer-mode
            optimizer-state
-           scaled-step!))
+           scaled-step!
+           tracked-state
+           tracked-store
+           tracked?))
 
 (define-generics optimizer
   (optimizer-step! optimizer)
@@ -157,11 +158,15 @@
     (with-gradients ([qs gs] (optimizer-parameters opt))
       (proc (map bucket-of (group-by key-of (map cons qs gs)))))))
 
-(define (optimizer-fused? opt)
+(define (optimizer-mode opt)
   (match (optimizer-root opt)
-    [(? sgd? o) (eq? (sgd-mode o) 'fused)]
-    [(? adam? o) (eq? (adam-mode o) 'fused)]
+    [(? sgd? o) (sgd-mode o)]
+    [(? adam? o) (adam-mode o)]
+    [(? rmsprop? o) (rmsprop-mode o)]
     [_ #f]))
+
+(define (optimizer-fused? opt)
+  (eq? (optimizer-mode opt) 'fused))
 
 (define (scaled-step! opt [grad-scale #f] [found-inf #f] [home #f])
   (parameterize ([current-amp-scaling (and found-inf (amp-scaling-at home grad-scale found-inf))])
@@ -455,45 +460,3 @@
 (define/checked-out (param-group-count opt)
   (-> optimizer? exact-positive-integer?)
   (store-count (optimizer-store opt)))
-
-(define/contract-out (optimizer-param-groups opt) ;; noqa
-  (-> optimizer? (listof param-group?))
-  (store-groups (optimizer-store opt)))
-
-(define/contract-out (param-group-ref opt i key) ;; noqa
-  (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c])
-       #:pre/name (opt i) "the optimizer has no parameter group with this index"
-       (group-index? opt i)
-       #:pre/name (opt key) "this optimizer has no such hyperparameter"
-       (has-hyperparameter? opt key)
-       [_ (or/c real? boolean?)])
-  (store-ref (optimizer-store opt) i key))
-
-(define/contract-out (param-group-set! opt i key v) ;; noqa
-  (->i ([opt optimizer?] [i exact-nonnegative-integer?] [key hyperparameter-key/c]
-        [v (opt key) (hyperparameter-value/c opt key)])
-       #:pre/name (opt i) "the optimizer has no parameter group with this index"
-       (group-index? opt i)
-       #:pre/name (opt key) "this optimizer has no such hyperparameter"
-       (has-hyperparameter? opt key)
-       [_ void?])
-  (store-set! (optimizer-store opt) i key v))
-
-(define/contract-out (learning-rate opt #:group [group 0]) ;; noqa
-  (->i ([opt lr-optimizer/c]) (#:group [group exact-nonnegative-integer?])
-       #:pre/name (opt group) "the optimizer has no parameter group with this index"
-       (or (unsupplied-arg? group) (group-index? opt group))
-       [_ real?])
-  (store-ref (optimizer-store opt) group 'lr))
-
-(define/contract-out (set-learning-rate! opt lr #:group [group #f]) ;; noqa
-  (->i ([opt lr-optimizer/c] [lr (>=/c 0)])
-       (#:group [group (or/c #f exact-nonnegative-integer?)])
-       #:pre/name (opt group) "the optimizer has no parameter group with this index"
-       (match (supplied-or group)
-         [#f #t]
-         [i (group-index? opt i)])
-       [_ void?])
-  (if group
-      (store-set! (optimizer-store opt) group 'lr lr)
-      (store-set-all! (optimizer-store opt) 'lr lr)))

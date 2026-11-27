@@ -24,7 +24,8 @@
          sgd-fused!
          slot!
          slot-ref
-         step-count!)
+         step-count!
+         step-tensor)
 
 (define (slot-table state name)
   (hash-ref! state name make-hasheq))

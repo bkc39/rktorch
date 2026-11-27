@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >/c and/c any/c contract-out contract? or/c rename-contract
-                  unsupplied-arg?)
+                  -> ->* ->i </c >/c >=/c and/c any/c contract-out contract? or/c
+                  rename-contract unsupplied-arg?)
          (only-in racket/match match match* match-define struct*)
          (only-in "../foreign.rkt"
                   * + copy! cuda-available? device device-type device? full item tensor? to)
@@ -10,7 +10,6 @@
                                 addcdiv! amp-foreach-non-finite-check-and-unscale!
                                 amp-update-scale! fill-scalar! sum-dim-intlist))
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "optim.rkt" optimizer-root optimizer?)
          (only-in (submod "optim.rkt" private)
                   call-with-gradient-buckets gradient-bucket gradient-bucket-dtype
@@ -34,7 +33,9 @@
 (struct device-state (factor tracker unit inverse home
                              [spares #:mutable] [stages #:mutable]))
 
-(struct grad-scaler (active? init growth backoff interval [state #:auto #:mutable])
+(struct grad-scaler (active? [init #:mutable] [growth #:mutable] [backoff #:mutable]
+                             [interval #:mutable] [state #:auto #:mutable]
+                             [initial-tracker #:auto #:mutable])
   #:auto-value #f
   #:constructor-name make-grad-scaler ;; noqa
   #:name grad-scaler-struct) ;; noqa
@@ -108,7 +109,9 @@
 
 (define (fresh-state s dev)
   (device-state (full (grad-scaler-init s) #:device dev #:dtype 'float32)
-                (g:sum-dim-intlist (full 0.0 #:device dev) #f #f 'int32)
+                (g:sum-dim-intlist (full (exact->inexact (or (grad-scaler-initial-tracker s) 0))
+                                         #:device dev)
+                                   #f #f 'int32)
                 (full 1.0 #:device dev #:dtype 'float32)
                 (full 0.0 #:device dev #:dtype 'float32)
                 dev '() #hasheq()))
@@ -265,17 +268,45 @@
   contract?
   (rename-contract
    (or/c (and/c immutable-equal-hash/c hash-empty?)
-         (record/c (hash "scale" (and/c flonum? (>/c 0.0))
+         (record/c (hash "scale" (and/c flonum? (>=/c 0.0))
                          "growth_factor" (and/c flonum? (>/c 1.0))
                          "backoff_factor" (and/c flonum? (>/c 0.0) (</c 1.0))
                          "growth_interval" exact-positive-integer?
                          "_growth_tracker" exact-nonnegative-integer?)))
    'grad-scaler-state/c))
 
+(define (growth-tracker s)
+  (match (grad-scaler-state s)
+    [#f (or (grad-scaler-initial-tracker s) 0)]
+    [st (inexact->exact (host-read (device-state-tracker st)))]))
+
 (define/contract-out (grad-scaler-state-dict s) ;; noqa
   (-> grad-scaler? grad-scaler-state/c)
-  (not-implemented 'grad-scaler-state-dict 'T3))
+  (if (grad-scaler-active? s)
+      (hash "scale" (grad-scaler-scale s)
+            "growth_factor" (grad-scaler-growth s)
+            "backoff_factor" (grad-scaler-backoff s)
+            "growth_interval" (grad-scaler-interval s)
+            "_growth_tracker" (growth-tracker s))
+      (hash)))
 
 (define/contract-out (load-grad-scaler-state! s state) ;; noqa
   (-> grad-scaler? grad-scaler-state/c void?)
-  (not-implemented 'load-grad-scaler-state! 'T3))
+  (when (grad-scaler-active? s)
+    (when (hash-empty? state)
+      (raise-arguments-error
+       'load-grad-scaler-state!
+       "the state is empty, possibly because it was saved from a disabled grad-scaler"))
+    (match-define (hash* ["scale" scale] ["growth_factor" growth] ["backoff_factor" backoff]
+                         ["growth_interval" interval] ["_growth_tracker" tracker])
+      state)
+    (set-grad-scaler-init! s scale)
+    (set-grad-scaler-growth! s growth)
+    (set-grad-scaler-backoff! s backoff)
+    (set-grad-scaler-interval! s interval)
+    (set-grad-scaler-initial-tracker! s tracker)
+    (define st (grad-scaler-state s))
+    (when st
+      (g:fill-scalar! (device-state-factor st) scale)
+      (g:fill-scalar! (device-state-tracker st) (exact->inexact tracker))
+      (void))))

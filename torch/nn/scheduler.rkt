@@ -6,11 +6,10 @@
                   unsupplied-arg?)
          (only-in racket/flonum ->fl flexpt)
          (only-in racket/generic define/generic)
-         (only-in racket/list count)
-         (only-in racket/match match match-define struct*)
+         (only-in racket/list append* append-map count)
+         (only-in racket/match match match* match-define match-lambda struct*)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/not-implemented.rkt" not-implemented)
          (only-in "optim-groups.rkt"
                   store-initial-lrs! store-set-each! store-update-each! store-values)
          (only-in "optim.rkt"
@@ -36,11 +35,11 @@
 (define schedulable/c
   (and/c lr-optimizer/c (not/c scheduler?)))
 
-(struct shape (bases next closed))
+(struct shape ([bases #:mutable] next closed))
 
-(struct rated (bases rate))
+(struct rated ([bases #:mutable] rate))
 
-(struct restarts (bases t-0 t-mult eta-min [t-cur #:mutable] [t-i #:mutable]))
+(struct restarts ([bases #:mutable] t-0 t-mult eta-min [t-cur #:mutable] [t-i #:mutable]))
 
 (struct chain (schedulers))
 
@@ -323,6 +322,9 @@
        scheduler?)
   (build opt (lambda (bases) (restarts bases t-0 t-mult (real->double-flonum eta-min) -1 t-0))))
 
+(define (bases-unless-chained? v)
+  (not (eq? (hash-has-key? v "base_lrs") (hash-has-key? v "_schedulers"))))
+
 (define (restarts-paired? v)
   (eq? (hash-has-key? v "T_cur") (hash-has-key? v "T_i")))
 
@@ -332,17 +334,81 @@
    (and/c (record/c (hash "last_epoch" exact-integer?
                           "base_lrs" (listof state-real/c)
                           "_last_lr" (listof state-real/c)
-                          "T_cur" state-real/c
+                          "T_cur" exact-nonnegative-integer?
                           "T_i" exact-positive-integer?
                           "_schedulers" (listof (recursive-contract scheduler-state/c #:flat)))
-                    #:required '("last_epoch" "base_lrs" "_last_lr"))
+                    #:required '("last_epoch" "_last_lr"))
+          bases-unless-chained?
           restarts-paired?)
    'scheduler-state/c))
 
+(define (inner-schedulers rule)
+  (match rule
+    [(struct* chain ([schedulers subs])) subs]
+    [(struct* sequence ([schedulers subs])) (vector->list subs)]
+    [_ #f]))
+
+(define (rule-bases rule)
+  (match rule
+    [(struct* shape ([bases bases])) bases]
+    [(struct* rated ([bases bases])) bases]
+    [(struct* restarts ([bases bases])) bases]))
+
 (define/contract-out (scheduler-state-dict s) ;; noqa
   (-> scheduler? scheduler-state/c)
-  (not-implemented 'scheduler-state-dict 'T3))
+  (define rule (scheduler-rule s))
+  (define progress (hash "last_epoch" (scheduler-last s) "_last_lr" (scheduler-last-rates s)))
+  (match rule
+    [(app inner-schedulers (? list? subs))
+     (hash-set progress "_schedulers" (map scheduler-state-dict subs))]
+    [(struct* restarts ([bases bases] [t-cur t-cur] [t-i t-i]))
+     (hash-set* progress "base_lrs" bases "T_cur" t-cur "T_i" t-i)]
+    [_ (hash-set progress "base_lrs" (rule-bases rule))]))
+
+(define (state-problems s state where)
+  (define rule (scheduler-rule s))
+  (define groups (length (scheduler-last-rates s)))
+  (define (problem what) (list (cons where what)))
+  (define (count-problems key)
+    (define n (length (hash-ref state key)))
+    (if (= n groups)
+        '()
+        (problem (format "~a has ~a rates, the optimizer ~a groups" key n groups))))
+  (define subs (inner-schedulers rule))
+  (define saved-subs (hash-ref state "_schedulers" #f))
+  (append
+   (count-problems "_last_lr")
+   (cond
+     [(and subs saved-subs (= (length subs) (length saved-subs)))
+      (append* (for/list ([sub (in-list subs)] [saved (in-list saved-subs)] [i (in-naturals)])
+                 (state-problems sub saved (format "~a._schedulers[~a]" where i))))]
+     [(or subs saved-subs)
+      (problem (format "the state wraps ~a schedules, the scheduler ~a"
+                       (if saved-subs (length saved-subs) 0) (if subs (length subs) 0)))]
+     [(not (eq? (restarts? rule) (hash-has-key? state "T_cur")))
+      (problem (if (restarts? rule)
+                   "warm restarts need T_cur and T_i"
+                   "T_cur and T_i belong to warm restarts"))]
+     [else (count-problems "base_lrs")])))
+
+(define (restore! s state)
+  (define rule (scheduler-rule s))
+  (match-define (hash* ["last_epoch" last] ["_last_lr" rates]) state)
+  (settle! s last (map real->double-flonum rates))
+  (match* (rule state)
+    [((app inner-schedulers (? list? subs)) (hash* ["_schedulers" saved]))
+     (for-each restore! subs saved)]
+    [((? shape?) (hash* ["base_lrs" bases])) (set-shape-bases! rule bases)]
+    [((? rated?) (hash* ["base_lrs" bases])) (set-rated-bases! rule bases)]
+    [((? restarts?) (hash* ["base_lrs" bases] ["T_cur" t-cur] ["T_i" t-i]))
+     (set-restarts-bases! rule bases)
+     (set-restarts-t-cur! rule t-cur)
+     (set-restarts-t-i! rule t-i)]))
 
 (define/contract-out (load-scheduler-state! s state) ;; noqa
   (-> scheduler? scheduler-state/c void?)
-  (not-implemented 'load-scheduler-state! 'T3))
+  (match (state-problems s state "state")
+    ['() (restore! s state)]
+    [problems
+     (apply raise-arguments-error 'load-scheduler-state! "the state does not fit the scheduler"
+            (append-map (match-lambda [(cons label why) (list label why)]) problems))]))
