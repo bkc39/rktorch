@@ -134,6 +134,7 @@
 
   (define-trainer Old (net)
     (define-init (width [depth 1] #:rate [r 0.1] #:tag [tag 'a] . more)
+      (set-box! given (list width depth more))
       (set! net (Linear 2 width)))
     (define-optimizers (sgd (parameters net) #:lr 0.1))
     (define-training-step (x y) (mse-loss (net x) y)))
@@ -208,6 +209,17 @@
       (check-equal? args '(1 1))
       (check-equal? (length warnings) 1)
       (check-regexp-match #rx"takes no rest more saved in" (car warnings))))
+
+  (test-case "saved rest values never reach a constructor that takes a rest formal, as Lightning's"
+    (with-temporary-directory (dir #:template "rest-rest-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define-values (args warnings) (loaded Old path))
+      (check-equal? args '(1 1 ()))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"takes no rest more saved in" (car warnings))
+      (define-values (given-args none) (loaded Old path #:init-args (hasheq 'more '(5))))
+      (check-equal? given-args '(1 5 ()) "an #:init-args rest value follows the saved positionals")
+      (check-equal? none '())))
 
   (test-case "a positional that became a keyword keeps its default; the warning says positional"
     (with-temporary-directory (dir #:template "became-keyword-~a")

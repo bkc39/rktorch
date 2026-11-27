@@ -347,10 +347,12 @@ moves the trainer to @racket[device]. An argument that was not a
 
 As Lightning filters the saved arguments to the class's signature, a saved
 keyword that @racket[make-trainer] does not take, saved positional arguments
-past its arity, and a saved rest formal's values unless @racket[make-trainer]
-takes a rest argument (Lightning never passes saved @tt{*args}) are dropped
-with one warning on the @racket['rktorch-train] topic naming them and the
-path. Arguments are matched by position and keyword, not by name, so a
+past its arity, and any values a rest formal saved are dropped with one warning
+on the @racket['rktorch-train] topic naming them and the path. Saved rest values
+never reach @racket[make-trainer], as Lightning never passes saved @tt{*args};
+an @racket[init-args] entry under the rest formal's name is passed after the
+saved positional arguments when @racket[make-trainer] takes a rest argument, so
+it fills any optional positionals first. Arguments are matched by position and keyword, not by name, so a
 positional formal that became a keyword keeps its default. A keyword
 @racket[make-trainer] takes that the checkpoint did not save comes from the
 @racket[init-args] entry under its name (@racket[#:lr] from @racket['lr]); a

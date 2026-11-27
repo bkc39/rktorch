@@ -212,8 +212,10 @@
   (define saved-count (length positional-ids))
   (define-values (passed-ids extra-ids)
     (split-at positional-ids (if limit (min limit saved-count) saved-count)))
+  (define rest-given?
+    (and rest-id (not limit) (hash-has-key? overrides (string->symbol rest-id))))
   (define positional
-    (append (map value-of passed-ids) (if (and rest-id (not limit)) (rest-values rest-id) '())))
+    (append (map value-of passed-ids) (if rest-given? (rest-values rest-id) '())))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
     (raise-arguments-error 'load-from-checkpoint
                            (string-append "the constructor does not take as many positional"
@@ -224,7 +226,7 @@
   (define dropped
     (append (map (lambda (id) (string-append "positional " id)) extra-ids)
             (map (match-lambda [(list _ text _) (string-append "keyword " text)]) untaken-keywords)
-            (if (and rest-id limit (not (null? (hash-ref saved rest-id #f))))
+            (if (and rest-id (not rest-given?) (pair? (hash-ref saved rest-id '())))
                 (list (string-append "rest " rest-id))
                 '())))
   (unless (null? dropped)
