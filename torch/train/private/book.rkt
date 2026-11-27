@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list remove-duplicates)
+(require (only-in racket/list check-duplicates remove-duplicates)
          (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
@@ -216,14 +216,27 @@
     [(field-shape names _ _)
      (and (hash? saved) (andmap (lambda (name) (hash-has-key? saved name)) names))]))
 
-(define (ledger-state l)
+(define (string-named table key-path state-of)
+  (define names (hash-keys table))
+  (match (check-duplicates names #:key symbol->string)
+    [#f (for/hash ([(k v) (in-hash table)]) (values (symbol->string k) (state-of v)))]
+    [twin
+     (define twins (filter (lambda (k) (equal? (symbol->string k) (symbol->string twin))) names))
+     (raise-arguments-error
+      'save-checkpoint!
+      "two logged metric names are spelled the same, so the checkpoint cannot hold both"
+      "key" key-path
+      "names" twins
+      "interned" (map symbol-interned? twins))]))
+
+(define (ledger-state l loop)
   (for/hash ([field (in-list ledger-fields)])
     (match-define (list name table-of shape) field)
-    (values name (for/hash ([(k v) (in-hash (table-of l))])
-                   (values (symbol->string k) (shape-state shape v))))))
+    (values name (string-named (table-of l) (format "metric_book.~a.~a" loop name)
+                               (lambda (v) (shape-state shape v))))))
 
 (define (book-state b)
-  (hash "train" (ledger-state (book-train b)) "eval" (ledger-state (book-eval b))))
+  (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))
 
 (define (saved-ledger? saved)
   (for/and ([field (in-list ledger-fields)])

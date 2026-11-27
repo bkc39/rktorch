@@ -157,4 +157,28 @@
                  #:callbacks (list (lambda-callback
                                     #:on-train-end (lambda (r) (save-checkpoint! r path))))))
       (define train (~> path read-checkpoint (hash-ref "metric_book") (hash-ref "train")))
-      (check-true (for/or ([table (in-hash-values train)]) (hash-has-key? table "odd"))))))
+      (check-true (for/or ([table (in-hash-values train)]) (hash-has-key? table "odd")))))
+
+  (define-trainer Twins (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y)
+      (define loss (mse-loss (net x) y))
+      (log! 'odd loss)
+      (log! odd-key loss)
+      loss))
+
+  (test-case "two logged names spelled the same are refused at save, naming both"
+    (with-temporary-directory (dir #:template "twins-~a")
+      (define path (build-path dir "twins.ckpt"))
+      (check-exn (lambda (e)
+                   (and (exn:fail:contract? e)
+                        (regexp-match? #rx"spelled the same" (exn-message e))
+                        (regexp-match? #rx"key: \"metric_book[.]train[.]steps\"" (exn-message e))
+                        (regexp-match? #rx"names: '[(]odd odd[)]" (exn-message e))))
+                 (lambda ()
+                   (fit (Twins) (dataloader (data 4 1) #:batch-size 2) #:max-epochs 1 #:logger #f
+                        #:callbacks (list (lambda-callback
+                                           #:on-train-end (lambda (r) (save-checkpoint! r path)))))))
+      (check-false (file-exists? path)))))
+
