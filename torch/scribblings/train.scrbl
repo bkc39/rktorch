@@ -327,7 +327,12 @@ Lightning's @tt{Trainer.save_checkpoint}. It writes:
 @itemlist[
  @item{the trainer's parameters and buffers, its @racket[define-hparams] fields
        and @racket[define-init] arguments;}
- @item{the loop's position and counters, and @racket[run-metrics];}
+ @item{the loop's position and counters, and, for a save in
+       @tt{on-train-epoch-end}, whether the trainer's hook had run
+       (@tt{"epoch_end_logged"});}
+ @item{@racket[run-metrics], and the values logged and not yet published
+       (@tt{"metric_book"}), which a resumed fit publishes and reads as the
+       uninterrupted one would;}
  @item{each optimizer's and scheduler's state, and the grad scaler's;}
  @item{every callback's @tt{state-dict} under its state key;}
  @item{the RNG states: the CPU stream, the run's device stream,
