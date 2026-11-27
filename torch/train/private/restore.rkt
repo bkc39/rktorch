@@ -46,9 +46,9 @@
   (restore-current-generator! (hash-ref bundle "current_generator" #f) path)
   (set-rng-state! (hash-ref bundle "cpu"))
   (define type (device-type device))
-  (match (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f))
-    [#f (void)]
-    [state (set-rng-state! state #:device device)])
+  (define device-state (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f)))
+  (when device-state
+    (set-rng-state! device-state #:device device))
   (vector->pseudo-random-generator!
    (current-pseudo-random-generator)
    (list->vector (hash-ref bundle "racket"))))

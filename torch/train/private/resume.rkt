@@ -7,7 +7,8 @@
          (only-in "../../nn/scheduler.rkt" load-scheduler-state!)
          (only-in "../../nn/state-dict.rkt" load-state!)
          (only-in "../optimization.rkt" set-hparam! trainer-hparams)
-         (only-in "book.rkt" restore-book-state!)
+         (only-in "../../foreign.rkt" tensor?)
+         (only-in "book.rkt" restore-book-state! saved-book?)
          (only-in "dispatch.rkt" call-callback call-callbacks call-trainer warn-train!)
          (only-in "format.rkt" read-checkpoint-file)
          (only-in "restore.rkt" restore-rng-bundle!)
@@ -24,13 +25,16 @@
 
 (struct source (path tree))
 
-(define (fit-loop tree)
-  (hash-ref (hash-ref tree "loops") "fit_loop"))
+(define fit-loop-path '("loops" "fit_loop"))
 
-(define (checked who path tree keys ok?)
-  (define v
-    (for/fold ([v tree]) ([k (in-list keys)])
-      (and (hash? v) (hash-ref v k #f))))
+(define (tree-ref tree keys)
+  (for/fold ([v tree]) ([k (in-list keys)])
+    (and (hash? v) (hash-ref v k #f))))
+
+(define (fit-loop tree) (tree-ref tree fit-loop-path))
+
+(define (checked-ref who path tree keys ok?)
+  (define v (tree-ref tree keys))
   (unless (ok? v)
     (raise-arguments-error
      who "the checkpoint's entry is missing or malformed, so it cannot be resumed"
@@ -41,12 +45,26 @@
 (define (string-keyed? h)
   (and (hash? h) (andmap string? (hash-keys h))))
 
+(define (metrics-table? h)
+  (and (string-keyed? h) (andmap real? (hash-values h))))
+
+(define (check-full! path tree)
+  (when (hash-has-key? tree "optimizer_states")
+    (for ([keys (in-list '(("optimizer_states") ("lr_schedulers") ("rng" "racket")))])
+      (checked-ref 'fit path tree keys list?))
+    (checked-ref 'fit path tree '("rng" "cpu") tensor?)
+    (when (hash-has-key? tree "metric_book")
+      (checked-ref 'fit path tree '("metric_book") saved-book?))))
+
 (define (check-resumable! path tree)
-  (checked 'fit path tree '("global_step") exact-nonnegative-integer?)
-  (checked 'fit path tree '("callback_metrics") string-keyed?)
+  (define (check! keys ok?) (checked-ref 'fit path tree keys ok?))
+  (check! '("global_step") exact-nonnegative-integer?)
+  (check! '("callback_metrics") metrics-table?)
   (for ([key (in-list '("epoch" "batches_that_stepped" "eval_batches"))])
-    (checked 'fit path tree (list "loops" "fit_loop" key) exact-nonnegative-integer?))
-  (match (checked 'fit path tree '("loops" "fit_loop" "phase") string?)
+    (check! (append fit-loop-path (list key)) exact-nonnegative-integer?))
+  (check! (append fit-loop-path '("epoch_end_logged")) boolean?)
+  (check-full! path tree)
+  (match (check! (append fit-loop-path '("phase")) string?)
     [(or "epoch-end" "fit-end") (void)]
     [(and phase (or "batch-end" "validation-end" "exception"))
      (not-implemented (format "fit: resuming from a mid-epoch (~a) checkpoint" phase) 'T3)]
@@ -59,7 +77,7 @@
 
 (define (checkpoint-source who path)
   (define tree (read-checkpoint-file who path))
-  (checked who path tree '("trainer_hparams") string-keyed?)
+  (checked-ref who path tree '("trainer_hparams") string-keyed?)
   (when (eq? who 'fit)
     (check-resumable! path tree))
   (source path tree))
@@ -69,12 +87,12 @@
        (substring name (string-length "state_dict."))))
 
 (define (warn-orphan-callbacks! r states)
-  (match (sort (remove* (map callback-state-key (run-callbacks r)) (hash-keys states)) string<?)
-    ['() (void)]
-    [orphans
-     (warn-train! (format (string-append "~a: the checkpoint holds state for callbacks this run"
-                                         " does not have, which is ignored: ~s")
-                          (run-entry r) orphans))]))
+  (define orphans
+    (sort (remove* (map callback-state-key (run-callbacks r)) (hash-keys states)) string<?))
+  (unless (null? orphans)
+    (warn-train! (format (string-append "~a: the checkpoint holds state for callbacks this run"
+                                        " does not have, which is ignored: ~s")
+                         (run-entry r) orphans))))
 
 (define (restore-callbacks! r tree)
   (match (hash-ref tree "callbacks" #f)
@@ -100,18 +118,32 @@
                                             " ignored")
                              (run-entry r) field)))))
 
-(define (restore-modules! r ckpt)
-  (match-define (source path tree) ckpt)
-  (define tr (run-trainer r))
+(define (call-naming-path path thunk)
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (define message (format "~a\n  path: ~e" (exn-message e) path))
+                     (raise ((if (exn:fail:contract? e) exn:fail:contract exn:fail)
+                             message (exn-continuation-marks e))))])
+    (thunk)))
+
+(define (call-putting-hparams-back-on-escape tr thunk)
   (define before (trainer-hparams tr))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
                      (for ([(field v) (in-hash before)])
                        (set-hparam! tr field v))
                      (raise e))])
-    (restore-hparams! r tree)
-    (call-trainer r 'on-load-checkpoint tree)
-    (load-state! tr path #:rename model-entry))
+    (thunk)))
+
+(define (restore-modules! r ckpt)
+  (match-define (source path tree) ckpt)
+  (define tr (run-trainer r))
+  (call-putting-hparams-back-on-escape
+   tr
+   (lambda ()
+     (restore-hparams! r tree)
+     (call-trainer r 'on-load-checkpoint tree)
+     (call-naming-path path (lambda () (load-state! tr path #:rename model-entry)))))
   (restore-callbacks! r tree))
 
 (define (restore-each! path tree key what targets load!)
@@ -130,7 +162,7 @@
                   what (length states) (length targets))
      "path" path))
   (for ([target (in-list targets)] [state (in-list states)])
-    (load! target state)))
+    (call-naming-path path (lambda () (load! target state)))))
 
 (define (restore-training-state! r ckpt max-epochs)
   (match-define (source path tree) ckpt)

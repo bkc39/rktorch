@@ -1,15 +1,16 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/port open-output-nowhere)
+  (require (only-in racket/match match-define)
+           (only-in racket/port open-output-nowhere)
            (only-in racket/string string-contains?)
            rackunit
            (only-in "../main.rkt" current-generator make-generator)
-           (only-in "../nn.rkt" Linear mse-loss parameters sgd step-lr)
+           (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" saving-callback Small)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
   (define (saved-with dir callbacks #:name [name "e.ckpt"] #:max-epochs [epochs 1]
                       #:weights-only? [weights-only? #f])
@@ -41,8 +42,14 @@
     (with-temporary-directory (dir #:template "hparams-~a")
       (define path (saved-with dir '()))
       (define tr (Tuned))
-      (check-exn #rx"shape|size" (lambda () (resume tr path)))
+      (check-names-path #rx"shape|size" path (lambda () (resume tr path)))
       (check-equal? (trainer-hparams tr) (hasheq 'lr 0.9))))
+
+  (define-trainer Adaptive (net lr)
+    (define-init () (set! net (Linear 2 1)) (set! lr 0.1))
+    (define-hparams lr)
+    (define-optimizers (adamw (parameters net) #:lr lr))
+    (define-training-step (x y) (mse-loss (net x) y)))
 
   (define-trainer Pair (net)
     #:automatic-optimization? #f
@@ -66,6 +73,8 @@
     (with-temporary-directory (dir #:template "named-~a")
       (define path (saved-with dir '()))
       (check-names-path #rx"optimizer.*1.*2" path (lambda () (resume (Pair) path)) "optimizers")
+      (check-names-path #rx"does not fit the optimizer" path (lambda () (resume (Adaptive) path))
+                        "another optimizer kind")
       (check-names-path #rx"scheduler.*0.*1" path (lambda () (resume (Scheduled) path))
                         "schedulers")
       (define weights (saved-with dir '() #:name "weights.ckpt" #:weights-only? #t))
@@ -96,16 +105,25 @@
 
   (test-case "T3-L3: a malformed tree is refused before any hook, naming the path and the key"
     (with-temporary-directory (dir #:template "malformed-~a")
-      (for ([edit (list (lambda (tree) (hash-remove! tree "loops"))
-                        (lambda (tree) (hash-set! tree "loops" (hash)))
-                        (fit-loop-set "phase" 3)
-                        (fit-loop-set "eval_batches" "many")
-                        (lambda (tree) (hash-remove! tree "trainer_hparams"))
-                        (lambda (tree) (hash-set! tree "trainer_hparams" '(lr)))
-                        (lambda (tree) (hash-remove! tree "global_step")))]
-            [key (list "loops" "loops" "phase" "eval_batches" "trainer_hparams" "trainer_hparams"
-                       "global_step")]
+      (define (set-entry key v) (lambda (tree) (hash-set! tree key v)))
+      (define (remove-entry key) (lambda (tree) (hash-remove! tree key)))
+      (for ([malformed (in-list
+                        (list (cons "loops" (remove-entry "loops"))
+                              (cons "loops" (set-entry "loops" (hash)))
+                              (cons "phase" (fit-loop-set "phase" 3))
+                              (cons "eval_batches" (fit-loop-set "eval_batches" "many"))
+                              (cons "epoch_end_logged" (fit-loop-set "epoch_end_logged" 1))
+                              (cons "trainer_hparams" (remove-entry "trainer_hparams"))
+                              (cons "trainer_hparams" (set-entry "trainer_hparams" '(lr)))
+                              (cons "global_step" (remove-entry "global_step"))
+                              (cons "callback_metrics"
+                                    (set-entry "callback_metrics" (hash "x" "y")))
+                              (cons "rng" (remove-entry "rng"))
+                              (cons "metric_book" (set-entry "metric_book" (hash "train" 1)))
+                              (cons "optimizer_states" (set-entry "optimizer_states" (hash)))
+                              (cons "lr_schedulers" (set-entry "lr_schedulers" 0))))]
             [i (in-naturals)])
+        (match-define (cons key edit) malformed)
         (define path (saved-with dir (list (reshaping i edit)) #:name (format "~a.ckpt" i)))
         (define seen (box '()))
         (check-names-path (regexp (string-append "cannot be resumed.*key: \"[a-z_.]*" key))
@@ -117,9 +135,17 @@
                                                                  (set-box! seen '(setup)))))))
                           key)
         (check-equal? (unbox seen) '() (format "~a: no hook ran" key)))
-      (define path (saved-with dir (list (reshaping "test" (lambda (tree)
-                                                             (hash-remove! tree "trainer_hparams"))))
+      (define path (saved-with dir (list (reshaping "test" (remove-entry "trainer_hparams")))
                                #:name "test.ckpt"))
       (check-names-path #rx"cannot be resumed.*trainer_hparams" path
                         (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path))
-                        "test #:ckpt-path"))))
+                        "test #:ckpt-path")))
+
+  (test-case "an epoch-end file without epoch_end_logged resumes without a warning"
+    (with-temporary-directory (dir #:template "older-~a")
+      (define (drop-logged tree)
+        (define loop (hash-ref (hash-ref tree "loops") "fit_loop"))
+        (hash-set! tree "loops" (hash "fit_loop" (hash-remove loop "epoch_end_logged"))))
+      (define path (saved-with dir (list (reshaping "older" drop-logged))))
+      (define-values (_run warnings) (call-with-logged-warnings (lambda () (resume (Small) path))))
+      (check-equal? warnings '()))))
