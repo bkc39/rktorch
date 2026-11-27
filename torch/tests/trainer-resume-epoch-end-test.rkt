@@ -49,6 +49,21 @@
     (define-hook (on-train-epoch-end)
       (log! 'tag (exact->inexact (run-epoch run)))))
 
+  (define-callback logging-saver (dir)
+    #:kind checkpoint
+    (define-init (d) (set! dir d))
+    (define-hook (on-train-epoch-end)
+      (log! 'tag (exact->inexact (run-epoch run)))
+      (save-checkpoint! run (epoch-path dir run "late"))))
+
+  (define-callback save-log-saver (dir)
+    #:kind checkpoint
+    (define-init (d) (set! dir d))
+    (define-hook (on-train-epoch-end)
+      (save-checkpoint! run (epoch-path dir run))
+      (log! 'tag (exact->inexact (run-epoch run)))
+      (save-checkpoint! run (epoch-path dir run "late"))))
+
   (struct legs (straight split saving resuming))
 
   (define (go dir trainer-of callbacks-of max-epochs ckpt)
@@ -96,6 +111,17 @@
       (check-regexp-match #rx"not exact" (car saving))
       (check-equal? resuming saving
                     (format "~a: the resumed run warns for its saves, not for the resume" kind))))
+
+  (test-case "a later save in the same on-train-epoch-end does not hide the first save's warning"
+    (for ([callbacks-of
+           (in-list (list (lambda (d) (list (checkpoint-saver d "epoch") (logging-saver d)))
+                          (lambda (d) (list (save-log-saver d)))))])
+      (match-define (legs straight split saving resuming) (resumed plain callbacks-of))
+      (check-equal? straight exact-tags)
+      (check-equal? split '(#f 0.0 0.0 2.0) "the resumed epoch reads a stale tag")
+      (check-equal? (length saving) 1 "one warning in the saving run")
+      (check-regexp-match #rx"saver[0-9]* callback logged in on-train-epoch-end after"
+                          (car saving))))
 
   (test-case "a saver listed after every callback that logs resumes exactly, without a warning"
     (match-define (legs straight split saving resuming)

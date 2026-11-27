@@ -76,7 +76,7 @@
 
 (define (note-epoch-end-save! r)
   (define at (late-save-writes))
-  (when at
+  (when (and at (not (unbox at)))
     (set-box! at (book-writes (run-book r))))
   (after-trainer-hook?))
 
