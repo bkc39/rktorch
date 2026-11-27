@@ -5,7 +5,7 @@
            (only-in json jsexpr->string)
            (only-in racket/file file->bytes)
            (only-in racket/list filter-map make-list)
-           (only-in racket/match match-lambda)
+           (only-in racket/match match match-define match-lambda)
            (only-in racket/runtime-path define-runtime-path)
            (only-in racket/string string-prefix?)
            rackunit
@@ -153,10 +153,10 @@
           (define size (header-bytes fits))
           (define text (string-utf-8-length (hash-ref (safetensors-metadata fits) 'checkpoint)))
           (check-true (< text (sub1 size)) "the escaped header is longer than the text")
-          (check-exn #rx"save-checkpoint!:.*100 MB header limit"
-                     (lambda ()
-                       (parameterize ([current-header-limit (sub1 size)])
-                         (save-checkpoint! r over))))
+          (check-exn/contract #rx"save-checkpoint!:.*100 MB header limit"
+                              (lambda ()
+                                (parameterize ([current-header-limit (sub1 size)])
+                                  (save-checkpoint! r over))))
           (check-equal? (directory-list dir) (list (string->path "fits.ckpt")))
           (parameterize ([current-header-limit size])
             (save-checkpoint! r over))
@@ -166,25 +166,33 @@
     (with-temporary-directory (dir #:template "estimate-~a")
       (define path (build-path dir "big.ckpt"))
       (define value (box #f))
-      (define bigs
-        (hash "a shared string" (make-list 1000 (make-string 10000 #\a))
-              "a bignum" (expt 10 1000000)))
+      (define cases
+        (list (list "the save itself" "a" 1 0)
+              (list "a shared string" (make-list 1000 (make-string 10000 #\a)) 100000 10000000)
+              (list "a bignum" (expt 10 1000000) 100000 1000001)))
       (define allocated (make-hash))
       (void
        (call-with-live-run
         #:callbacks (list (stored value))
         (lambda (r)
-          (for ([(label big) (in-hash bigs)])
+          (for ([c (in-list cases)])
+            (match-define (list label big limit _) c)
             (set-box! value big)
             (collect-garbage)
             (define before (current-memory-use 'cumulative))
-            (check-exn #rx"100 MB header limit"
-                       (lambda ()
-                         (parameterize ([current-header-limit 100000])
-                           (save-checkpoint! r path)))
-                       label)
+            (check-exn/contract #rx"100 MB header limit"
+                                (lambda ()
+                                  (parameterize ([current-header-limit limit])
+                                    (save-checkpoint! r path)))
+                                label)
             (hash-set! allocated label (- (current-memory-use 'cumulative) before))))))
-      (check-equal? (for/list ([(label n) (in-hash allocated)] #:unless (< n 4000000)) label) '()
+      (define save-cost (hash-ref allocated "the save itself"))
+      (check-equal? (for/list ([c (in-list (cdr cases))]
+                               #:unless (match c
+                                          [(list label _ _ text-length)
+                                           (< (- (hash-ref allocated label) save-cost) text-length)]))
+                      (car c))
+                    '()
                     "refused without writing the text out")
       (check-equal? (directory-list dir) '())))
 
