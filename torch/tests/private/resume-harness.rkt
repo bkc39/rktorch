@@ -158,6 +158,7 @@
   (match-define (leg w r _logger _saver dir) leg-run)
   (define tr (world-trainer w))
   (hasheq 'parameters (comparable (state-dict tr))
+          'hparams (trainer-hparams tr)
           'optimizers (for/list ([opt (in-list (run-optimizers r))])
                         (comparable (optimizer-state-dict opt tr)))
           'schedulers (for/list ([c (in-list (run-schedulers r))])
