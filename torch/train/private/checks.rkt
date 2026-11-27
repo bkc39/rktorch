@@ -99,7 +99,9 @@
 
 (define (captured-arguments shapes vals)
   (init-capture shapes
-                (for/hasheq ([shape (in-list shapes)] [v (in-list vals)] #:when (checkpoint-value? v))
+                (for/hasheq ([shape (in-list shapes)]
+                             [v (in-list vals)]
+                             #:when (checkpoint-value? v))
                   (values (formal-name shape) v))))
 
 (define (readable-arguments captured)

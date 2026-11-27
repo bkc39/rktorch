@@ -6,6 +6,7 @@
            (only-in "../nn.rkt" Linear Sequential mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
+           (only-in "private/checkpoint-kit.rkt" check-exn/contract)
            (only-in "private/comparable.rkt" host-bytes layer-bytes)
            (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
@@ -123,10 +124,9 @@
       (void (fit (Spread 1 'a) (toy-loader 4) #:max-epochs 1 #:logger #f
                  #:callbacks (list (lambda-callback
                                     #:on-train-end (lambda (r) (save-checkpoint! r path))))))
-      (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                  (regexp-match? #rx"load-from-checkpoint:.*list.*formal: 'more"
-                                                 (exn-message e))))
-                 (lambda () (load-from-checkpoint Spread path #:init-args (hasheq 'more 5))))
+      (check-exn/contract #rx"load-from-checkpoint:.*list.*formal: 'more"
+                          (lambda ()
+                            (load-from-checkpoint Spread path #:init-args (hasheq 'more 5))))
       (check-not-exn
        (lambda () (load-from-checkpoint Spread path #:init-args (hasheq 'more '(1 2)))))))
 
@@ -191,10 +191,8 @@
   (test-case "a renamed keyword: the old one is dropped, the new one comes from #:init-args"
     (with-temporary-directory (dir #:template "renamed-~a")
       (define path (saved-from (Narrow 1 #:rate 1/3) dir))
-      (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                  (regexp-match? #rx"load-from-checkpoint:.*formal: '#:lr.*old[.]ckpt"
-                                                 (exn-message e))))
-                 (lambda () (load-from-checkpoint Renamed path)))
+      (check-exn/contract #rx"load-from-checkpoint:.*formal: '#:lr.*old[.]ckpt"
+                          (lambda () (load-from-checkpoint Renamed path)))
       (define-values (args warnings) (loaded Renamed path #:init-args (hasheq 'lr 0.2)))
       (check-equal? args '(1 0.2))
       (check-regexp-match #rx"#:rate" (car warnings))
@@ -218,8 +216,8 @@
                       (hash-remove! ckpt "trainer_hparams"))))
       (check-exn #rx"load-from-checkpoint:.*formal: 'width.*bare[.]ckpt"
                  (lambda () (load-from-checkpoint Plain path)))
-      (check-equal? (trainer-hparams (load-from-checkpoint Plain path #:init-args (hasheq 'width 1)))
-                    (hasheq))))
+      (define back (load-from-checkpoint Plain path #:init-args (hasheq 'width 1)))
+      (check-equal? (trainer-hparams back) (hasheq))))
 
   (test-case "missing or malformed init formals raise naming the entry and the path"
     (with-temporary-directory (dir #:template "formals-~a")
@@ -229,6 +227,6 @@
                         (lambda (ckpt) (hash-set! ckpt "epoch" "one")))]
             [i (in-naturals)])
         (define path (saved-with dir (format "f~a.ckpt" i) edit))
-        (check-exn #rx"load-from-checkpoint: the checkpoint's entry is missing or malformed.*f[0-9][.]ckpt"
+        (check-exn #rx"^load-from-checkpoint: the checkpoint's entry is missing.*f[0-9][.]ckpt"
                    (lambda () (load-from-checkpoint Plain path))
                    (format "edit ~a" i))))))

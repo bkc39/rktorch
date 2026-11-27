@@ -55,7 +55,8 @@
           "batches_that_stepped" (run-batches-stepped r)
           "eval_batches" (run-eval-batches r)))
   (match* (at (run-train-batch-index r))
-    [((or "batch-end" "validation-end" "exception") (? exact-integer? i)) (hash-set counters "batch_index" i)]
+    [((or "batch-end" "validation-end" "exception") (? exact-integer? i))
+     (hash-set counters "batch_index" i)]
     [(_ _) counters]))
 
 (define (string-keyed h)
@@ -220,13 +221,15 @@
       (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing kw))))))
   (when (< (length positional) fewest)
     (raise-arguments-error 'load-from-checkpoint
-                           "the constructor takes more positional arguments than the checkpoint saved"
+                           (string-append "the constructor takes more positional arguments"
+                                          " than the checkpoint saved")
                            "required" fewest
                            "saved" (length positional)
                            "path" path))
   (unless (null? dropped)
-    (log-rktorch-train-warning "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
-                               (string-join dropped ", ") path))
+    (log-rktorch-train-warning
+     "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
+     (string-join dropped ", ") path))
   (define sorted (sort (append keywords given) keyword<? #:key car))
   (values (map car sorted) (map cdr sorted) positional))
 

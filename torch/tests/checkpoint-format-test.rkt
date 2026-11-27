@@ -13,7 +13,7 @@
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt"
-                    call-with-live-run fit-draws saving-callback Small stored)
+                    call-with-live-run check-exn/contract fit-draws saving-callback Small stored)
            (only-in "private/comparable.rkt" comparable layer-bytes)
            (only-in "private/safetensors-reader.rkt" safetensors-metadata))
 
@@ -79,11 +79,9 @@
           (define before (file->bytes path))
           (define files (directory-list dir))
           (set-box! current (list 1 (hash "f" (lambda () 1))))
-          (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                      (regexp-match? #rx"probe" (exn-message e))
-                                      (regexp-match? #rx"\"f\"" (exn-message e))))
-                     (lambda () (save-checkpoint! r path))
-                     "a procedure in the tree names its key path")
+          (check-exn/contract #rx"probe.*\"f\""
+                              (lambda () (save-checkpoint! r path))
+                              "a procedure in the tree names its key path")
           (check-equal? (file->bytes path) before)
           (check-equal? (directory-list dir) files)
           (set-box! current 2)
@@ -230,9 +228,9 @@
           (hand-built dir (format "m~a.ckpt" i) text #:entries entries #:payload (make-bytes 4 0)))
         (for ([who (in-list '(read-checkpoint load-from-checkpoint))])
           (define rx (pregexp (format "^~a: not a rktorch checkpoint.*path: .*m~a[.]ckpt" who i)))
-          (check-exn (lambda (e) (and (exn:fail:contract? e) (regexp-match? rx (exn-message e))))
-                     (lambda () (if (eq? who 'read-checkpoint)
-                                    (read-checkpoint path)
-                                    (load-from-checkpoint Small path)))
-                     (format "~a, ~a" label who)))))))
+          (check-exn/contract rx
+                              (lambda () (if (eq? who 'read-checkpoint)
+                                             (read-checkpoint path)
+                                             (load-from-checkpoint Small path)))
+                              (format "~a, ~a" label who)))))))
 

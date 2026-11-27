@@ -5,9 +5,11 @@
          (only-in "../../nn.rkt" Dropout Linear Sequential mse-loss parameters sgd)
          "../../train.rkt"
          (only-in "comparable.rkt" host-bytes layer-bytes)
+         (only-in rackunit define-check fail-check with-check-info)
          (only-in "trainer-kit.rkt" toy-loader))
 
 (provide call-with-live-run
+         check-exn/contract
          fit-draws
          Small
          saving-callback
@@ -43,6 +45,14 @@
             'cpu-rng (host-bytes (rng-state))
             'racket-rng (pseudo-random-generator->vector (current-pseudo-random-generator))
             'loader-generator (host-bytes (generator-state shuffle)))))
+
+(define-check (check-exn/contract rx thunk)
+  (define raised (with-handlers ([exn:fail:contract? values]) (thunk) #f))
+  (unless raised
+    (fail-check "no exn:fail:contract was raised"))
+  (unless (regexp-match? rx (exn-message raised))
+    (with-check-info (['exn-message (exn-message raised)])
+      (fail-check "the exn:fail:contract's message does not match"))))
 
 (define (call-with-live-run proc #:trainer [trainer (Small)] #:callbacks [callbacks '()]
                             #:max-epochs [epochs 1])

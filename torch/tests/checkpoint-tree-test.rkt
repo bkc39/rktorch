@@ -11,7 +11,7 @@
                     scheduler-state-dict sgd step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
-           (only-in "private/checkpoint-kit.rkt" call-with-live-run Small stored)
+           (only-in "private/checkpoint-kit.rkt" call-with-live-run check-exn/contract Small stored)
            (only-in "private/comparable.rkt" comparable host-bytes)
            (only-in "private/safetensors-reader.rkt" read-safetensors)
            (only-in "private/trainer-kit.rkt" toy-loader))
@@ -141,19 +141,19 @@
   (test-case "a callback state-dict that is not a checkpoint value names the callback"
     (with-temporary-directory (dir #:template "bad-state-~a")
       (define bad (lambda-callback #:state-key "holder" #:state-dict (lambda (_r) (vector 1))))
-      (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                  (regexp-match? #rx"state-dict" (exn-message e))
-                                  (regexp-match? #rx"\"holder\"" (exn-message e))))
-                 (lambda ()
-                   (call-with-live-run #:callbacks (list bad)
-                                       (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
+      (check-exn/contract #rx"state-dict.*\"holder\""
+                          (lambda ()
+                            (call-with-live-run
+                             #:callbacks (list bad)
+                             (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
       (check-equal? (directory-list dir) '())))
 
   (define (save-raises dir rx #:callbacks [callbacks '()])
-    (check-exn (lambda (e) (and (exn:fail:contract? e) (regexp-match? rx (exn-message e))))
-               (lambda ()
-                 (call-with-live-run #:callbacks callbacks
-                                     (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
+    (check-exn/contract rx
+                        (lambda ()
+                          (call-with-live-run
+                           #:callbacks callbacks
+                           (lambda (r) (save-checkpoint! r (build-path dir "x.ckpt"))))))
     (check-equal? (directory-list dir) '() "nothing is written"))
 
   (test-case "a top-level key a hook adds must be a string"
