@@ -185,29 +185,27 @@
        (define limits (map most arities))
        (and (andmap values limits) (apply max 0 limits))])))
 
-(define (init-call make-trainer tree overrides path)
-  (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
-  (define (missing formal)
-    (raise-arguments-error 'load-from-checkpoint
-                           "the checkpoint did not save this init argument; pass it in #:init-args"
-                           "formal" formal
-                           "path" path))
-  (define (value-of id)
-    (define name (string->symbol id))
-    (cond
-      [(hash-has-key? overrides name) (hash-ref overrides name)]
-      [(hash-has-key? saved id) (hash-ref saved id)]
-      [else (missing name)]))
-  (define (rest-values id)
-    (match (value-of id)
-      [(? list? vs) vs]
-      [v (raise-arguments-error 'load-from-checkpoint "a rest formal's value must be a list"
-                                "formal" (string->symbol id)
-                                "value" v)]))
-  (define-values (keyword-formals positional-ids rest-id) (saved-formals tree path))
-  (define-values (required accepted) (procedure-keywords make-trainer))
-  (define-values (taken-keywords untaken-keywords)
-    (partition (lambda (f) (or (not accepted) (memq (car f) accepted))) keyword-formals))
+(define (missing-init-arg formal path)
+  (raise-arguments-error 'load-from-checkpoint
+                         "the checkpoint did not save this init argument; pass it in #:init-args"
+                         "formal" formal
+                         "path" path))
+
+(define ((init-value saved overrides path) id)
+  (define name (string->symbol id))
+  (cond
+    [(hash-has-key? overrides name) (hash-ref overrides name)]
+    [(hash-has-key? saved id) (hash-ref saved id)]
+    [else (missing-init-arg name path)]))
+
+(define (rest-values value-of id)
+  (match (value-of id)
+    [(? list? vs) vs]
+    [v (raise-arguments-error 'load-from-checkpoint "a rest formal's value must be a list"
+                              "formal" (string->symbol id)
+                              "value" v)]))
+
+(define (positional-args make-trainer value-of overrides positional-ids rest-id path)
   (define limit (positional-limit make-trainer))
   (define saved-count (length positional-ids))
   (define-values (passed-ids extra-ids)
@@ -215,7 +213,7 @@
   (define rest-given?
     (and rest-id (not limit) (hash-has-key? overrides (string->symbol rest-id))))
   (define positional
-    (append (map value-of passed-ids) (if rest-given? (rest-values rest-id) '())))
+    (append (map value-of passed-ids) (if rest-given? (rest-values value-of rest-id) '())))
   (unless (procedure-arity-includes? make-trainer (length positional) #t)
     (raise-arguments-error 'load-from-checkpoint
                            (string-append "the constructor does not accept the number of"
@@ -224,6 +222,26 @@
                            "saved" (length positional)
                            "accepts" (procedure-arity make-trainer)
                            "path" path))
+  (values positional extra-ids (and (not rest-given?) rest-id)))
+
+(define (keyword-args make-trainer value-of overrides keyword-formals path)
+  (define-values (required accepted) (procedure-keywords make-trainer))
+  (define-values (taken untaken)
+    (partition (match-lambda [(list kw _ _) (or (not accepted) (memq kw accepted))])
+               keyword-formals))
+  (define saved
+    (for/list ([f (in-list taken)])
+      (match-define (list kw _ id) f)
+      (cons kw (value-of id))))
+  (define given
+    (for/list ([kw (in-list (or accepted required))]
+               #:unless (assq kw saved)
+               #:when (or (memq kw required) (hash-has-key? overrides (keyword-name kw))))
+      (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing-init-arg kw path))))))
+  (define sorted (sort (append saved given) keyword<? #:key car))
+  (values (map car sorted) (map cdr sorted) untaken))
+
+(define (warn-dropped! saved path extra-ids untaken-keywords rest-id)
   (define (saved? id) (hash-has-key? saved id))
   (define dropped
     (append (filter-map (lambda (id) (and (saved? id) (string-append "positional " id)))
@@ -231,24 +249,24 @@
             (filter-map (match-lambda
                           [(list _ text id) (and (saved? id) (string-append "keyword " text))])
                         untaken-keywords)
-            (if (and rest-id (not rest-given?) (pair? (hash-ref saved rest-id '())))
+            (if (and rest-id (pair? (hash-ref saved rest-id '())))
                 (list (string-append "rest " rest-id))
                 '())))
   (unless (null? dropped)
     (log-rktorch-train-warning
      "load-from-checkpoint: the constructor takes no ~a saved in ~a; dropped"
-     (string-join dropped ", ") path))
-  (define keywords
-    (for/list ([f (in-list taken-keywords)])
-      (match-define (list kw _ id) f)
-      (cons kw (value-of id))))
-  (define given
-    (for/list ([kw (in-list (or accepted required))]
-               #:unless (assq kw keywords)
-               #:when (or (memq kw required) (hash-has-key? overrides (keyword-name kw))))
-      (cons kw (hash-ref overrides (keyword-name kw) (lambda () (missing kw))))))
-  (define sorted (sort (append keywords given) keyword<? #:key car))
-  (values (map car sorted) (map cdr sorted) positional))
+     (string-join dropped ", ") path)))
+
+(define (init-call make-trainer tree overrides path)
+  (define saved (checkpoint-entry tree "hyper_parameters" string-keyed? path #:default (hash)))
+  (define value-of (init-value saved overrides path))
+  (define-values (keyword-formals positional-ids rest-id) (saved-formals tree path))
+  (define-values (positional extra-ids dropped-rest-id)
+    (positional-args make-trainer value-of overrides positional-ids rest-id path))
+  (define-values (kws kw-values untaken-keywords)
+    (keyword-args make-trainer value-of overrides keyword-formals path))
+  (warn-dropped! saved path extra-ids untaken-keywords dropped-rest-id)
+  (values kws kw-values positional))
 
 (define (restore-hparams! tr saved path)
   (define-values (known unknown)
