@@ -35,7 +35,8 @@
              [stop? #:auto]
              [set-up? #:auto]
              [torn-down? #:auto]
-             [finished? #:auto])
+             [finished? #:auto]
+             [outcome #:auto])
   #:auto-value #f
   #:mutable
   #:name run-struct

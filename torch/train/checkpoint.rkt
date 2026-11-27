@@ -21,7 +21,7 @@
          (only-in "private/state.rkt"
                   fresh-run run? run-batches-stepped run-book run-callbacks
                   run-current-stage run-device run-entry run-epoch run-eval-batches
-                  run-finished? run-global-step run-grad-scaler run-hook run-optimizers
+                  run-global-step run-grad-scaler run-hook run-optimizers run-outcome
                   run-scheduler-configs run-train-batch-index run-trainer set-run-finished?!)
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
@@ -34,12 +34,15 @@
 
 (define saving? (make-parameter #f))
 
+(define (saved-hook r)
+  (match (run-outcome r)
+    [#f (run-hook r)]
+    ['success 'on-fit-end]
+    ['failure #f]))
+
 (define (phase r)
   (match (and (eq? (run-entry r) 'fit) (not (eq? (run-current-stage r) 'sanity-check))
-              (match (run-finished? r)
-                ['success 'on-fit-end]
-                [#f (run-hook r)]
-                [_ #f]))
+              (saved-hook r))
     ['on-train-epoch-end "epoch-end"]
     ['on-train-batch-end "batch-end"]
     ['on-validation-end "validation-end"]
