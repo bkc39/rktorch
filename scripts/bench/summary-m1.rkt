@@ -1,63 +1,62 @@
 #lang racket/base
 
-(require (only-in racket/list remove-duplicates)
+(require (only-in racket/list append* remove-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/string string-join)
-         (only-in "markdown.rkt" num ref table whole))
+         (only-in "harness.rkt" list-median)
+         (only-in "markdown.rkt" column-table num ref table whole)
+         (only-in "summary-blocks.rkt" arm-blocks complete-blocks outside-clean?)
+         (only-in "summary-m0.rkt" block-arms))
 
-(provide gc-row
+(provide block-loss
+         gc-row
          handoff-terms
          loss-row
+         m1-arms
          m1-markdown
+         registration-pieces
          registration-rows
          valid-arms)
 
-(define (median xs)
-  (define v (sort (filter real? xs) <))
-  (define n (length v))
-  (cond
-    [(zero? n) #f]
-    [(odd? n) (list-ref v (quotient n 2))]
-    [else (/ (+ (list-ref v (sub1 (quotient n 2))) (list-ref v (quotient n 2))) 2.0)]))
+(define (m1-arms pipeline workers trip)
+  (if trip '(rktorch) (block-arms pipeline workers)))
 
-(define (block-key r) (list (ref r 'run_id) (ref r 'round) (ref r 'block)))
-
-(define (clean? r limit)
-  (define outside (ref r 'load_outside))
-  (and (not (ref r 'error)) (not (and (real? outside) (real? limit) (>= outside limit)))))
+(define (expected-arms b)
+  (match-define (cons r _) (hash-values b))
+  (map symbol->string
+       (m1-arms (string->symbol (ref r 'pipeline)) (ref r 'workers)
+                (ref (hash-ref b "rktorch" #f) 'trip_mb))))
 
 (define (valid-arms records #:limit [limit #f])
   (define arms (filter (lambda (r) (equal? (ref r 'kind) "arm")) records))
-  (define keys (remove-duplicates (map block-key arms)))
-  (define blocks
-    (for/list ([k (in-list keys)])
-      (filter (lambda (r) (equal? (block-key r) k)) arms)))
-  (define kept
-    (filter (lambda (b) (andmap (lambda (r) (clean? r (or limit (ref r 'max_load)))) b)) blocks))
-  (values (apply append kept) (- (length blocks) (length kept))))
+  (define-values (kept dropped)
+    (complete-blocks (arm-blocks arms)
+                     #:expected expected-arms
+                     #:clean? (lambda (r) (outside-clean? r (or limit (ref r 'max_load))))))
+  (values (append* (map hash-values kept)) dropped))
 
 (define (per-sample r . keys)
   (define ms (apply ref r keys))
   (and (real? ms) (/ (* 1000.0 ms) (ref r 'samples))))
 
-(define (build-kind r) (if (zero? (ref r 'workers)) 'main_build 'worker_build))
+(define (us-of r)
+  (or (ref r 'us_per_sample)
+      (let ([rate (ref r 'samples_per_s)]) (and (real? rate) (positive? rate) (/ 1e6 rate)))))
 
 (define (handoff-terms r)
-  (define b (build-kind r))
-  (define wall (per-sample r 'split b 'wall_ms))
-  (define cpu (per-sample r 'split b 'cpu_ms))
-  (define gc (per-sample r 'split b 'gc_ms))
-  (hasheq 'us (ref r 'us_per_sample)
-          'build_cpu cpu
-          'build_gc gc
-          'build_off (and wall cpu gc (- wall cpu gc))
-          'collate (per-sample r 'split (if (zero? (ref r 'workers)) 'main_collate 'worker_collate)
-                               'wall_ms)
+  (define main? (zero? (ref r 'workers)))
+  (define build (if main? 'main_build 'worker_build))
+  (hasheq 'us (us-of r)
+          'build_wall (per-sample r 'split build 'wall_ms)
+          'build_cpu (per-sample r 'split build 'cpu_ms)
+          'build_off (per-sample r 'split build 'off_ms)
+          'build_gc (per-sample r 'split build 'gc_ms)
+          'outside (or (per-sample r 'split build 'outside_ms) 0.0)
+          'collate (per-sample r 'split (if main? 'main_collate 'worker_collate) 'wall_ms)
           'step (per-sample r 'split 'step 'wall_ms)
           'next (per-sample r 'split 'next 'wall_ms)
           'next_cpu (per-sample r 'split 'next 'cpu_ms)
           'next_gc (per-sample r 'split 'next 'gc_ms)
-          'start_finish (+ (per-sample r 'split 'start 'wall_ms) (per-sample r 'split 'finish 'wall_ms))
           'main_cpu (per-sample r 'main_cpu_ms)
           'head (per-sample r 'split 'worker_idle 'head_ms)
           'tail (per-sample r 'split 'worker_idle 'tail_ms)
@@ -66,52 +65,71 @@
           'gc_real (per-sample r 'gc 'all 'real_ms)
           'gc_cpu (per-sample r 'gc 'all 'cpu_ms)))
 
-(define (medians rs f)
-  (define hs (map f rs))
+(define summed-terms '(cpu off outside head tail gaps absent serial))
+
+(define (block-loss t t₀ workers)
+  (define (at h k) (hash-ref h k #f))
+  (define needed '(us build_wall build_cpu build_off build_gc outside head tail gaps absent))
+  (cond
+    [(not (and (andmap (lambda (k) (real? (at t k))) needed)
+               (andmap (lambda (k) (real? (at t₀ k))) '(us build_wall build_cpu build_off build_gc))))
+     #f]
+    [else
+     (define (d k) (/ (- (at t k) (at t₀ k)) workers))
+     (define (w k) (/ (at t k) workers))
+     (define terms
+       (hasheq 'cpu (d 'build_cpu)
+               'off (d 'build_off)
+               'outside (- (w 'outside))
+               'head (w 'head) 'tail (w 'tail) 'gaps (w 'gaps) 'absent (w 'absent)
+               'serial (- (/ (- (at t₀ 'us) (at t₀ 'build_wall)) workers))))
+     (define loss (- (at t 'us) (/ (at t₀ 'us) workers)))
+     (hash-set* terms
+                'us (at t 'us)
+                'ideal (/ (at t₀ 'us) workers)
+                'loss loss
+                'gc (d 'build_gc)
+                'residual (- loss (for/sum ([k (in-list summed-terms)]) (hash-ref terms k))))]))
+
+(define (median-by hs)
   (match hs
     ['() (hasheq)]
     [(cons h _)
      (for/hasheq ([k (in-hash-keys h)])
-       (values k (median (map (lambda (h) (hash-ref h k)) hs))))]))
+       (values k (list-median (map (lambda (h) (hash-ref h k #f)) hs))))]))
 
-(define (cell rs pipeline workers impl #:trip [trip #f])
+(define (cell rs pipeline workers arm #:trip [trip #f])
   (filter (lambda (r)
             (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)
-                 (equal? (ref r 'impl) impl) (equal? (ref r 'trip_mb) trip)))
+                 (equal? (ref r 'arm) arm) (equal? (ref r 'trip_mb) trip)))
           rs))
 
-(define (us-of rs)
-  (median (for/list ([r (in-list rs)])
-            (or (ref r 'us_per_sample)
-                (let ([rate (ref r 'samples_per_s)]) (and (real? rate) (/ 1e6 rate)))))))
+(define (arm-us rs pipeline workers arm)
+  (list-median (map us-of (cell rs pipeline workers arm))))
+
+(define (w0-reference rs pipeline)
+  (define m (median-by (map handoff-terms (cell rs pipeline 0 "rktorch"))))
+  (match m
+    [(hash-table ('build_wall (? real? wall)) ('build_cpu (? real? cpu)) (_ _) ...)
+     (hash-set m 'build_off (- wall cpu))]
+    [_ m]))
 
 (define (loss-row rs pipeline workers)
-  (define m (medians (cell rs pipeline workers "rktorch") handoff-terms))
-  (define m₀ (medians (cell rs pipeline 0 "rktorch") handoff-terms))
-  (define py (us-of (cell rs pipeline workers "pytorch")))
-  (define py₀ (us-of (cell rs pipeline 0 "pytorch")))
-  (define (d k) (and (hash-ref m k #f) (hash-ref m₀ k #f) (/ (- (hash-ref m k) (hash-ref m₀ k)) workers)))
-  (define (w k) (and (hash-ref m k #f) (/ (hash-ref m k) workers)))
-  (cond
-    [(or (zero? workers) (not (hash-ref m 'us #f)) (not (hash-ref m₀ 'us #f))) #f]
-    [else
-     (define loss (- (hash-ref m 'us) (/ (hash-ref m₀ 'us) workers)))
-     (define serial (/ (- (hash-ref m₀ 'us) (hash-ref m₀ 'build_cpu) (hash-ref m₀ 'build_gc)
-                          (hash-ref m₀ 'build_off))
-                       workers))
-     (define terms
-       (list (d 'build_cpu) (d 'build_gc) (d 'build_off)
-             (w 'head) (w 'tail) (w 'gaps) (w 'absent) (- serial)))
-     (define explained (and (andmap real? terms) (apply + terms)))
-     (hasheq 'pipeline pipeline 'workers workers
-             'us (hash-ref m 'us) 'ideal (/ (hash-ref m₀ 'us) workers) 'loss loss
-             'cpu (d 'build_cpu) 'gc (d 'build_gc) 'off (d 'build_off)
-             'head (w 'head) 'tail (w 'tail) 'gaps (w 'gaps) 'absent (w 'absent) 'serial (- serial)
-             'explained explained
-             'py_us py 'py_loss (and py py₀ (- py (/ py₀ workers)))
-             'next (hash-ref m 'next) 'next_cpu (hash-ref m 'next_cpu) 'next_gc (hash-ref m 'next_gc)
-             'step (hash-ref m 'step) 'main_cpu (hash-ref m 'main_cpu)
-             'gc_real (hash-ref m 'gc_real) 'gc_real₀ (hash-ref m₀ 'gc_real))]))
+  (define t₀ (w0-reference rs pipeline))
+  (define ts (map handoff-terms (cell rs pipeline workers "rktorch")))
+  (define blocks (filter values (map (lambda (t) (block-loss t t₀ workers)) ts)))
+  (define py₀ (arm-us rs pipeline 0 "pytorch"))
+  (define (py-loss arm)
+    (define py (arm-us rs pipeline workers arm))
+    (and py py₀ (- py (/ py₀ workers))))
+  (define m (median-by ts))
+  (and (positive? workers) (pair? blocks)
+       (hash-set* (median-by blocks)
+                  'pipeline pipeline 'workers workers 'blocks (length blocks)
+                  'py_loss (py-loss "pytorch")
+                  'py_persistent_loss (py-loss "pytorch-persistent")
+                  'next (hash-ref m 'next) 'next_cpu (hash-ref m 'next_cpu)
+                  'next_gc (hash-ref m 'next_gc) 'step (hash-ref m 'step))))
 
 (define (mode-stat r mode key) (ref r 'gc mode key))
 
@@ -130,7 +148,7 @@
 
 (define (gc-row rs pipeline workers trip)
   (define cs (cell rs pipeline workers "rktorch" #:trip trip))
-  (define (med f) (median (map f cs)))
+  (define (med f) (list-median (map f cs)))
   (define (per-k r mode) (/ (* 1000.0 (mode-stat r mode 'count)) (ref r 'samples)))
   (define minor-points
     (for*/list ([r (in-list cs)] [p (in-list (ref r 'gc 'points))]
@@ -150,27 +168,30 @@
                'us_per_k_live (let ([s (slope minor-points)]) (and s (* 1000.0 s))))))
 
 (define registration-pieces
-  '((guardian guardian raw) (lifetimes lifetimes raw) (registration registered raw)
-    (accounting accounted registered) (rest facade accounted)))
+  '((free raw kept) (guardian guardian kept) (lifetimes lifetimes raw)
+    (registration registered kept) (accounting accounted registered) (rest facade accounted)))
+
+(define registration-layers '("kept" "raw" "guardian" "lifetimes" "registered" "accounted" "facade"))
 
 (define (registration-rows records)
   (define ops (filter (lambda (r) (equal? (ref r 'kind) "op")) records))
   (define (at op layer n key)
-    (median (for/list ([r (in-list ops)]
-                       #:when (and (equal? (ref r 'op) op) (equal? (ref r 'layer) layer)
-                                   (equal? (ref r 'threads) n)))
-              (define per (ref r 'ops_per_call))
-              (match key
-                ['us (/ (ref r 'us_per_op) per)]
-                ['kb (/ (or (ref r 'heap_bytes_per_op) 0) per 1024.0)]
-                ['gc-free (/ (- (ref r 'us_per_op)
-                                (/ (* 1000.0 (ref r 'gc_real_ms) (max 1 n)) (ref r 'ops)))
-                             per)]))))
+    (list-median
+     (for/list ([r (in-list ops)]
+                #:when (and (equal? (ref r 'op) op) (equal? (ref r 'layer) layer)
+                            (equal? (ref r 'threads) n)))
+       (define per (ref r 'ops_per_call))
+       (match key
+         ['us (/ (ref r 'us_per_op) per)]
+         ['kb (/ (or (ref r 'heap_bytes_per_op) 0) per 1024.0)]
+         ['gc-free (/ (- (ref r 'us_per_op)
+                         (/ (* 1000.0 (ref r 'gc_real_ms) (max 1 n)) (ref r 'ops)))
+                      per)]))))
   (define threads (sort (remove-duplicates (map (lambda (r) (ref r 'threads)) ops)) <))
   (define layers
-    (for/list ([l (in-list '("raw" "guardian" "lifetimes" "registered" "accounted" "facade"))])
-      (cons l (for/list ([n (in-list threads)]) (list (at "mix" l n 'us) (at "mix" l n 'gc-free)
-                                                      (at "mix" l n 'kb))))))
+    (for/list ([l (in-list registration-layers)])
+      (cons l (for/list ([n (in-list threads)])
+                (for/list ([key (in-list '(us gc-free kb))]) (at "mix" l n key))))))
   (define (minus a b) (and (real? a) (real? b) (- a b)))
   (define pieces
     (for/list ([p (in-list registration-pieces)])
@@ -190,46 +211,68 @@
 (define (registration-markdown records)
   (define-values (threads layers pieces chain) (registration-rows records))
   (define by-threads (map (lambda (n) (format "~a threads" n)) threads))
-  (define header (cons "µs/op, excl. GC / KB/op" by-threads))
   (define (rows xs)
     (for/list ([x (in-list xs)])
       (match-define (cons name triples) x)
       (cons name (map triple-text triples))))
   (string-append
    "### Registration and accounting per op, the loader's op mix\n\n"
-   (table header (rows layers)) "\n\n"
+   (table (cons "µs/op, excl. GC / KB/op" by-threads) (rows layers)) "\n\n"
    (table (cons "piece" by-threads) (rows pieces)) "\n\n"
    (table (cons "cifar chain, µs/sample" by-threads) (list (cons "facade" (map num chain))))
    "\n"))
 
+(define (column header format-of key)
+  (cons header (lambda (row) (format-of (hash-ref row key)))))
+
+(define (us header key) (column header whole key))
+
+(define loss-columns
+  (list (column "pipeline" values 'pipeline)
+        (column "w" number->string 'workers)
+        (column "blocks" number->string 'blocks)
+        (us "µs/sample" 'us) (us "ideal" 'ideal) (us "loss" 'loss)
+        (us "build CPU Δ" 'cpu) (us "build off-CPU Δ" 'off) (us "builds outside epochs" 'outside)
+        (us "idle head" 'head) (us "idle tail" 'tail) (us "idle gaps" 'gaps)
+        (us "absent" 'absent) (us "serial w0" 'serial) (us "residual" 'residual)
+        (us "build GC overlap Δ" 'gc)
+        (us "py loss" 'py_loss) (us "py persistent loss" 'py_persistent_loss)
+        (cons "main next (CPU, GC)"
+              (lambda (row)
+                (format "~a (~a, ~a)" (whole (hash-ref row 'next)) (whole (hash-ref row 'next_cpu))
+                        (whole (hash-ref row 'next_gc)))))
+        (us "main step" 'step)))
+
 (define (loss-markdown rs pipelines workers)
-  (define header
-    '("pipeline" "w" "µs/sample" "ideal" "loss" "build CPU Δ" "build GC Δ" "build off-CPU Δ"
-      "idle head" "idle tail" "idle gaps" "absent" "serial w0" "sum" "py loss"
-      "main next (CPU, GC)" "main step"))
   (define rows
     (for*/list ([p (in-list pipelines)] [w (in-list workers)]
                 #:when (positive? w)
                 [row (in-value (loss-row rs p w))] #:when row)
-      (define (n k) (whole (hash-ref row k)))
-      (list p (number->string w) (n 'us) (n 'ideal) (n 'loss) (n 'cpu) (n 'gc) (n 'off)
-            (n 'head) (n 'tail) (n 'gaps) (n 'absent) (n 'serial) (n 'explained) (n 'py_loss)
-            (format "~a (~a, ~a)" (n 'next) (n 'next_cpu) (n 'next_gc)) (n 'step))))
-  (string-append "### Hand-off loss per sample, µs (Δ: worker-summed against w0, ÷ w)\n\n"
-                 (table header rows) "\n"))
+      row))
+  (string-append "### Hand-off loss per sample, µs (Δ: worker-summed against w0, ÷ w; "
+                 "medians over blocks)\n\n"
+                 (column-table loss-columns rows) "\n"))
+
+(define (fixed header key [digits 1]) (column header (lambda (x) (num x digits)) key))
+
+(define gc-columns
+  (list (column "pipeline" values 'pipeline)
+        (column "w" number->string 'workers)
+        (column "trip MB" (lambda (t) (if t (number->string t) "default")) 'trip)
+        (column "arms" number->string 'blocks)
+        (column "samples/s" whole 'rate)
+        (fixed "GC µs/sample" 'gc_us) (fixed "GC CPU µs/sample" 'gc_cpu_us)
+        (fixed "minor /1k" 'minor_per_k) (fixed "major /1k" 'major_per_k 2)
+        (fixed "ms/minor" 'minor_ms 2) (fixed "ms/major" 'major_ms)
+        (column "live entries" whole 'live)
+        (fixed "ms/minor per 1k live" 'us_per_k_live)))
 
 (define (gc-markdown rs pipelines workers trips)
-  (define header
-    '("pipeline" "w" "trip MB" "arms" "samples/s" "GC µs/sample" "GC CPU µs/sample"
-      "minor /1k" "major /1k" "ms/minor" "ms/major" "live entries" "ms/minor per 1k live"))
   (define rows
     (for*/list ([p (in-list pipelines)] [w (in-list workers)] [t (in-list trips)]
                 [row (in-value (gc-row rs p w t))] #:when row)
-      (define (n k [d 1]) (num (hash-ref row k) d))
-      (list p (number->string w) (if t (number->string t) "default") (number->string (hash-ref row 'blocks))
-            (whole (hash-ref row 'rate)) (n 'gc_us) (n 'gc_cpu_us) (n 'minor_per_k) (n 'major_per_k 2) (n 'minor_ms 2)
-            (n 'major_ms) (whole (hash-ref row 'live)) (n 'us_per_k_live))))
-  (string-append "### GC against live objects\n\n" (table header rows) "\n"))
+      row))
+  (string-append "### GC against live objects\n\n" (column-table gc-columns rows) "\n"))
 
 (define (m1-markdown records #:limit [limit #f])
   (define-values (rs dropped) (valid-arms records #:limit limit))
@@ -241,7 +284,7 @@
   (define trips (cons #f (sort (values-of 'trip_mb) <)))
   (string-join
    (append
-    (list (format "Blocks dropped for outside load (~a busy cores) or a failed arm: ~a\n"
+    (list (format "Blocks dropped for outside load (~a busy cores), a failed or a missing arm: ~a\n"
                   (or limit "each run's limit") dropped))
     (for/list ([g (in-list groups)])
       (match-define (list tree racket) g)

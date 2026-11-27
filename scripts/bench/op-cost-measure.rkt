@@ -75,7 +75,8 @@
           'heap (current-memory-use 'cumulative)
           'finalizers (finalizer-runs)
           'main-cpu (main-cpu-ms)
-          'process-cpu (current-process-milliseconds)))
+          'process-cpu (current-process-milliseconds)
+          'wall (current-inexact-milliseconds)))
 
 (define (window n make seconds)
   (cond
@@ -111,6 +112,8 @@
           'rep rep
           'ops ops
           'elapsed_ms elapsed-ms
+          'window_start_ms (hash-ref before 'wall)
+          'window_end_ms (hash-ref after 'wall)
           'us_per_op (~> (or main-ms 0) (+ thread-ms) (* 1000.0) per-op)
           'thread_us_per_op (per-op (* 1000.0 thread-ms))
           'main_cpu_ms main-ms

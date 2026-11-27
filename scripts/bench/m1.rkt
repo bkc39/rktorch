@@ -9,6 +9,8 @@
          (only-in racket/match match)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-split)
+         (only-in "flags.rkt" flag-count flag-counts flag-positive flag-trips refuse-repo-out-dir!
+                  require-one-aten-thread!)
          (only-in "harness.rkt" write-record)
          (only-in "m0.rkt" cell-args run-blocks)
          (only-in "op-cost.rkt" default-out-dir stamp)
@@ -16,19 +18,14 @@
          (only-in "pytorch.rkt" child-records require-pytorch twin-records)
          (only-in "session.rkt" fresh-run-id)
          (only-in "summary.rkt" read-records)
-         (only-in "summary-m1.rkt" m1-markdown))
+         (only-in "summary-m1.rkt" m1-arms m1-markdown))
 
-(provide m1-arms
-         m1-plan
-         m1-settings)
+(provide m1-plan
+         m1-settings
+         run-m1)
 
 (define-runtime-path cell-module "m1-cell.rkt")
-
-(define (m1-arms workers trip)
-  (cond
-    [trip '(rktorch)]
-    [(zero? workers) '(rktorch pytorch)]
-    [else '(rktorch pytorch-persistent)]))
+(define-runtime-path repo-root "../..")
 
 (define (m1-plan #:rounds rounds #:pipelines pipelines #:workers workers #:trips trips #:seed seed)
   (define cells
@@ -42,7 +39,7 @@
          (match c
            [(list p w t)
             (hasheq 'round round 'block i 'pipeline p 'workers w 'trip t
-                    'arms (shuffle (m1-arms w t)))]))))))
+                    'arms (shuffle (m1-arms p w t)))]))))))
 
 (define (one-record arm records)
   (match records
@@ -64,8 +61,10 @@
        [_ (twin-records "loaders.py" args #:log log #:time-limit limit)]))))
 
 (define (run-m1 settings #:log [log (current-error-port)])
-  (require-pytorch 'm1)
   (define dir (hash-ref settings 'out-dir))
+  (refuse-repo-out-dir! 'm1 dir repo-root)
+  (require-one-aten-thread! 'm1)
+  (require-pytorch 'm1)
   (make-directory* dir)
   (define jsonl (build-path dir (format "m1-~a-~a-~a.jsonl" (hash-ref settings 'tree)
                                         (hash-ref settings 'racket) (stamp))))
@@ -90,33 +89,30 @@
 (define (m1-settings argv)
   (define settings (default-settings))
   (define (put! key value) (set! settings (hash-set settings key value)))
-  (define (numbers text)
-    (for/list ([t (in-list (string-split text ","))])
-      (match t
-        ["-" #f]
-        [_ (or (string->number t) (raise-user-error 'm1 "expected a number, got ~s" t))])))
+  (define (count text [ok? exact-positive-integer?]) (flag-count 'm1 text ok?))
+  (define (positive text) (flag-positive 'm1 text))
   (define summarize
     (command-line
      #:program "m1"
      #:argv argv
      #:once-each
      [("--rounds") n "Rounds, each block once per round (default 3)"
-                   (put! 'rounds (string->number n))]
+                   (put! 'rounds (count n))]
      [("--tree") t "Label of the checkout measured, e.g. master or int" (put! 'tree t)]
      [("--out-dir") d "Directory for m1-<tree>-<racket>-<stamp>.jsonl" (put! 'out-dir d)]
-     [("--max-load") l "Wait for fewer busy cores before a block" (put! 'max-load (string->number l))]
+     [("--max-load") l "Wait for fewer busy cores before a block" (put! 'max-load (positive l))]
      [("--pipelines") s "Comma-separated: cifar-png,jpeg"
                       (put! 'pipelines (map string->symbol (string-split s ",")))]
      [("--workers") s "Comma-separated loader worker counts (default 0,4,7)"
-                    (put! 'workers (numbers s))]
+                    (put! 'workers (flag-counts 'm1 s))]
      [("--trips") s "Comma-separated collect trips in MB, - for Racket's (default -)"
-                  (put! 'trips (numbers s))]
-     [("--samples") n "Samples per epoch for every pipeline" (put! 'samples (string->number n))]
-     [("--warmup") n "Untimed epochs" (put! 'warmup (string->number n))]
-     [("--epochs") n "Timed epochs per arm" (put! 'epochs (string->number n))]
+                  (put! 'trips (flag-trips 'm1 s))]
+     [("--samples") n "Samples per epoch for every pipeline" (put! 'samples (count n))]
+     [("--warmup") n "Untimed epochs" (put! 'warmup (count n exact-nonnegative-integer?))]
+     [("--epochs") n "Timed epochs per arm" (put! 'epochs (count n))]
      [("--dataset") d "The CIFAR-10 PNG tree: full or fixture" (put! 'dataset d)]
-     [("--seed") n "Seed of the block and arm order" (put! 'seed (string->number n))]
-     [("--time-limit") s "Kill an arm after s seconds" (put! 'time-limit (string->number s))]
+     [("--seed") n "Seed of the block and arm order" (put! 'seed (count n exact-nonnegative-integer?))]
+     [("--time-limit") s "Kill an arm after s seconds" (put! 'time-limit (positive s))]
      #:args paths paths))
   (hash-set settings 'summarize (and (pair? summarize) summarize)))
 

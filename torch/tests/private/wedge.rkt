@@ -5,9 +5,7 @@
                   _fun
                   _int
                   _intptr
-                  _long
                   _pointer
-                  define-cstruct
                   get-ffi-obj
                   malloc)
          (only-in ffi/unsafe/os-thread call-in-os-thread)
@@ -15,6 +13,13 @@
          (only-in racket/math exact-floor)
          (only-in racket/os getpid)
          (only-in racket/port port->string)
+         (only-in "clock.rkt"
+                  clock-gettime
+                  make-timespec
+                  set-timespec-nsec!
+                  set-timespec-sec!
+                  timespec-nsec
+                  timespec-sec)
          (only-in "platform.rkt" host-platform))
 
 (provide arm-process-deadline!
@@ -46,15 +51,15 @@
   (c-write 2 notice (bytes-length notice))
   (c-raise sigalrm))
 
-(define (checked-call name type)
-  (define call (libc name type))
-  (lambda arguments
-    (define status (apply call arguments))
-    (unless (zero? status)
-      (call-failed! name status))))
+(define ((checked name call) . arguments)
+  (define status (apply call arguments))
+  (unless (zero? status)
+    (call-failed! name status)))
 
-(define read-clock (libc "clock_gettime" (_fun _int _pointer -> _int)))
-(define checked-read-clock (checked-call "clock_gettime" (_fun _int _pointer -> _int)))
+(define (checked-call name type)
+  (checked name (libc name type)))
+
+(define checked-read-clock (checked "clock_gettime" clock-gettime))
 (define mutex-init (checked-call "pthread_mutex_init" (_fun _pointer _pointer -> _int)))
 (define mutex-lock (checked-call "pthread_mutex_lock" (_fun #:blocking? #t _pointer -> _int)))
 (define mutex-unlock (checked-call "pthread_mutex_unlock" (_fun _pointer -> _int)))
@@ -69,8 +74,6 @@
   (define object (malloc pthread-object-bytes 'atomic-interior))
   (apply init! object arguments)
   object)
-
-(define-cstruct _timespec ([sec _long] [nsec _long]) #:malloc-mode 'atomic-interior)
 
 (define nanoseconds-per-second 1000000000)
 
@@ -117,7 +120,7 @@
      (values (lambda () #f)
              "pthread_cond_timedwait_relative_np"
              (lambda (condition mutex deadline left)
-               (read-clock clock-monotonic left)
+               (clock-gettime clock-monotonic left)
                (set-time-left! left deadline left)
                (wait-for condition mutex left)))]))
 

@@ -1,7 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/list last remove-duplicates)
-         (only-in racket/match match match-define)
+(require (only-in racket/dict in-dict)
+         (only-in racket/list last remove-duplicates)
+         (only-in racket/match match match* match-define)
          (only-in racket/os getpid)
          (only-in racket/promise force)
          (only-in threading ~>)
@@ -16,10 +17,11 @@
          (only-in torch/foreign/raw/fault with-crossing-hook)
          (only-in (submod torch/runtime/reaper private) reaper-statistics)
          (only-in torch/tests/private/race-harness with-race-hook)
+         (only-in "harness.rkt" mean)
          (only-in "m1-clocks.rkt"
-                  call-with-gc-log gc-event-cpu-ms gc-event-end gc-event-live gc-event-mode
-                  gc-event-start gc-overlap-ms os-thread-id span-cpu₀ span-cpu₁ span-kind
-                  span-tid span-wall₀ span-wall₁ spans task-cpu-ms thread-cpu-ms timed)
+                  gc-event-cpu-ms gc-event-end gc-event-live gc-event-mode gc-event-start
+                  gc-overlap-ms os-thread-id published-entries span span-kind span-tid span-wall₀
+                  span-wall₁ spans task-cpu-ms thread-cpu-ms timed with-gc-log)
          (only-in "runtime-work.rkt" with-trip-bytes)
          (only-in (submod "threads.rkt" private) collector-sweepers)
          (only-in "workloads/cifar-pipeline.rkt" cifar-folder-dataset cifar-folder-root)
@@ -86,72 +88,112 @@
           'charges_per_sample (/ (unbox charged) n 1.0)
           'crossings_per_sample (/ (unbox crossings) n 1.0)))
 
-(define (sum-of f xs) (for/sum ([x (in-list xs)]) (f x)))
+(struct idle (head tail gaps absent))
 
-(define (merge-ms a b)
-  (for/hasheq ([(k v) (in-hash a)]) (values k (+ v (hash-ref b k)))))
+(define no-idle (idle 0.0 0.0 0.0 0.0))
 
-(define (one-worker-idle bs e₀ e₁)
-  (define sorted (sort bs < #:key span-wall₀))
-  (hasheq 'head_ms (~> (car sorted) span-wall₀ (- e₀))
-          'tail_ms (- e₁ (span-wall₁ (last sorted)))
-          'gaps_ms (for/sum ([a (in-list sorted)] [b (in-list (cdr sorted))])
-                     (- (span-wall₀ b) (span-wall₁ a)))
-          'absent_ms 0.0))
+(define (idle+ a b)
+  (match* (a b)
+    [((idle h t g x) (idle h* t* g* x*)) (idle (+ h h*) (+ t t*) (+ g g*) (+ x x*))]))
+
+(define (idle->hash i)
+  (match-define (idle h t g x) i)
+  (hasheq 'head_ms h 'tail_ms t 'gaps_ms g 'absent_ms x))
+
+(define (span-wall s) (- (span-wall₁ s) (span-wall₀ s)))
+
+(define (span-cpu s)
+  (match s
+    [(span _ _ _ _ (? real? c₀) (? real? c₁)) (- c₁ c₀)]
+    [_ 0.0]))
+
+(define (clipped s e₀ e₁)
+  (define a (max e₀ (span-wall₀ s)))
+  (define b (min e₁ (span-wall₁ s)))
+  (and (< a b) (cons a b)))
+
+(define (one-worker-idle intervals e₀ e₁)
+  (define sorted (sort intervals < #:key car))
+  (match-define (cons (cons start _) _) sorted)
+  (match-define (cons _ end) (last sorted))
+  (idle (- start e₀)
+        (- e₁ end)
+        (for/sum ([a (in-list sorted)] [b (in-list (cdr sorted))]) (- (car b) (cdr a)))
+        0.0))
+
+(define (epoch-idle e builds workers)
+  (define e₀ (span-wall₀ e))
+  (define e₁ (span-wall₁ e))
+  (define inside
+    (for*/list ([b (in-list builds)] [c (in-value (clipped b e₀ e₁))] #:when c)
+      (cons (span-tid b) c)))
+  (define tids (remove-duplicates (map car inside)))
+  (for/fold ([acc (idle 0.0 0.0 0.0 (* (max 0 (- workers (length tids))) (- e₁ e₀)))])
+            ([t (in-list tids)])
+    (idle+ acc (one-worker-idle (for/list ([(tid interval) (in-dict inside)] #:when (eqv? tid t))
+                                  interval)
+                                e₀ e₁))))
 
 (define (worker-idle epochs builds workers)
-  (for/fold ([acc (hasheq 'head_ms 0.0 'tail_ms 0.0 'gaps_ms 0.0 'absent_ms 0.0)])
-            ([e (in-list epochs)] #:when (positive? workers))
-    (define e₀ (span-wall₀ e))
-    (define e₁ (span-wall₁ e))
-    (define inside (filter (lambda (b) (<= e₀ (span-wall₀ b) (span-wall₁ b) e₁)) builds))
-    (define tids (remove-duplicates (map span-tid inside)))
-    (define absent (* (max 0 (- workers (length tids))) (- e₁ e₀)))
-    (for/fold ([acc (merge-ms acc (hasheq 'head_ms 0.0 'tail_ms 0.0 'gaps_ms 0.0 'absent_ms absent))])
-              ([t (in-list tids)])
-      (merge-ms acc (one-worker-idle (filter (lambda (b) (eqv? (span-tid b) t)) inside) e₀ e₁)))))
+  (for/fold ([acc no-idle]) ([e (in-list epochs)] #:when (positive? workers))
+    (idle+ acc (epoch-idle e builds workers))))
+
+(define (outside-epochs-ms builds epochs)
+  (for/sum ([b (in-list builds)])
+    (- (span-wall b)
+       (for*/sum ([e (in-list epochs)] [c (in-value (clipped b (span-wall₀ e) (span-wall₁ e)))]
+                  #:when c)
+         (- (cdr c) (car c))))))
+
+(define (totals ss events)
+  (define wall (for/sum ([s (in-list ss)]) (span-wall s)))
+  (define cpu (for/sum ([s (in-list ss)]) (span-cpu s)))
+  (hasheq 'wall_ms wall
+          'cpu_ms cpu
+          'off_ms (- wall cpu)
+          'gc_ms (for/sum ([s (in-list ss)]) (gc-overlap-ms events (span-wall₀ s) (span-wall₁ s)))
+          'count (length ss)))
+
+(define (spans-of all kind [where (lambda (_s) #t)])
+  (filter (lambda (s) (and (eq? (span-kind s) kind) (where s))) all))
 
 (define (span-split all events #:main main #:workers [workers 0])
-  (define (of kind [where (lambda (_s) #t)])
-    (filter (lambda (s) (and (eq? (span-kind s) kind) (where s))) all))
   (define (on-main s) (eqv? (span-tid s) main))
   (define (off-main s) (not (on-main s)))
-  (define (wall s) (- (span-wall₁ s) (span-wall₀ s)))
-  (define (cpu s) (if (and (span-cpu₀ s) (span-cpu₁ s)) (- (span-cpu₁ s) (span-cpu₀ s)) 0.0))
-  (define (gc s) (gc-overlap-ms events (span-wall₀ s) (span-wall₁ s)))
-  (define (totals ss)
-    (hasheq 'wall_ms (sum-of wall ss) 'cpu_ms (sum-of cpu ss) 'gc_ms (sum-of gc ss)
-            'count (length ss)))
-  (define builds (of 'build off-main))
-  (hasheq 'epoch (totals (of 'epoch))
-          'start (totals (of 'start))
-          'finish (totals (of 'finish))
-          'next (totals (of 'next))
-          'step (totals (of 'step))
-          'main_build (totals (of 'build on-main))
-          'main_collate (totals (of 'collate on-main))
-          'worker_build (totals builds)
-          'worker_collate (totals (of 'collate off-main))
+  (define (of kind [where (lambda (_s) #t)]) (totals (spans-of all kind where) events))
+  (define epochs (spans-of all 'epoch))
+  (define builds (spans-of all 'build off-main))
+  (hasheq 'epoch (of 'epoch)
+          'start (of 'start)
+          'finish (of 'finish)
+          'next (of 'next)
+          'step (of 'step)
+          'main_build (of 'build on-main)
+          'main_collate (of 'collate on-main)
+          'worker_build (hash-set (totals builds events)
+                                  'outside_ms (outside-epochs-ms builds epochs))
+          'worker_collate (of 'collate off-main)
           'worker_threads (~> (map span-tid builds) remove-duplicates length)
-          'worker_idle (worker-idle (of 'epoch) builds workers)))
+          'worker_idle (idle->hash (worker-idle epochs builds workers))))
+
+(define (gc-real e) (- (gc-event-end e) (gc-event-start e)))
+
+(define (gc-row es)
+  (hasheq 'count (length es)
+          'real_ms (for/sum ([e (in-list es)]) (gc-real e))
+          'cpu_ms (for/sum ([e (in-list es)]) (gc-event-cpu-ms e))
+          'mean_real_ms (mean (map gc-real es))
+          'mean_live (mean (filter real? (map gc-event-live es)))))
 
 (define (gc-summary events seconds)
   (define (mode-of m) (filter (lambda (e) (eq? (gc-event-mode e) m)) events))
-  (define (real e) (- (gc-event-end e) (gc-event-start e)))
-  (define (mean xs) (and (pair? xs) (/ (apply + xs) (length xs) 1.0)))
-  (define (row es)
-    (hasheq 'count (length es)
-            'real_ms (sum-of real es)
-            'cpu_ms (sum-of gc-event-cpu-ms es)
-            'mean_real_ms (mean (map real es))
-            'mean_live (mean (filter real? (map gc-event-live es)))))
-  (hasheq 'all (row events)
-          'minor (row (mode-of 'minor))
-          'major (row (mode-of 'major))
-          'incremental (row (mode-of 'incremental))
+  (hasheq 'all (gc-row events)
+          'minor (gc-row (mode-of 'minor))
+          'major (gc-row (mode-of 'major))
+          'incremental (gc-row (mode-of 'incremental))
           'per_s (/ (length events) seconds)
           'points (for/list ([e (in-list events)])
-                    (list (symbol->string (gc-event-mode e)) (real e) (gc-event-live e)))))
+                    (list (symbol->string (gc-event-mode e)) (gc-real e) (gc-event-live e)))))
 
 (define (cpu-by-task before after main workers-cpu)
   (define (moved tid) (- (hash-ref after tid 0.0) (hash-ref before tid 0.0)))
@@ -161,7 +203,7 @@
           'workers_span_ms workers-cpu))
 
 (define (handoff-cell name workers #:warmup warmup #:epochs epochs #:samples samples
-                      #:dataset [dataset "full"] #:trip [trip #f] #:count? [count? #t])
+                      #:dataset [dataset "full"] #:trip [trip #f] #:count? [count? (zero? workers)])
   (force collector-sweepers)
   (define loader (cell-loader name workers #:samples samples #:dataset dataset))
   (define main (os-thread-id))
@@ -175,8 +217,8 @@
     (define reaper₀ (reaper-statistics))
     (define main-cpu₀ (thread-cpu-ms))
     (define-values (n events)
-      (call-with-gc-log (lambda () (for/sum ([_ (in-range epochs)]) (epoch! loader)))
-                        #:live ledger-entries))
+      (with-gc-log (#:live published-entries)
+        (for/sum ([_ (in-range epochs)]) (epoch! loader))))
     (define main-cpu₁ (thread-cpu-ms))
     (define all (spans #:clear? #t))
     (define tasks₁ (task-cpu-ms))
@@ -209,26 +251,34 @@
 
 (module+ main
   (require (only-in json write-json)
-           (only-in racket/cmdline command-line))
+           (only-in racket/cmdline command-line)
+           (only-in "flags.rkt" flag-count flag-positive))
 
-  (define settings (make-hasheq '((warmup . 1) (epochs . 2) (samples . #f) (dataset . "full")
-                                  (trip . #f))))
-  (define (put! key value) (hash-set! settings key value))
+  (define (cell-settings argv)
+    (define settings (hasheq 'warmup 1 'epochs 2 'samples #f 'dataset "full" 'trip #f))
+    (define (put! key value) (set! settings (hash-set settings key value)))
+    (define (count text [ok? exact-positive-integer?]) (flag-count 'm1-cell text ok?))
+    (define-values (name workers)
+      (command-line
+       #:program "m1-cell"
+       #:argv argv
+       #:once-each
+       [("--warmup") n "Untimed epochs" (put! 'warmup (count n exact-nonnegative-integer?))]
+       [("--epochs") n "Timed epochs" (put! 'epochs (count n))]
+       [("--samples") n "Samples per epoch" (put! 'samples (count n))]
+       [("--dataset") d "The CIFAR-10 PNG tree: full or fixture" (put! 'dataset d)]
+       [("--trip") mb "collect-trip-bytes in MB while the cell runs (default: Racket's)"
+                   (put! 'trip (flag-positive 'm1-cell mb))]
+       #:args (_loader name workers)
+       (values (string->symbol name) (count workers exact-nonnegative-integer?))))
+    (unless (memq name cell-pipelines)
+      (raise-user-error 'm1-cell "loader ~a: expected cifar-png or jpeg" name))
+    (hash-set* settings 'name name 'workers workers))
+
+  (define settings (cell-settings (current-command-line-arguments)))
   (define (setting key) (hash-ref settings key))
-  (define-values (name workers)
-    (command-line
-     #:once-each
-     [("--warmup") n "Untimed epochs" (put! 'warmup (string->number n))]
-     [("--epochs") n "Timed epochs" (put! 'epochs (string->number n))]
-     [("--samples") n "Samples per epoch" (put! 'samples (string->number n))]
-     [("--dataset") d "The CIFAR-10 PNG tree: full or fixture" (put! 'dataset d)]
-     [("--trip") mb "collect-trip-bytes in MB while the cell runs (default: Racket's)"
-                 (put! 'trip (string->number mb))]
-     #:args (_loader name workers)
-     (values (string->symbol name) (string->number workers))))
-  (unless (memq name cell-pipelines)
-    (raise-user-error 'm1-cell "loader ~a: expected cifar-png or jpeg" name))
-  (write-json (handoff-cell name workers #:warmup (setting 'warmup) #:epochs (setting 'epochs)
+  (write-json (handoff-cell (setting 'name) (setting 'workers)
+                            #:warmup (setting 'warmup) #:epochs (setting 'epochs)
                             #:samples (setting 'samples) #:dataset (setting 'dataset)
                             #:trip (setting 'trip)))
   (newline))
