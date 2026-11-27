@@ -12,9 +12,10 @@
          (only-in "book.rkt" book-writes read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
          (only-in "state.rkt"
-                  run-book run-callbacks run-epoch run-hook run-loggers
-                  run-set-up? run-torn-down? run-trainer set-run-batch-size!
-                  set-run-callbacks! set-run-finished?! set-run-hook! set-run-set-up?!
+                  run-book run-callbacks run-epoch run-epoch-end-save-writes run-hook
+                  run-loggers run-set-up? run-stale-save-warned? run-torn-down? run-trainer
+                  set-run-batch-size! set-run-callbacks! set-run-epoch-end-save-writes!
+                  set-run-finished?! set-run-hook! set-run-set-up?! set-run-stale-save-warned?!
                   set-run-torn-down?!)
          (only-in "types.rkt"
                   callback-hook callback-kind callback-state-key callback-type
@@ -70,19 +71,13 @@
 
 (define after-trainer-hook? (make-parameter #f))
 
-(define late-save-writes (make-parameter #f))
-
-(define stale-save-warned (make-weak-hasheq))
-
 (define (note-epoch-end-save! r)
-  (define at (late-save-writes))
-  (when (and at (not (unbox at)))
-    (set-box! at (book-writes (run-book r))))
-  (after-trainer-hook?))
+  (when (and (after-trainer-hook?) (not (run-epoch-end-save-writes r)))
+    (set-run-epoch-end-save-writes! r (book-writes (run-book r)))))
 
 (define (warn-stale-save! r cb)
-  (unless (hash-ref stale-save-warned r #f)
-    (hash-set! stale-save-warned r #t)
+  (unless (run-stale-save-warned? r)
+    (set-run-stale-save-warned?! r #t)
     (warn-train! (format (string-append "fit: the ~a callback logged in on-train-epoch-end after a"
                                         " checkpoint was saved earlier in this hook, so that file"
                                         " does not hold the value and a resume from it is not"
@@ -90,12 +85,13 @@
                          (callback-type cb)))))
 
 (define (call-late-callbacks r name cbs args)
-  (define at (box #f))
-  (parameterize ([after-trainer-hook? #t] [late-save-writes at])
+  (set-run-epoch-end-save-writes! r #f)
+  (parameterize ([after-trainer-hook? #t])
     (for ([cb (in-list cbs)])
       (call-callback r cb name args)
-      (when (and (unbox at) (> (book-writes (run-book r)) (unbox at)))
-        (set-box! at #f)
+      (define at (run-epoch-end-save-writes r))
+      (when (and at (> (book-writes (run-book r)) at))
+        (set-run-epoch-end-save-writes! r #f)
         (warn-stale-save! r cb)))))
 
 (define (call-hooks r name . args)
@@ -105,7 +101,7 @@
   (match (hook-order h)
     ['by-kind
      (define-values (late early) (partition late? cbs))
-     (parameterize ([after-trainer-hook? #f] [late-save-writes #f])
+     (parameterize ([after-trainer-hook? #f])
        (apply call-callbacks r name early args)
        (trainer!))
      (call-late-callbacks r name late args)]

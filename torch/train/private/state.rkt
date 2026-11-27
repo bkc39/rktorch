@@ -34,7 +34,9 @@
              [stop? #:auto]
              [set-up? #:auto]
              [torn-down? #:auto]
-             [finished? #:auto])
+             [finished? #:auto]
+             [epoch-end-save-writes #:auto]
+             [stale-save-warned? #:auto])
   #:auto-value #f
   #:mutable
   #:name run-struct
