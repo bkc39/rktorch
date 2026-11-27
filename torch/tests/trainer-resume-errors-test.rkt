@@ -6,7 +6,8 @@
            (only-in racket/port open-output-nowhere)
            (only-in racket/string string-contains? string-join)
            rackunit
-           (only-in "../main.rkt" current-generator make-generator zeros)
+           (only-in "../main.rkt"
+                    current-generator generator-state make-generator tensor->list zeros)
            (only-in "../nn.rkt" Linear adamw mse-loss parameters sgd state-dict step-lr)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
@@ -156,6 +157,8 @@
           (list '("rng" "racket") '(1 2))
           (list '("rng" "racket") (list 1 2 3 4 5 (expt 2 40)))
           (list '("rng" "cpu") (zeros 3))
+          (list '("rng" "cpu") (zeros 5056 #:dtype 'uint8))
+          (list '("rng" "cuda") (zeros 3))
           (list '("rng" "current_generator") 5)
           (list '("metric_book") (hash "train" 1))
           (list '("MixedPrecision") (hash "scale" -1.0))
@@ -201,6 +204,27 @@
                     #:name "test.ckpt"))
       (check-names-path #rx"cannot be resumed.*trainer_hparams" path
                         (lambda () (test (Tested) (toy-loader 2) #:logger #f #:ckpt-path path)))))
+
+  (test-case "a malformed current-generator state is refused before any hook, the generator kept"
+    (call-with-process-deadline
+     60
+     #:what "refusing a malformed current-generator state"
+     (lambda ()
+       (with-temporary-directory (dir #:template "generator-state-~a")
+         (define g (make-generator 13))
+         (define zeroed
+           (edit-at '("rng" "current_generator" "state") (zeros 5056 #:dtype 'uint8)))
+         (define path
+           (parameterize ([current-generator g])
+             (saved-with dir (list (reshaping "zeroed" zeroed)))))
+         (define tr (Small))
+         (define before (tensor->list (generator-state g)))
+         (define seen (box '()))
+         (parameterize ([current-generator g])
+           (check-names-path #rx"cannot be resumed.*key: \"rng.current_generator.state" path
+                             (lambda () (resume tr path #:callbacks (list (setup-seen seen))))))
+         (check-equal? (unbox seen) '() "no hook ran")
+         (check-equal? (tensor->list (generator-state g)) before "the generator is kept")))))
 
   (test-case "an epoch-end file without epoch_end_logged resumes without a warning"
     (with-temporary-directory (dir #:template "older-~a")

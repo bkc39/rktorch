@@ -50,13 +50,11 @@
     [(_ _) (void)]))
 
 (define (restore-rng-bundle! bundle [device (cpu-device)])
-  (define racket-state
-    (~> bundle (hash-ref "racket") list->vector vector->pseudo-random-generator
-        pseudo-random-generator->vector))
-  (restore-current-generator! (hash-ref bundle "current_generator" #f))
-  (set-rng-state! (hash-ref bundle "cpu"))
   (define type (device-type device))
   (define device-state (and (not (eq? type 'cpu)) (hash-ref bundle (symbol->string type) #f)))
   (when device-state
     (set-rng-state! device-state #:device device))
-  (vector->pseudo-random-generator! (current-pseudo-random-generator) racket-state))
+  (set-rng-state! (hash-ref bundle "cpu"))
+  (restore-current-generator! (hash-ref bundle "current_generator" #f))
+  (vector->pseudo-random-generator! (current-pseudo-random-generator)
+                                    (list->vector (hash-ref bundle "racket"))))

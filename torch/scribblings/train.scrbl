@@ -240,8 +240,10 @@ the callback states are restored, as in Lightning.
        parameters and hyperparameters unchanged; a trainer that configures a
        different number of optimizers or schedulers, or an optimizer of another
        kind; a @racket[#:weights-only?] checkpoint, with Lightning's message
-       when the optimizers are restored. Every refusal names the file and
-       keeps the error's kind.}
+       when the optimizers are restored; a device stream's state (the
+       @tt{"cuda"} entry) its device refuses, before any other stream is
+       restored, since before any hook only its dtype and shape are checked.
+       Every refusal names the file and keeps the error's kind.}
  @item{Skipped with a warning on the @racket['rktorch-train] topic and stderr:
        a saved hyperparameter the trainer does not define, and a callback
        state no callback claims. A save that is not @racket[#:weights-only?],

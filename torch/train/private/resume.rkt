@@ -5,7 +5,10 @@
          (only-in racket/match match match-define)
          (only-in racket/string string-join)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../../foreign.rkt" dtype rng-state shape tensor?)
+         (only-in threading ~>)
+         (only-in "../../foreign.rkt" cpu-device dtype shape tensor?)
+         (only-in "../../foreign/generator.rkt"
+                  current-generator generator-device make-generator set-generator-state!)
          (only-in "../../nn/grad-scaler.rkt" grad-scaler-state/c load-grad-scaler-state!)
          (only-in "../../nn/optim-state.rkt" load-optimizer-state!)
          (only-in "../../nn/scheduler.rkt" load-scheduler-state!)
@@ -62,9 +65,19 @@
        (with-handlers ([exn:fail? (lambda (_) #f)])
          (pseudo-random-generator? (vector->pseudo-random-generator (list->vector v))))))
 
-(define (cpu-generator-state? v)
-  (define live (rng-state))
-  (and (tensor? v) (eq? (dtype v) (dtype live)) (equal? (shape v) (shape live))))
+(define ((generator-accepts? device) v)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (set-generator-state! (make-generator 0 #:device device) v)
+    #t))
+
+(define ((device-stream-state? type) v)
+  (and (tensor? v)
+       (eq? (dtype v) 'uint8)
+       (match type
+         ["cuda" (equal? (shape v) '(16))]
+         [_ (= (length (shape v)) 1)])))
+
+(define rng-streams '("cpu" "current_generator" "racket"))
 
 (define (saved-generator? v)
   (match v
@@ -80,8 +93,14 @@
     (check! '("optimizer_states") states?)
     (check! '("lr_schedulers") states?)
     (check! '("rng" "racket") racket-generator-state?)
-    (check! '("rng" "cpu") cpu-generator-state?)
-    (check-current-generator! (check! '("rng" "current_generator") saved-generator?) path))
+    (check! '("rng" "cpu") (generator-accepts? (cpu-device)))
+    (for ([type (in-list (remove* rng-streams (hash-keys (tree-ref tree '("rng")))))])
+      (check! (list "rng" type) (device-stream-state? type)))
+    (define saved (check! '("rng" "current_generator") saved-generator?))
+    (check-current-generator! saved path)
+    (when saved
+      (check! '("rng" "current_generator" "state")
+              (~> (current-generator) generator-device generator-accepts?))))
   (for ([key (in-list '("metric_book" "MixedPrecision"))]
         [ok? (in-list (list saved-book? scaler-state?))]
         #:when (hash-has-key? tree key))
