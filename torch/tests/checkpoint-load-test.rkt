@@ -266,6 +266,16 @@
                                ".*saved: 1.*accepts: 2.*old[.]ckpt"))
        (lambda () (load-from-checkpoint Taller path)))))
 
+  (test-case "a load that raises for a missing keyword logs no drop warning"
+    (with-temporary-directory (dir #:template "raised-~a")
+      (define path (saved-from (Old 1 2 #:rate 1/3 #:tag 'b) dir))
+      (define-values (raised warnings)
+        (call-with-logged-warnings
+         (lambda ()
+           (with-handlers ([exn:fail:contract? values]) (load-from-checkpoint Renamed path)))))
+      (check-regexp-match #rx"load-from-checkpoint:.*formal: '#:lr" (exn-message raised))
+      (check-equal? warnings '())))
+
   (define (saved-with dir name edit)
     (define path (build-path dir name))
     (void (fit (Plain 1) (toy-loader 2) #:max-epochs 1 #:logger #f
