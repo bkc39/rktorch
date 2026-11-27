@@ -64,7 +64,7 @@
 (define (racket-generator-state? v)
   (and (list? v)
        (with-handlers ([exn:fail? (lambda (_) #f)])
-         (pseudo-random-generator? (vector->pseudo-random-generator (list->vector v))))))
+         (~> (list->vector v) vector->pseudo-random-generator pseudo-random-generator?))))
 
 (define ((generator-accepts? device) v)
   (with-handlers ([exn:fail? (lambda (_) #f)])
@@ -76,7 +76,7 @@
        (eq? (dtype v) 'uint8)
        (match type
          ["cuda" (equal? (shape v) '(16))]
-         [_ (= (length (shape v)) 1)])))
+         [_ (~> (shape v) length (= 1))])))
 
 (define rng-streams '("cpu" "current_generator" "racket"))
 
@@ -237,13 +237,13 @@
     (with-path-noted path (load! target state))))
 
 (define (warn-inexact-resume! path)
-  (warn-train! (format (string-append "fit: the checkpoint ~a was saved before or during the"
-                                      " trainer's on-train-epoch-end; values logged there after"
-                                      " the save are not in the file, so the resume may not be"
-                                      " exact; for an exact resume save from a #:kind checkpoint"
-                                      " callback listed after every callback that logs in"
-                                      " on-train-epoch-end")
-                       path)))
+  (~> (string-append "fit: the checkpoint ~a was saved before or during the trainer's"
+                     " on-train-epoch-end; values logged there after the save are not in the"
+                     " file, so the resume may not be exact; for an exact resume save from a"
+                     " #:kind checkpoint callback listed after every callback that logs in"
+                     " on-train-epoch-end")
+      (format path)
+      warn-train!))
 
 (define (restore-training-state! r ckpt)
   (match-define (source path tree) ckpt)
