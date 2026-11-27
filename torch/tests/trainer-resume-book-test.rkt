@@ -182,4 +182,3 @@
                         (list (lambda-callback
                                #:on-train-end (lambda (r) (save-checkpoint! r path)))))))
       (check-false (file-exists? path)))))
-

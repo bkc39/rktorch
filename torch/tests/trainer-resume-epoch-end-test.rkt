@@ -110,10 +110,11 @@
   (define exact-tags '(#f 0.0 1.0 2.0))
 
   (test-case "a save followed in on-train-epoch-end by a callback that logs warns while saving"
-    (for ([callbacks-of
-           (in-list (list (lambda (d) (list (checkpoint-saver d "epoch") (checkpoint-tagger)))
-                          (lambda (d) (list (monitor-saver d) (monitor-tagger)))))]
-          [kind (in-list '(checkpoint monitor))])
+    (define kinds
+      (list (cons 'checkpoint (lambda (d) (list (checkpoint-saver d "epoch") (checkpoint-tagger))))
+            (cons 'monitor (lambda (d) (list (monitor-saver d) (monitor-tagger))))))
+    (for ([kind-callbacks (in-list kinds)])
+      (match-define (cons kind callbacks-of) kind-callbacks)
       (match-define (legs straight split saving resuming) (resumed plain callbacks-of))
       (check-equal? straight exact-tags)
       (check-equal? split '(#f 0.0 0.0 2.0) (format "~a: the resumed epoch reads a stale tag" kind))

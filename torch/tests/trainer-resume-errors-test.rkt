@@ -83,13 +83,14 @@
 
   (define (path-set h keys v)
     (match keys
-      [(list k) (if (eq? v removed) (hash-remove h k) (hash-set h k v))]
-      [(cons k more) (hash-set h k (path-set (hash-ref h k) more v))]))
+      ['() v]
+      [(list k) #:when (eq? v removed) (hash-remove h k)]
+      [(cons k more) (hash-set h k (path-set (hash-ref h k #f) more v))]))
 
   (define ((edit-at keys v) tree)
-    (define edited (path-set (for/hash ([(k x) (in-hash tree)]) (values k x)) keys v))
-    (hash-clear! tree)
-    (for ([(k x) (in-hash edited)]) (hash-set! tree k x)))
+    (match keys
+      [(list k) #:when (eq? v removed) (hash-remove! tree k)]
+      [(cons k more) (hash-set! tree k (path-set (hash-ref tree k #f) more v))]))
 
   (define (setup-seen seen)
     (lambda-callback #:setup (lambda (_r _stage) (set-box! seen '(setup)))))
@@ -203,7 +204,8 @@
                                                                     (set-box! seen '(setup)))))))
                              key)
            (check-equal? (unbox seen) '() "no hook ran")
-           (check-pred exact-nonnegative-integer? (random 10) "random returns")))))
+           (check-pred exact-nonnegative-integer? (random 10)
+                       "the Racket PRNG still answers after the refusals")))))
     (test-case "T3-L3: a metric_book is checked in a file without optimizer states"
       (define path
         (saved-with dir (list (reshaping "book-only" (edit-at '("metric_book") (hash "train" 1)))

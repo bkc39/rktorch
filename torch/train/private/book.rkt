@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/dict in-dict in-dict-keys)
+         (only-in racket/function curry)
          (only-in racket/list check-duplicates remove-duplicates)
          (only-in racket/match match match-define)
          (only-in threading ~>)
@@ -235,7 +236,7 @@
             (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
     [ok? (ok? saved)]))
 
-(define (string-named table key-path state-of)
+(define (string-keyed-state table key-path state-of)
   (define names (hash-keys table))
   (match (check-duplicates names #:key symbol->string)
     [#f (for/hash ([(k v) (in-hash table)]) (values (symbol->string k) (state-of v)))]
@@ -251,8 +252,8 @@
 (define (ledger-state l loop)
   (for/hash ([field (in-list ledger-fields)])
     (match-define (list name table-of shape) field)
-    (values name (string-named (table-of l) (format "metric_book.~a.~a" loop name)
-                               (lambda (v) (shape-state shape v))))))
+    (values name (string-keyed-state (table-of l) (format "metric_book.~a.~a" loop name)
+                                     (curry shape-state shape)))))
 
 (define (book-state b)
   (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))
@@ -274,7 +275,7 @@
 (define (restore-ledger! l saved)
   (for ([field (in-list ledger-fields)])
     (match-define (list name table-of shape) field)
-    (refill! (table-of l) (hash-ref saved name) (lambda (v) (state-shape shape v)))))
+    (refill! (table-of l) (hash-ref saved name) (curry state-shape shape))))
 
 (define (restore-book-state! b metrics saved #:close-train-epoch? close?)
   (refill! (book-host b) metrics)
