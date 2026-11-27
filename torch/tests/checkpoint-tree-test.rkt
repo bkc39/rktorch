@@ -138,8 +138,8 @@
                                     (Spread w #:bias b))
                                   path
                                   #:init-args (hasheq 'width 3 'unknown 1)))
-      (check-equal? (unbox seen) '(3 #f x "y")
-                    "an #:init-args name that is no formal is ignored, as Lightning's")))
+      (check-equal? (unbox seen) '(3 #f)
+                    "an #:init-args name that is no formal is ignored, and saved rest values too")))
 
   (test-case "a callback state-dict that is not a checkpoint value names the callback"
     (with-temporary-directory (dir #:template "bad-state-~a")
@@ -161,7 +161,8 @@
 
   (test-case "a top-level key a hook adds must be a string"
     (with-temporary-directory (dir #:template "top-key-~a")
-      (define note (lambda-callback #:on-save-checkpoint (lambda (_r ckpt) (hash-set! ckpt 'note 1))))
+      (define note
+        (lambda-callback #:on-save-checkpoint (lambda (_r ckpt) (hash-set! ckpt 'note 1))))
       (save-raises dir #rx"top-level key.*key path: '\\(note\\)" #:callbacks (list note))))
 
   (define-trainer Indexed (net index)
