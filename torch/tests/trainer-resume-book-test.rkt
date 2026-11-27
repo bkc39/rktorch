@@ -41,7 +41,7 @@
   (define (epoch-path dir r)
     (build-path dir (format "epoch=~a.ckpt" (run-epoch r))))
 
-  (define (plain-saver dir _drop-book?)
+  (define (plain-saver dir)
     (lambda-callback #:on-train-epoch-end (lambda (r) (save-checkpoint! r (epoch-path dir r)))))
 
   (define (data n seed)
@@ -59,28 +59,28 @@
                                   (run-metrics r))
                             (unbox seen))))))
 
-  (define (go dir max-epochs ckpt #:drop-book? [drop-book? #f] #:saver [saver epoch-end-saver])
+  (define (go dir max-epochs ckpt saver)
     (manual-seed! 0)
     (define seen (box '()))
     (define l (collecting-logger))
     (fit (Logging) (dataloader (data 8 1) #:batch-size 2)
          #:val (dataloader (data 6 2) #:batch-size 2)
          #:max-epochs max-epochs #:logger l #:log-every-n-steps 3 #:ckpt-path ckpt
-         #:callbacks (list (epoch-start-reader seen) (saver dir drop-book?)))
-    (values (reverse (unbox seen)) (collecting-steps l)))
+         #:callbacks (list (epoch-start-reader seen) (saver dir)))
+    (list (reverse (unbox seen)) (collecting-steps l)))
 
-  (define (straight-and-split dir #:drop-book? [drop-book? #f] #:saver [saver epoch-end-saver])
-    (define-values (straight-reads straight-rows)
-      (go (build-path dir "straight") 4 #f #:saver saver))
+  (define (book-saver dir) (epoch-end-saver dir #f))
+
+  (define (straight-and-split dir #:drop-book? [drop-book? #f] #:saver [saver book-saver])
+    (match-define (list straight-reads straight-rows) (go (build-path dir "straight") 4 #f saver))
     (define split (build-path dir "split"))
-    (define-values (first-reads first-rows) (go split 2 #f #:drop-book? drop-book? #:saver saver))
+    (define first-saver (if drop-book? (lambda (d) (epoch-end-saver d #t)) saver))
+    (match-define (list first-reads first-rows) (go split 2 #f first-saver))
     (define-values (later warnings)
       (call-with-logged-warnings
        (lambda ()
          (parameterize ([current-error-port (open-output-nowhere)])
-           (call-with-values
-            (lambda () (go split 4 (build-path split "epoch=1.ckpt") #:saver saver))
-            list)))))
+           (go split 4 (build-path split "epoch=1.ckpt") saver)))))
     (match-define (list later-reads later-rows) later)
     (values straight-reads (append first-reads later-reads)
             straight-rows (append first-rows later-rows)
@@ -123,7 +123,7 @@
                        (values (string->symbol k) v))
                      "the run-metrics table is the saved callback_metrics"))))
 
-  (test-case "a plain saver's epoch-end file resumes with a warning, the trainer's epoch-end logs stale"
+  (test-case "a plain saver's epoch-end file warns on resume and reads stale epoch-end logs"
     (with-legs
      (lambda (dir)
        (define-values (straight split straight-rows split-rows warnings)

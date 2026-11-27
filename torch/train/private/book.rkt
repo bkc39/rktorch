@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/list check-duplicates remove-duplicates)
+(require (only-in racket/dict in-dict in-dict-keys)
+         (only-in racket/list check-duplicates remove-duplicates)
          (only-in racket/match match match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
@@ -181,14 +182,17 @@
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
 
-(struct field-shape (names accessors make))
+(struct field-shape (fields make))
+
+(define logged-fields
+  (list (cons "logger" logged-logger?) (cons "both" logged-both?)))
 
 (define pending-shape
-  (field-shape '("logger" "both" "value") (list logged-logger? logged-both? pending-value) pending))
+  (field-shape (append logged-fields (list (cons "value" pending-value))) pending))
 
 (define entry-shape
-  (field-shape '("logger" "both" "value" "weight" "reduce")
-               (list logged-logger? logged-both? entry-value entry-weight entry-reduce)
+  (field-shape (append logged-fields (list (cons "value" entry-value) (cons "weight" entry-weight)
+                                           (cons "reduce" entry-reduce)))
                entry))
 
 (define ledger-fields
@@ -201,20 +205,20 @@
 (define (shape-state shape v)
   (match shape
     [#f v]
-    [(field-shape names accessors _)
-     (for/hash ([name (in-list names)] [get (in-list accessors)]) (values name (get v)))]))
+    [(field-shape fields _)
+     (for/hash ([(name get) (in-dict fields)]) (values name (get v)))]))
 
 (define (state-shape shape saved)
   (match shape
     [#f saved]
-    [(field-shape names _ make)
-     (apply make (for/list ([name (in-list names)]) (hash-ref saved name)))]))
+    [(field-shape fields make)
+     (apply make (for/list ([name (in-dict-keys fields)]) (hash-ref saved name)))]))
 
 (define (shape-state? shape saved)
   (match shape
     [#f #t]
-    [(field-shape names _ _)
-     (and (hash? saved) (andmap (lambda (name) (hash-has-key? saved name)) names))]))
+    [(field-shape fields _)
+     (and (hash? saved) (for/and ([name (in-dict-keys fields)]) (hash-has-key? saved name)))]))
 
 (define (string-named table key-path state-of)
   (define names (hash-keys table))
@@ -239,11 +243,13 @@
   (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))
 
 (define (saved-ledger? saved)
-  (for/and ([field (in-list ledger-fields)])
-    (match-define (list name _ shape) field)
-    (match (and (hash? saved) (hash-ref saved name #f))
-      [(? hash? table) (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))]
-      [_ #f])))
+  (and (hash? saved)
+       (for/and ([field (in-list ledger-fields)])
+         (match-define (list name _ shape) field)
+         (match (hash-ref saved name #f)
+           [(? hash? table)
+            (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))]
+           [_ #f]))))
 
 (define (saved-book? saved)
   (and (hash? saved) (saved-ledger? (hash-ref saved "train" #f))
