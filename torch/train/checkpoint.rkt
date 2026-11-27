@@ -15,7 +15,7 @@
          (only-in "private/checks.rkt"
                   formal-name init-capture-shapes init-capture-values)
          (only-in "private/dispatch.rkt"
-                  after-trainer-hook? call-callback call-hooks call-trainer trainer-device)
+                  call-callback call-hooks call-trainer note-epoch-end-save! trainer-device)
          (only-in "private/format.rkt" read-checkpoint-file write-checkpoint!)
          (only-in "private/restore.rkt" rng-bundle)
          (only-in "private/state.rkt"
@@ -52,7 +52,7 @@
           "eval_batches" (run-eval-batches r)))
   (match* (at (run-batch-index r))
     [((or "batch-end" "validation-end") (? exact-integer? i)) (hash-set counters "batch_index" i)]
-    [("epoch-end" _) (hash-set counters "epoch_end_logged" (after-trainer-hook?))]
+    [("epoch-end" _) (hash-set counters "epoch_end_logged" (note-epoch-end-save! r))]
     [(_ _) counters]))
 
 (define (string-keyed h)

@@ -11,6 +11,7 @@
          book-metric
          book-metrics
          book-state
+         book-writes
          epoch-end-reached!
          host-reads
          make-book
@@ -30,12 +31,15 @@
 
 (struct ledger (steps epoch stepped latest closed))
 
-(struct book (train eval host))
+(struct book (train eval host [writes #:mutable]))
 
 (define (fresh-ledger)
   (ledger (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq)))
 
-(define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq)))
+(define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq) 0))
+
+(define (count-write! b)
+  (set-book-writes! b (add1 (book-writes b))))
 
 (define reads (box 0))
 
@@ -52,6 +56,7 @@
 
 (define (note-step! b loop key v logger? both?)
   (define l (loop-ledger b loop))
+  (count-write! b)
   (hash-set! (ledger-steps l) key (pending logger? both? (scalar v)))
   (hash-set! (ledger-stepped l) key #t))
 
@@ -76,6 +81,7 @@
 (define (note-epoch! b loop key v w reduce logger? both?)
   (define t (ledger-epoch (loop-ledger b loop)))
   (define value (scalar v))
+  (count-write! b)
   (match (hash-ref t key #f)
     [#f (hash-set! t key (entry logger? both? (start reduce value w) w reduce))]
     [e

@@ -9,7 +9,7 @@
          (only-in "../../nn/layer.rkt" buffers layer? parameters)
          (only-in (submod "../../nn/mode.rkt" private) eval-layer-count)
          (only-in "../logging.rkt" logger-finalize! logger-log-metrics!)
-         (only-in "book.rkt" read-epoch! read-steps!)
+         (only-in "book.rkt" book-writes read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
          (only-in "state.rkt"
                   run-book run-callbacks run-epoch run-hook run-loggers
@@ -29,6 +29,7 @@
          finish!
          install-callbacks!
          note-batch-size!
+         note-epoch-end-save!
          publish-epoch!
          publish-steps!
          set-up!
@@ -69,6 +70,34 @@
 
 (define after-trainer-hook? (make-parameter #f))
 
+(define late-save-writes (make-parameter #f))
+
+(define stale-save-warned (make-weak-hasheq))
+
+(define (note-epoch-end-save! r)
+  (define at (late-save-writes))
+  (when at
+    (set-box! at (book-writes (run-book r))))
+  (after-trainer-hook?))
+
+(define (warn-stale-save! r cb)
+  (unless (hash-ref stale-save-warned r #f)
+    (hash-set! stale-save-warned r #t)
+    (warn-train! (format (string-append "fit: the ~a callback logged in on-train-epoch-end after a"
+                                        " checkpoint was saved earlier in this hook, so that file"
+                                        " does not hold the value and a resume from it is not"
+                                        " exact; list the saving callback last")
+                         (callback-type cb)))))
+
+(define (call-late-callbacks r name cbs args)
+  (define at (box #f))
+  (parameterize ([after-trainer-hook? #t] [late-save-writes at])
+    (for ([cb (in-list cbs)])
+      (call-callback r cb name args)
+      (when (and (unbox at) (> (book-writes (run-book r)) (unbox at)))
+        (set-box! at #f)
+        (warn-stale-save! r cb)))))
+
 (define (call-hooks r name . args)
   (define h (hook-named name))
   (define cbs (if (memq 'callback (hook-sides h)) (run-callbacks r) '()))
@@ -76,11 +105,10 @@
   (match (hook-order h)
     ['by-kind
      (define-values (late early) (partition late? cbs))
-     (parameterize ([after-trainer-hook? #f])
+     (parameterize ([after-trainer-hook? #f] [late-save-writes #f])
        (apply call-callbacks r name early args)
        (trainer!))
-     (parameterize ([after-trainer-hook? #t])
-       (apply call-callbacks r name late args))]
+     (call-late-callbacks r name late args)]
     ['trainer-first
      (trainer!)
      (apply call-callbacks r name cbs args)]
