@@ -14,7 +14,7 @@
          (only-in "../../nn/scheduler.rkt" load-scheduler-state!)
          (only-in "../../nn/state-dict.rkt" load-state!)
          (only-in "../optimization.rkt" set-hparam! trainer-hparams)
-         (only-in "book.rkt" restore-book-state! saved-book?)
+         (only-in "book.rkt" restore-book-state! saved-book-checks)
          (only-in "dispatch.rkt" call-callback call-callbacks call-trainer warn-train!)
          (only-in "format.rkt" read-checkpoint-file)
          (only-in "restore.rkt" check-current-generator! restore-rng-bundle!)
@@ -101,10 +101,12 @@
     (when saved
       (check! '("rng" "current_generator" "state")
               (~> (current-generator) generator-device generator-accepts?))))
-  (for ([key (in-list '("metric_book" "MixedPrecision"))]
-        [ok? (in-list (list saved-book? scaler-state?))]
-        #:when (hash-has-key? tree key))
-    (check! (list key) ok?)))
+  (when (hash-has-key? tree "metric_book")
+    (for ([book-check (in-list saved-book-checks)])
+      (match-define (cons keys ok?) book-check)
+      (check! (cons "metric_book" keys) ok?)))
+  (when (hash-has-key? tree "MixedPrecision")
+    (check! '("MixedPrecision") scaler-state?)))
 
 (define (check-resumable! path tree)
   (define (check! keys ok?) (checked-ref 'fit path tree keys ok?))
@@ -259,10 +261,11 @@
   (set-run-global-step! r (hash-ref tree "global_step"))
   (set-run-batches-stepped! r stepped)
   (set-run-eval-batches! r evals)
-  (restore-book-state! (run-book r)
-                       (hash-ref tree "callback_metrics")
-                       (hash-ref tree "metric_book" #f)
-                       #:close-train-epoch? (equal? phase "epoch-end"))
+  (with-path-noted path
+    (restore-book-state! (run-book r)
+                         (hash-ref tree "callback_metrics")
+                         (hash-ref tree "metric_book" #f)
+                         #:close-train-epoch? (equal? phase "epoch-end")))
   (define tr (run-trainer r))
   (restore-each! path tree "optimizer_states" "optimizer" (run-optimizers r)
                  (lambda (opt state) (load-optimizer-state! opt tr state)))

@@ -22,7 +22,7 @@
          read-groups
          read-steps!
          restore-book-state!
-         saved-book?)
+         saved-book-checks)
 
 (struct logged (logger? both?))
 
@@ -182,43 +182,58 @@
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
 
-(struct field-shape (fields make))
+(struct record-shape (slots make))
 
-(define logged-fields
-  (list (cons "logger" logged-logger?) (cons "both" logged-both?)))
+(struct slot (get ok?))
+
+(define reducers '(mean sum max min))
+
+(define (metric-value? v) (or (real? v) (tensor? v)))
+
+(define (weight? w) (and (real? w) (positive? w)))
+
+(define (reducer? r) (and (memq r reducers) #t))
+
+(define logged-slots
+  (list (cons "logger" (slot logged-logger? boolean?)) (cons "both" (slot logged-both? boolean?))))
 
 (define pending-shape
-  (field-shape (append logged-fields (list (cons "value" pending-value))) pending))
+  (record-shape (append logged-slots (list (cons "value" (slot pending-value metric-value?))))
+                pending))
 
 (define entry-shape
-  (field-shape (append logged-fields (list (cons "value" entry-value) (cons "weight" entry-weight)
-                                           (cons "reduce" entry-reduce)))
-               entry))
+  (record-shape (append logged-slots
+                        (list (cons "value" (slot entry-value metric-value?))
+                              (cons "weight" (slot entry-weight weight?))
+                              (cons "reduce" (slot entry-reduce reducer?))))
+                entry))
 
 (define ledger-fields
   (list (list "steps" ledger-steps pending-shape)
         (list "epoch" ledger-epoch entry-shape)
-        (list "stepped" ledger-stepped #f)
-        (list "latest" ledger-latest #f)
-        (list "closed" ledger-closed #f)))
+        (list "stepped" ledger-stepped boolean?)
+        (list "latest" ledger-latest real?)
+        (list "closed" ledger-closed real?)))
 
 (define (shape-state shape v)
   (match shape
-    [#f v]
-    [(field-shape fields _)
-     (for/hash ([(name get) (in-dict fields)]) (values name (get v)))]))
+    [(record-shape slots _)
+     (for/hash ([(name s) (in-dict slots)]) (values name ((slot-get s) v)))]
+    [_ v]))
 
 (define (state-shape shape saved)
   (match shape
-    [#f saved]
-    [(field-shape fields make)
-     (apply make (for/list ([name (in-dict-keys fields)]) (hash-ref saved name)))]))
+    [(record-shape slots make)
+     (apply make (for/list ([name (in-dict-keys slots)]) (hash-ref saved name)))]
+    [_ saved]))
 
 (define (shape-state? shape saved)
   (match shape
-    [#f #t]
-    [(field-shape fields _)
-     (and (hash? saved) (for/and ([name (in-dict-keys fields)]) (hash-has-key? saved name)))]))
+    [(record-shape slots _)
+     (and (hash? saved)
+          (for/and ([(name s) (in-dict slots)])
+            (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
+    [ok? (ok? saved)]))
 
 (define (string-named table key-path state-of)
   (define names (hash-keys table))
@@ -242,18 +257,14 @@
 (define (book-state b)
   (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))
 
-(define (saved-ledger? saved)
-  (and (hash? saved)
-       (for/and ([field (in-list ledger-fields)])
-         (match-define (list name _ shape) field)
-         (match (hash-ref saved name #f)
-           [(? hash? table)
-            (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))]
-           [_ #f]))))
+(define ((saved-table? shape) table)
+  (and (hash? table)
+       (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))))
 
-(define (saved-book? saved)
-  (and (hash? saved) (saved-ledger? (hash-ref saved "train" #f))
-       (saved-ledger? (hash-ref saved "eval" #f))))
+(define saved-book-checks
+  (for*/list ([loop (in-list '("train" "eval"))] [field (in-list ledger-fields)])
+    (match-define (list name _ shape) field)
+    (cons (list loop name) (saved-table? shape))))
 
 (define (refill! table saved [load values])
   (hash-clear! table)

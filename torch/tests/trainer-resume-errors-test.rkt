@@ -143,6 +143,10 @@
     (define-hparams lr)
     (define-test-step (x y) (log! 'test-loss (mse-loss (net x) y))))
 
+  (define (epoch-entry field v)
+    (define well-formed (hash "logger" #t "both" #f "value" 1.0 "weight" 2 "reduce" 'mean))
+    (list '("metric_book" "train" "epoch") (hash "k" (hash-set well-formed field v))))
+
   (define malformed-entries
     (list (list '("loops") removed)
           (list '("loops") (hash))
@@ -161,6 +165,14 @@
           (list '("rng" "cuda") (zeros 3))
           (list '("rng" "current_generator") 5)
           (list '("metric_book") (hash "train" 1))
+          (epoch-entry "value" "x")
+          (epoch-entry "reduce" "mean")
+          (epoch-entry "weight" -1)
+          (epoch-entry "logger" 1)
+          (list '("metric_book" "eval" "steps")
+                (hash "k" (hash "logger" #t "both" "no" "value" 1.0)))
+          (list '("metric_book" "train" "stepped") (hash "k" 1))
+          (list '("metric_book" "train" "closed") (hash "k" "x"))
           (list '("MixedPrecision") (hash "scale" -1.0))
           (list '("optimizer_states") (hash))
           (list '("optimizer_states") '(1))
