@@ -1,11 +1,13 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/function curry curryr)
+  (require (only-in racket/contract/base flat-contract-predicate)
+           (only-in racket/function curry curryr)
            rackunit
            (only-in racket/match match-define)
+           (only-in "../generated.rkt" sum-dim-intlist)
            (only-in "../main.rkt"
-                    current-generator make-generator ones rng-state transpose)
+                    current-generator make-generator ones rng-state tensor transpose)
            (only-in "../nn.rkt"
                     Linear load-optimizer-state! mse-loss optimizer-state-dict parameters
                     scheduler-state-dict sgd step-lr)
@@ -160,6 +162,21 @@
     (with-temporary-directory (dir #:template "top-key-~a")
       (define note (lambda-callback #:on-save-checkpoint (lambda (_r ckpt) (hash-set! ckpt 'note 1))))
       (save-raises dir #rx"top-level key.*key path: '\\(note\\)" #:callbacks (list note))))
+
+  (define-trainer Indexed (net index)
+    (define-init (ix) (set! index ix) (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y))
+    (define-validation-step (x y) (mse-loss (net x) y)))
+
+  (test-case "a tensor of a dtype the format has no tag for is no checkpoint value, and no raise"
+    (define narrow (sum-dim-intlist (tensor '(1.0)) #f #f 'int32))
+    (check-false ((flat-contract-predicate checkpoint-value/c) (hash "x" narrow)))
+    (with-temporary-directory (dir #:template "narrow-~a")
+      (save-raises dir #rx"key path: '\\(\"probe\" \"x\"\\)"
+                   #:callbacks (list (stored (box (hash "x" narrow)))))
+      (define-values (tree _r) (saved-at (build-path dir "k.ckpt") #:trainer (Indexed narrow)))
+      (check-equal? (hash-ref tree "init_dropped") '("ix"))))
 
   (test-case "a value shared down 40 levels is refused before it is expanded"
     (with-temporary-directory (dir #:template "shared-deep-~a")

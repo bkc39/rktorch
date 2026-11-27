@@ -8,7 +8,12 @@
          encode-value
          value-problem)
 
-(define tagged-dtypes '(float32 float64 float16 bfloat16 int64 int32 int16 int8 uint8 bool))
+(define tagged-dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
+
+;; dtype raises on a dtype the binding's code table lacks (int32, int16, int8)
+(define (tagged-dtype? t)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (and (memq (dtype t) tagged-dtypes) #t)))
 
 (define (reserved-key? k)
   (and (string? k) (positive? (string-length k)) (char=? (string-ref k 0) #\$)))
@@ -69,7 +74,7 @@
       [(or #t #f '()) #f]
       [(or (? flonum?) (? string?) (? exact-rational?)) #f]
       [(? symbol?) (and (not (symbol-interned? v)) (bad path v))]
-      [(? tensor?) (and (not (memq (dtype v) tagged-dtypes)) (bad path v))]
+      [(? tensor?) (and (not (tagged-dtype? v)) (bad path v))]
       [(? pair?) (spine v 0 path)]
       [(? hash?)
        #:when (taggable-hash? v)
