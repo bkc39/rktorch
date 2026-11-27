@@ -8,20 +8,23 @@
            (only-in racket/string string-replace string-trim)
            (only-in racket/system system*)
            rackunit
-           (only-in torch/tests/private/platform os*->platform)
+           (only-in torch/tests/private/platform path-convention simulated-system-type)
            (only-in "harness.rkt" with-temporary-path))
 
   (define-runtime-path writer "cifar-folder.rkt")
   (define-runtime-path resolver "python/cache_dirs.py")
+  (define-runtime-path launcher "pytorch.rkt")
   (define-runtime-path twins "python")
 
-  (define (cache-platform os*)
-    (if (eq? (os*->platform os*) 'macosx) "darwin" "linux"))
+  (define (cache-platform system-type)
+    (if (eq? (path-convention system-type) 'macosx) "darwin" "linux"))
 
-  (define host-platform (cache-platform (system-type 'os*)))
+  (define host-platform (cache-platform system-type))
 
-  (test-case "the cache layout follows the os* name, which a nix-built darwin Racket says as darwin"
-    (check-equal? (map cache-platform '(darwin macosx linux)) '("darwin" "darwin" "linux")))
+  (test-case "the cache layout follows Racket's os convention, so a nix-built darwin Racket's is unix"
+    (check-equal? (for/list ([build (in-list '((unix darwin) (macosx macosx) (unix linux)))])
+                    (cache-platform (apply simulated-system-type build)))
+                  '("linux" "darwin" "linux")))
 
   (define (racket-cache platform)
     (if (equal? platform "darwin") "Library/Caches/Racket" ".cache/racket"))
@@ -44,7 +47,8 @@
       ("darwin" (("RKTORCH_CIFAR10_PNG_DIR" . "@/png")) () "@/png")))
 
   (define cleared
-    '(#"HOME" #"PLTUSERHOME" #"XDG_CACHE_HOME" #"RKTORCH_CIFAR10_PNG_DIR" #"RKTORCH_HYMENOPTERA_DIR"))
+    '(#"HOME" #"PLTUSERHOME" #"XDG_CACHE_HOME" #"RKTORCH_CIFAR10_PNG_DIR" #"RKTORCH_HYMENOPTERA_DIR"
+      #"RKTORCH_RACKET_CACHE_DIR"))
 
   (define (environment home settings)
     (define env (environment-variables-copy (current-environment-variables)))
@@ -69,6 +73,18 @@
   (define (python-reads python env platform)
     (output env python "-P" (path->string resolver) "RKTORCH_CIFAR10_PNG_DIR" "cifar10-png"
             platform))
+
+  (define (launched-twin-reads python env platform)
+    (output env (find-executable-path (find-system-path 'exec-file)) "-l" "racket/base" "-e"
+            (format "~s" `(begin (require (only-in racket/system system*)
+                                          (only-in (file ,(path->string launcher))
+                                                   python-child-environment))
+                                 (void (parameterize ([current-environment-variables
+                                                       (python-child-environment)])
+                                         (system* ,(path->string python) "-P"
+                                                  ,(path->string resolver)
+                                                  "RKTORCH_CIFAR10_PNG_DIR" "cifar10-png"
+                                                  ,platform)))))))
 
   (define (racket-hymenoptera env)
     (output env (find-executable-path (find-system-path 'exec-file)) "-l" "racket/base" "-e"
@@ -132,4 +148,7 @@
            (check-equal? (python-reads python env platform) want "Python")
            (when (equal? platform host-platform)
              (check-equal? (racket-writes env) (path->string (build-path want "full"))
-                           "Racket")))))]))
+                           "Racket")
+             (for ([twin-platform (in-list '("linux" "darwin"))])
+               (check-equal? (launched-twin-reads python env twin-platform) want
+                             (format "a twin the bench launches, on ~a" twin-platform)))))))]))

@@ -10,8 +10,12 @@ import sys
 
 
 def racket_cache_dir(environ, platform):
-    """(find-system-path 'cache-dir) on Linux and macOS, as the Racket
-    reference describes it."""
+    """(find-system-path 'cache-dir): the launching Racket's own, passed as
+    RKTORCH_RACKET_CACHE_DIR, else as the Racket reference describes it for
+    a Racket whose path convention is PLATFORM's."""
+    launcher = environ.get("RKTORCH_RACKET_CACHE_DIR", "")
+    if os.path.isabs(launcher):
+        return launcher
     user_home = environ.get("PLTUSERHOME", "")
     pinned = os.path.isabs(user_home)
     home = user_home if pinned else (environ.get("HOME") or os.path.expanduser("~"))
