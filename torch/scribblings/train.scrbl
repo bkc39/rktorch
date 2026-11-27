@@ -260,15 +260,20 @@ the callback states are restored, as in Lightning.
  @item{Not restored: a loader's own @racket[#:generator]; a callback whose
        @tt{state-dict} answers its @racket[generator-state] and whose
        @tt{load-state!} calls @racket[set-generator-state!] carries it.}
- @item{Not in the file: what was logged in @tt{on-train-epoch-end} after the
-       save, which the resumed epoch then reads as the value logged an epoch
-       earlier. A save from a plain callback, or from the trainer's own hook,
-       is taken before or during the trainer's logging, and the resume warns.
-       A save from a @racket[#:kind checkpoint] or @racket[#:kind monitor]
-       callback, or @racket[model-checkpoint], resumes exactly when it comes
-       after the trainer's hook and after every callback that logs in
-       @tt{on-train-epoch-end}; one that a later callback logs past warns in
-       the saving run instead, since the file cannot know.}]
+ @item{Not in the file: what is logged in @tt{on-train-epoch-end} after the
+       save, which the resumed epoch reads as the value logged an epoch
+       earlier, and what a later callback's @tt{on-train-epoch-end} changes
+       in its state. Lightning 2.6.5 behaves the same. By where the save is
+       made:
+       @itemlist[
+        @item{from a plain callback or the trainer's own hook: the save comes
+              before or during the trainer's logging, and the resume warns;}
+        @item{from a @racket[#:kind checkpoint] or @racket[#:kind monitor]
+              callback, or @racket[model-checkpoint]: the resume is exact
+              when the save comes after every callback that logs or changes
+              its state in @tt{on-train-epoch-end}. A later log warns in the
+              saving run, since the file cannot know; a later state change
+              does not warn.}]}]
 
 @examples[#:eval train-eval
 (define-trainer Resumed (net)
