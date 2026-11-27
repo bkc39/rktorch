@@ -119,6 +119,27 @@
                  (lambda () (save-state! (fixture-model) (build-path dir "loop1"))))
       (check-equal? (directory-names dir) '("loop1" "loop2"))))
 
+  (test-case "a target name with a ~ in it saves, and leaves no temporary file"
+    (with-temporary-directory (dir #:template "save-state-~a")
+      (define names '("run~1.safetensors" "model.safetensors~" "x~a.safetensors" "y~n.safetensors"))
+      (for ([name (in-list names)])
+        (save-state! (fixture-model) (build-path dir name))
+        (check-equal? (file->bytes (build-path dir name)) (file->bytes master-file) name))
+      (check-equal? (directory-names dir) (sort names string<?))))
+
+  (test-case "a target ending in a link to .. or in . raises a filesystem error naming it"
+    (with-temporary-directory (dir #:template "save-state-~a")
+      (make-directory (build-path dir "a"))
+      (define up (build-path dir "a" "up"))
+      (make-file-or-directory-link ".." up)
+      (for ([target (in-list (list up (build-path dir "a" 'same)))])
+        (check-exn (lambda (e)
+                     (and (exn:fail:filesystem? e)
+                          (regexp-match? (regexp-quote (path->string target)) (exn-message e))))
+                   (lambda () (save-state! (fixture-model) target))))
+      (check-equal? (directory-names dir) '("a"))
+      (check-equal? (directory-names (build-path dir "a")) '("up"))))
+
   (define (with-metadata src dst metadata)
     (define raw (file->bytes src))
     (define start (+ 8 (integer-bytes->integer raw #f #f 0 8)))

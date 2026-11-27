@@ -43,14 +43,16 @@
 
 (define link-hops 40)
 
+(define (raise-filesystem-error message path)
+  (raise (exn:fail:filesystem
+          (format "call-with-atomic-output-file: ~a\n  path: ~a" message path)
+          (current-continuation-marks))))
+
 (define (link-target path)
   (let follow ([p (path->complete-path path)] [hops 0])
     (cond
       [(not (link-exists? p)) p]
-      [(= hops link-hops)
-       (raise (exn:fail:filesystem
-               (format "call-with-atomic-output-file: too many levels of links\n  path: ~a" path)
-               (current-continuation-marks)))]
+      [(= hops link-hops) (raise-filesystem-error "too many levels of links" path)]
       [else
        (define-values (dir _name _must-be-dir?) (split-path p))
        (follow (path->complete-path (resolve-path p) dir) (add1 hops))])))
@@ -58,8 +60,11 @@
 (define (call-with-atomic-output-file path write!)
   (define target (link-target path))
   (define-values (dir name _) (split-path target))
-  (define temporary
-    (make-temporary-file (string-append "." (path->string name) ".~a.tmp") #:base-dir dir))
+  (unless (path? name)
+    (raise-filesystem-error "not a file path" path))
+  (define template
+    (string-append "." (regexp-replace* #rx"~" (path->string name) "~~") ".~a.tmp"))
+  (define temporary (make-temporary-file template #:base-dir dir))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
                      (delete-if-there temporary)
