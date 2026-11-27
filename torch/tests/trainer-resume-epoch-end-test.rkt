@@ -82,18 +82,20 @@
   (define exact-tags '(#f 0.0 1.0 2.0))
 
   (test-case "a save followed in on-train-epoch-end by a callback that logs warns while saving"
-    (for ([callbacks-of (in-list (list (lambda (d) (list (checkpoint-saver d "epoch") (checkpoint-tagger)))
-                                       (lambda (d) (list (monitor-saver d) (monitor-tagger)))))]
+    (for ([callbacks-of
+           (in-list (list (lambda (d) (list (checkpoint-saver d "epoch") (checkpoint-tagger)))
+                          (lambda (d) (list (monitor-saver d) (monitor-tagger)))))]
           [kind (in-list '(checkpoint monitor))])
       (match-define (legs straight split saving resuming) (resumed plain callbacks-of))
       (check-equal? straight exact-tags)
       (check-equal? split '(#f 0.0 0.0 2.0) (format "~a: the resumed epoch reads a stale tag" kind))
       (check-equal? (length saving) 1 (format "~a: one warning in the saving run" kind))
-      (check-regexp-match #rx"-tagger[0-9]* callback logged in on-train-epoch-end after a checkpoint was saved"
-                          (car saving))
+      (check-regexp-match
+       #rx"-tagger[0-9]* callback logged in on-train-epoch-end after a checkpoint was saved"
+       (car saving))
       (check-regexp-match #rx"not exact" (car saving))
       (check-equal? resuming saving
-                    (format "~a: the resumed run warns for its own saves, not for the resume" kind))))
+                    (format "~a: the resumed run warns for its saves, not for the resume" kind))))
 
   (test-case "a saver listed after every callback that logs resumes exactly, without a warning"
     (match-define (legs straight split saving resuming)

@@ -178,7 +178,8 @@
                         (regexp-match? #rx"names: '[(]odd odd[)]" (exn-message e))))
                  (lambda ()
                    (fit (Twins) (dataloader (data 4 1) #:batch-size 2) #:max-epochs 1 #:logger #f
-                        #:callbacks (list (lambda-callback
-                                           #:on-train-end (lambda (r) (save-checkpoint! r path)))))))
+                        #:callbacks
+                        (list (lambda-callback
+                               #:on-train-end (lambda (r) (save-checkpoint! r path)))))))
       (check-false (file-exists? path)))))
 

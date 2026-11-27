@@ -155,7 +155,8 @@
            (define path
              (saved-with dir (list (reshaping i (edit-at keys v))) #:name (format "~a.ckpt" i)))
            (define seen (box '()))
-           (check-names-path (regexp (string-append "cannot be resumed.*key: \"" (regexp-quote key)))
+           (check-names-path (regexp (string-append "cannot be resumed.*key: \""
+                                                    (regexp-quote key)))
                              path
                              (lambda ()
                                (resume (Small) path
