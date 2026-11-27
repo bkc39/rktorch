@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/match match)
-         (only-in "../../foreign.rkt" dtype tensor?))
+         (only-in "../../foreign.rkt" tensor?)
+         (only-in "../../foreign/raw/tensor.rkt" dtype-code->symbol tr-tensor-dtype/raw))
 
 (provide checkpoint-value?
          decode-value
@@ -11,10 +12,9 @@
 
 (define tagged-dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
 
-;; dtype raises on a dtype the binding's code table lacks (int32, int16, int8)
 (define (tagged-dtype? t)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
-    (and (memq (dtype t) tagged-dtypes) #t)))
+  (define-values (rc code) (tr-tensor-dtype/raw t))
+  (and (zero? rc) (memq (dtype-code->symbol code) tagged-dtypes) #t))
 
 (define (reserved-key? k)
   (and (string? k) (positive? (string-length k)) (char=? (string-ref k 0) #\$)))

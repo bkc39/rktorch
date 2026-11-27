@@ -14,6 +14,7 @@
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
            (only-in "private/checkpoint-kit.rkt" call-with-live-run check-exn/contract Small stored)
+           (only-in "private/child.rkt" run-child)
            (only-in "private/comparable.rkt" comparable host-bytes)
            (only-in "private/safetensors-reader.rkt" read-safetensors)
            (only-in "private/trainer-kit.rkt" toy-loader))
@@ -177,6 +178,22 @@
                    #:callbacks (list (stored (box (hash "x" narrow)))))
       (define-values (tree _r) (saved-at (build-path dir "k.ckpt") #:trainer (Indexed narrow)))
       (check-equal? (hash-ref tree "init_dropped") '("ix"))))
+
+  (test-case "a native fault in the value check reaches the caller, not a #f"
+    (define-values (status answer stderr)
+      (run-child '(begin
+                    (require (only-in ffi/unsafe _intptr cast)
+                             (only-in racket/contract/base flat-contract-predicate)
+                             (only-in torch/foreign/raw/syntax _Tensor)
+                             (only-in torch/foreign/structs tensor-impl)
+                             (only-in torch/train checkpoint-value/c))
+                    (define bad (tensor-impl (cast 8 _intptr _Tensor) '(2 2)))
+                    (write (with-handlers ([exn:fail? (lambda (e) (list 'raised (exn-message e)))])
+                             (list 'returned ((flat-contract-predicate checkpoint-value/c) bad)))))
+                 #:environment (list (cons "RKTORCH_ON_NATIVE_FAULT" #f))
+                 #:within 60))
+    (check-equal? status 0 stderr)
+    (check-match answer (list 'raised (regexp #rx"invalid memory reference"))))
 
   (test-case "a value shared down 40 levels is refused before it is expanded"
     (with-temporary-directory (dir #:template "shared-deep-~a")
