@@ -252,7 +252,8 @@
       (define path (saved-from (Taller 1 2) dir))
       (define one-or-three (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)]))
       (check-exn/contract
-       (pregexp (string-append "load-from-checkpoint: .*not accept the number.*wrap"
+       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+                               " arguments it would be passed; wrap"
                                ".*saved: 2.*accepts: '[(]1 3[)].*old[.]ckpt"))
        (lambda () (load-from-checkpoint one-or-three path)))))
 
@@ -265,7 +266,7 @@
       (check-equal? args '(1 0.2))
       (check-regexp-match #rx"#:rate" (car warnings))
       (check-exn/contract
-       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+       (pregexp (string-append "load-from-checkpoint: .*positional arguments it would be passed"
                                ".*saved: 1.*accepts: 2.*old[.]ckpt"))
        (lambda () (load-from-checkpoint Taller path)))))
 
@@ -274,7 +275,7 @@
       (define path (saved-from (Spread 1 5) dir))
       (define (deeper w _h _d . _more) (Plain w))
       (check-exn/contract
-       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+       (pregexp (string-append "load-from-checkpoint: .*positional arguments it would be passed"
                                ".*saved: 1.*given: 1.*accepts: [(]arity-at-least 3[)].*old[.]ckpt"))
        (lambda () (load-from-checkpoint deeper path #:init-args (hasheq 'more '(9)))))))
 

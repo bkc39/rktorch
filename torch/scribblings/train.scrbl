@@ -361,10 +361,11 @@ default. A keyword @racket[make-trainer] takes that the checkpoint did not save
 comes from the @racket[init-args] entry under its name (@racket[#:lr] from
 @racket['lr]); a required one without an entry raises naming it and the path. A
 count of positional arguments @racket[make-trainer] does not accept raises
-naming the count, the arity it accepts and the path; a procedure that takes the
-saved arguments and supplies the others can be passed instead. A name in
-@racket[init-args] that is neither is ignored, as Lightning ignores a keyword
-its constructor does not take. A checkpoint whose hooks removed
+naming the count the checkpoint saved, the count an @racket[init-args] rest entry
+supplied when it supplied any, the arity it accepts and the path; a procedure
+that takes the saved arguments and supplies the others can be passed instead. A
+name in @racket[init-args] that is neither is ignored, as Lightning ignores a
+keyword its constructor does not take. A checkpoint whose hooks removed
 @tt{hyper_parameters} or @tt{trainer_hparams} loads them as empty, as
 Lightning's @tt{.get} does.
 

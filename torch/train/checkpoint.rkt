@@ -220,7 +220,7 @@
     (apply raise-arguments-error
            'load-from-checkpoint
            (string-append "the constructor does not accept the number of positional arguments"
-                          " the checkpoint saved; wrap it in a procedure that takes them")
+                          " it would be passed; wrap it in a procedure that takes them")
            "saved" saved-count
            (append (if (null? given) '() (list "given" (length given)))
                    (list "accepts" (procedure-arity make-trainer)
