@@ -33,6 +33,19 @@
 (define (value-problem v)
   (define on-path (make-hasheq))
   (define accepted (make-hasheq))
+  (define identity-bound (make-hasheq))
+  (define (bound-to-identity? k)
+    (match k
+      [(? tensor?) #t]
+      [(or (? pair?) (? hash?))
+       (hash-ref! identity-bound k
+                  (lambda ()
+                    (match k
+                      [(cons a d) (or (bound-to-identity? a) (bound-to-identity? d))]
+                      [_ (or (not (immutable? k))
+                             (for/or ([(a x) (in-hash k)])
+                               (or (bound-to-identity? a) (bound-to-identity? x))))])))]
+      [_ #f]))
   (define (bad path v) (cons path v))
   (define (node v path walk)
     (cond
@@ -66,7 +79,9 @@
                  (define at (cons k path))
                  (if (or (reserved-key? k) (not (key-survives-read? v k)))
                      (bad at k)
-                     (or (check k at) (check x at))))))]
+                     (or (check k at)
+                         (and (bound-to-identity? k) (bad at k))
+                         (check x at))))))]
       [_ (bad path v)]))
   (match (check v '())
     [#f #f]

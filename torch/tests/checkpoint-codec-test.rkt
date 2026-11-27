@@ -90,6 +90,18 @@
                    (hash "a" 1 1.5 2 '(1 2) 3))])
       (check-true (value? v) (format "~e" v))))
 
+  (test-case "T3-L8: a key holding a tensor or a mutable hash would lose its identity"
+    (define value? (flat-contract-predicate checkpoint-value/c))
+    (define t (ones 2))
+    (for ([v (list (hash t 1) (hasheqv t 1) (hash (list 1 t) 1) (hash (hash "k" t) 1)
+                   (hash (make-hash '((a . 1))) 1)
+                   (hash (make-hash '((a . 1))) 1 (hash 'a 1) 2)
+                   (hash (list 'x (make-hasheq)) 1)
+                   (hash (hash 'k (make-hash)) 1))])
+      (check-false (value? v) (format "~e" v)))
+    (check-true (value? (hash (hash 'a 1) 1 (list "x" (hasheq 'b 2)) 2)))
+    (check-true (value? (hash "k" (make-hash '((a . 1))) "t" t)) "as values both are kept"))
+
   (test-case "T3-L8: an exact non-integer is {\"$rational\": \"n/d\"}, an integer a JSON integer"
     (with-temporary-directory (dir #:template "rational-~a")
       (define path (build-path dir "r.ckpt"))
