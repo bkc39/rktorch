@@ -74,9 +74,9 @@
 (define ((device-stream-state? type) v)
   (and (tensor? v)
        (eq? (dtype v) 'uint8)
-       (match type
-         ["cuda" (equal? (shape v) '(16))]
-         [_ (~> (shape v) length (= 1))])))
+       (if (equal? type "cuda")
+           (equal? (shape v) '(16))
+           (= 1 (length (shape v))))))
 
 (define rng-streams '("cpu" "current_generator" "racket"))
 
@@ -89,23 +89,33 @@
 (define (scaler-state? v)
   (contract-first-order-passes? grad-scaler-state/c v))
 
+(define (check-rng! check! bundle)
+  (define (check-stream! name ok?) (check! (list "rng" name) ok?))
+  (check-stream! "racket" racket-generator-state?)
+  (check-stream! "cpu" (generator-accepts? (cpu-device)))
+  (for ([type (in-list (remove* rng-streams (hash-keys bundle)))])
+    (check-stream! type (device-stream-state? type)))
+  (check-stream! "current_generator" saved-generator?))
+
+(define (check-live-generator! check! path saved)
+  (check-current-generator! saved path)
+  (when saved
+    (check! '("rng" "current_generator" "state")
+            (~> (current-generator) generator-device generator-accepts?))))
+
+(define (check-book! check!)
+  (for ([book-check (in-list saved-book-checks)])
+    (match-define (cons keys ok?) book-check)
+    (check! (cons "metric_book" keys) ok?)))
+
 (define (check-training-state! check! path tree)
   (when (hash-has-key? tree "optimizer_states")
     (check! '("optimizer_states") states?)
     (check! '("lr_schedulers") states?)
-    (check! '("rng" "racket") racket-generator-state?)
-    (check! '("rng" "cpu") (generator-accepts? (cpu-device)))
-    (for ([type (in-list (remove* rng-streams (hash-keys (tree-ref tree '("rng")))))])
-      (check! (list "rng" type) (device-stream-state? type)))
-    (define saved (check! '("rng" "current_generator") saved-generator?))
-    (check-current-generator! saved path)
-    (when saved
-      (check! '("rng" "current_generator" "state")
-              (~> (current-generator) generator-device generator-accepts?))))
+    (check-rng! check! (check! '("rng") hash?))
+    (check-live-generator! check! path (tree-ref tree '("rng" "current_generator"))))
   (when (hash-has-key? tree "metric_book")
-    (for ([book-check (in-list saved-book-checks)])
-      (match-define (cons keys ok?) book-check)
-      (check! (cons "metric_book" keys) ok?)))
+    (check-book! check!))
   (when (hash-has-key? tree "MixedPrecision")
     (check! '("MixedPrecision") scaler-state?)))
 
