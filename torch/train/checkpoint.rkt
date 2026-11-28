@@ -12,7 +12,7 @@
          (only-in "../nn/state-dict.rkt" load-state! state-dict)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optimization.rkt" set-hparam! trainer-hparams)
-         (only-in "private/book.rkt" book-metrics book-state)
+         (only-in "private/book.rkt" book-metrics-state book-state)
          (only-in "private/checks.rkt"
                   formal-name init-capture-kept init-capture-shapes)
          (only-in "private/dispatch.rkt"
@@ -110,7 +110,7 @@
              "state_dict" (make-immutable-hash (state-dict tr))
              "loops" (hash "fit_loop" (fit-loop r))
              "trainer_hparams" (keys->strings (trainer-hparams tr))
-             "callback_metrics" (keys->strings (book-metrics (run-book r)))))
+             "callback_metrics" (book-metrics-state (run-book r))))
 
 (define (with-training-state r tree)
   (note-epoch-end-save! r)

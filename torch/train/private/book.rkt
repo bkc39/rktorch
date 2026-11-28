@@ -12,6 +12,7 @@
 (provide accumulators
          book-metric
          book-metrics
+         book-metrics-state
          book-state
          book-writes
          epoch-end-reached!
@@ -239,7 +240,7 @@
             (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
     [(leaf-shape ok?) (ok? saved)]))
 
-(define (string-keyed-state table key-path state-of)
+(define (string-keyed-state table key-path [state-of values])
   (define names (hash-keys table))
   (match (check-duplicates names #:key symbol->string)
     [#f (for/hash ([(k v) (in-hash table)]) (values (symbol->string k) (state-of v)))]
@@ -257,6 +258,9 @@
     (match-define (list name table-of shape) field)
     (values name (string-keyed-state (table-of l) (format "metric_book.~a.~a" loop name)
                                      (curry shape-state shape)))))
+
+(define (book-metrics-state b)
+  (string-keyed-state (book-host b) "callback_metrics"))
 
 (define (book-state b)
   (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))

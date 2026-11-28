@@ -164,21 +164,47 @@
     (define-optimizers (sgd (parameters net) #:lr 0.1))
     (define-training-step (x y)
       (define loss (mse-loss (net x) y))
-      (log! 'odd loss)
-      (log! odd-key loss)
+      (log! 'odd loss #:on-epoch? #t)
+      (log! odd-key loss #:on-epoch? #t)
       loss))
 
-  (test-case "two logged names spelled the same are refused at save, naming both"
+  (define (check-twins-refused key-rx #:weights-only? [weights-only? #f])
     (with-temporary-directory (dir #:template "twins-~a")
       (define path (build-path dir "twins.ckpt"))
       (check-exn (lambda (e)
                    (and (exn:fail:contract? e)
                         (regexp-match? #rx"spelled the same" (exn-message e))
-                        (regexp-match? #rx"key: \"metric_book[.]train[.]steps\"" (exn-message e))
+                        (regexp-match? key-rx (exn-message e))
                         (regexp-match? #rx"names: '[(]odd odd[)]" (exn-message e))))
                  (lambda ()
                    (fit (Twins) (dataloader (data 4 1) #:batch-size 2) #:max-epochs 1 #:logger #f
                         #:callbacks
                         (list (lambda-callback
-                               #:on-train-end (lambda (r) (save-checkpoint! r path)))))))
-      (check-false (file-exists? path)))))
+                               #:on-train-end
+                               (lambda (r)
+                                 (save-checkpoint! r path #:weights-only? weights-only?)))))))
+      (check-false (file-exists? path))))
+
+  (test-case "two logged names spelled the same are refused at save, naming both"
+    (check-twins-refused #rx"key: \"callback_metrics\""))
+
+  (test-case "a weights-only save refuses two logged names spelled the same"
+    (check-twins-refused #rx"key: \"callback_metrics\"" #:weights-only? #t))
+
+  (define-trainer EpochTwins (net)
+    (define-init () (set! net (Linear 2 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y))
+    (define-hook (on-train-epoch-end)
+      (log! 'odd 1.0)
+      (log! odd-key 1.0)
+      (save-checkpoint! run (build-path (current-directory) "unused.ckpt"))))
+
+  (test-case "two names spelled the same in an unpublished epoch table are refused at save"
+    (with-temporary-directory (dir #:template "epoch-twins-~a")
+      (check-exn #rx"spelled the same.*key: \"metric_book[.]train[.]epoch\""
+                 (lambda ()
+                   (parameterize ([current-directory dir])
+                     (fit (EpochTwins) (dataloader (data 4 1) #:batch-size 2) #:max-epochs 1
+                          #:logger #f))))
+      (check-equal? (directory-list dir) '()))))
