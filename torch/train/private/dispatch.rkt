@@ -9,18 +9,20 @@
          (only-in "../../nn/layer.rkt" buffers layer? parameters)
          (only-in (submod "../../nn/mode.rkt" private) eval-layer-count)
          (only-in "../logging.rkt" logger-finalize! logger-log-metrics!)
-         (only-in "book.rkt" read-epoch! read-steps!)
+         (only-in "book.rkt" book-writes read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
          (only-in "state.rkt"
-                  run-book run-callbacks run-epoch run-hook run-loggers
-                  run-set-up? run-torn-down? run-trainer set-run-batch-size!
-                  set-run-callbacks! set-run-finished?! set-run-hook! set-run-outcome!
-                  set-run-set-up?! set-run-torn-down?!)
+                  run-book run-callbacks run-epoch run-epoch-end-save-writes run-hook
+                  run-loggers run-set-up? run-stale-save-warned? run-torn-down? run-trainer
+                  set-run-batch-size! set-run-callbacks! set-run-epoch-end-save-writes!
+                  set-run-finished?! set-run-hook! set-run-outcome! set-run-set-up?!
+                  set-run-stale-save-warned?! set-run-torn-down?!)
          (only-in "types.rkt"
                   callback-hook callback-kind callback-state-key callback-type
                   trainer-hook))
 
-(provide call-callback
+(provide after-trainer-hook?
+         call-callback
          call-callbacks
          call-hooks
          call-trainer
@@ -28,6 +30,7 @@
          finish!
          install-callbacks!
          note-batch-size!
+         note-epoch-end-save!
          publish-epoch!
          publish-steps!
          set-up!
@@ -35,6 +38,7 @@
          trainer-device
          transfer
          warn-eval-layers!
+         warn-train!
          with-failure-protocol)
 
 (define-logger rktorch-train)
@@ -65,6 +69,36 @@
 
 (define (late? cb) (memq (callback-kind cb) '(monitor checkpoint)))
 
+(define after-trainer-hook? (make-parameter #f))
+
+(define (note-epoch-end-save! r)
+  (when (and (after-trainer-hook?) (not (run-epoch-end-save-writes r)))
+    (set-run-epoch-end-save-writes! r (book-writes (run-book r)))))
+
+(define (warn-stale-save! r cb earlier-save-at)
+  (unless (run-stale-save-warned? r)
+    (set-run-stale-save-warned?! r #t)
+    (define message
+      (match earlier-save-at
+        [#f (string-append "fit: the ~a callback logged in on-train-epoch-end after saving a"
+                           " checkpoint earlier in this hook, so that file does not hold the"
+                           " value and a resume from it is not exact; log before saving")]
+        [_ (string-append "fit: the ~a callback logged in on-train-epoch-end after a checkpoint"
+                          " was saved earlier in this hook, so that file does not hold the value"
+                          " and a resume from it is not exact; list the saving callback last")]))
+    (warn-train! (format message (callback-type cb)))))
+
+(define (call-late-callbacks r name cbs args)
+  (set-run-epoch-end-save-writes! r #f)
+  (parameterize ([after-trainer-hook? #t])
+    (for ([cb (in-list cbs)])
+      (define earlier-save-at (run-epoch-end-save-writes r))
+      (call-callback r cb name args)
+      (define at (run-epoch-end-save-writes r))
+      (when (and at (> (book-writes (run-book r)) at))
+        (set-run-epoch-end-save-writes! r #f)
+        (warn-stale-save! r cb earlier-save-at)))))
+
 (define (call-hooks r name . args)
   (define h (hook-named name))
   (define cbs (if (memq 'callback (hook-sides h)) (run-callbacks r) '()))
@@ -72,9 +106,10 @@
   (match (hook-order h)
     ['by-kind
      (define-values (late early) (partition late? cbs))
-     (apply call-callbacks r name early args)
-     (trainer!)
-     (apply call-callbacks r name late args)]
+     (parameterize ([after-trainer-hook? #f])
+       (apply call-callbacks r name early args)
+       (trainer!))
+     (call-late-callbacks r name late args)]
     ['trainer-first
      (trainer!)
      (apply call-callbacks r name cbs args)]
@@ -159,13 +194,15 @@
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
 
+(define (warn-train! message)
+  (log-rktorch-train-warning message)
+  (eprintf "rktorch-train: ~a\n" message))
+
 (define (warn-eval-layers! r)
   (define n (match (run-trainer r) [(? layer? tr) (eval-layer-count tr)] [_ 0]))
   (when (positive? n)
-    (define message
-      (format "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n))
-    (log-rktorch-train-warning message)
-    (eprintf "rktorch-train: ~a\n" message)))
+    (warn-train!
+     (format "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n))))
 
 (define (logged-attempt what thunk)
   (with-fault-handlers ([exn:fail? (lambda (e)

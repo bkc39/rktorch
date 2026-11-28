@@ -10,6 +10,7 @@
          (only-in "private/evaluate.rkt" evaluate)
          (only-in "private/fit.rkt" fit-plan limited-batches run-fit start-entry!)
          (only-in "private/precision.rkt" clipping)
+         (only-in "private/resume.rkt" checkpoint-source)
          (only-in "private/state.rkt" fresh-run set-run-current-stage!)
          (only-in "private/types.rkt"
                   callback? not-implemented trainer-automatic?
@@ -27,17 +28,21 @@
     [(? list?) spec]
     [l (list l)]))
 
-(define (check-supported! #:ckpt-path [ckpt-path #f])
-  (when ckpt-path
-    (not-implemented '#:ckpt-path 'T3)))
+(define (checkpoint-of who ckpt-path)
+  (match ckpt-path
+    [#f #f]
+    [(? symbol?) (not-implemented (format "~a #:ckpt-path '~a" who ckpt-path) 'T3)]
+    [path (checkpoint-source who path)]))
 
 (define (evaluation entry trainer loader
-                    #:device device #:loggers loggers #:callbacks callbacks #:limit limit)
+                    #:device device #:loggers loggers #:callbacks callbacks #:limit limit
+                    #:ckpt-path ckpt-path)
+  (define checkpoint (checkpoint-of entry ckpt-path))
   (define r (fresh-run trainer entry (or device (trainer-device trainer))))
   (define outputs
     (with-failure-protocol r entry
       (set-run-current-stage! r entry)
-      (start-entry! r entry callbacks loggers device)
+      (start-entry! r entry callbacks loggers device #:checkpoint checkpoint)
       (begin0 (evaluate r loader (limited-batches loader limit) entry)
               (tear-down! r entry))))
   (finish! r 'success)
@@ -107,7 +112,7 @@
        (or (trainer-automatic? trainer)
            (and (= 1 (supplied-or accumulate 1)) (not (supplied-or clip-val))))
        [result run?])
-  (check-supported! #:ckpt-path ckpt-path)
+  (define checkpoint (checkpoint-of 'fit ckpt-path))
   (run-fit (fresh-run trainer 'fit (or device (trainer-device trainer)))
            (fit-plan train
                      #:val val
@@ -125,7 +130,8 @@
                      #:log-every log-every
                      #:fast-dev-run fast-dev-run
                      #:clip (and clip-val (clipping clip-val clip-algorithm))
-                     #:precision precision)))
+                     #:precision precision
+                     #:checkpoint checkpoint)))
 
 (define/contract-out (test trainer loader
                            #:device [device #f]
@@ -145,11 +151,10 @@
        "#:limit-test-batches selects no batch from this loader"
        (selects-a-batch? loader limit)
        [result run?])
-  (check-supported! #:ckpt-path ckpt-path)
   (define-values (r _outputs)
     (evaluation 'test trainer loader
                 #:device device #:loggers (logger-list logger) #:callbacks callbacks
-                #:limit limit))
+                #:limit limit #:ckpt-path ckpt-path))
   r)
 
 (define/contract-out (predict trainer loader
@@ -165,8 +170,8 @@
        #:pre/name (trainer) "the trainer has no define-predict-step"
        (trainer-defines? trainer 'define-predict-step)
        [result list?])
-  (check-supported! #:ckpt-path ckpt-path)
   (define-values (_r outputs)
     (evaluation 'predict trainer loader
-                #:device device #:loggers '() #:callbacks callbacks #:limit limit))
+                #:device device #:loggers '() #:callbacks callbacks #:limit limit
+                #:ckpt-path ckpt-path))
   outputs)

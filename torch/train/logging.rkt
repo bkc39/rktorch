@@ -12,7 +12,7 @@
          (only-in threading ~>)
          (only-in "../foreign.rkt" dtype numel tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "private/book.rkt" accumulators host-reads note-epoch! note-step!)
+         (only-in "private/book.rkt" accumulators host-reads note-epoch! note-step! reducers)
          (only-in "private/hooks.rkt"
                   log-rule-default-on-epoch? log-rule-default-on-step?
                   log-rule-on-epoch log-rule-on-step)
@@ -33,7 +33,7 @@
   (logger-log-metrics! training-logger metrics step)
   (logger-finalize! training-logger status))
 
-(define-named-contract reduce/c (or/c 'mean 'sum 'max 'min))
+(define-named-contract reduce/c (apply or/c reducers))
 
 (define-named-contract scalar-tensor/c
   (and/c tensor? (property/c numel 1)))

@@ -64,7 +64,9 @@
                    #:on-save-checkpoint
                    (lambda (_r ckpt) (hash-set! ckpt "probe" (unbox value-box)))))
 
-(define (saving-callback path-of #:weights-only? [weights-only? #f])
-  (lambda-callback #:state-key "saving"
-                   #:on-train-epoch-end
-                   (lambda (r) (save-checkpoint! r (path-of r) #:weights-only? weights-only?))))
+(define-callback saving-callback (path-of weights-only?)
+  #:kind checkpoint
+  (define-init (p #:weights-only? [w? #f]) (set! path-of p) (set! weights-only? w?))
+  (define-state-key "saving")
+  (define-hook (on-train-epoch-end)
+    (save-checkpoint! run (path-of run) #:weights-only? weights-only?)))

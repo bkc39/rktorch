@@ -1,15 +1,21 @@
 #lang racket/base
 
-(require (only-in racket/list remove-duplicates)
-         (only-in racket/match match match-define)
+(require (only-in racket/dict in-dict in-dict-keys)
+         (only-in racket/function curry)
+         (only-in racket/list remove-duplicates)
+         (only-in racket/match match match* match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  * + cat detach device dtype max min reshape tensor->list tensor? to
-                  zeros-like))
+                  * + cat detach device dtype max min numel reshape tensor->list tensor? to
+                  zeros-like)
+         (only-in "value.rkt" string-keyed-state))
 
 (provide accumulators
          book-metric
          book-metrics
+         book-metrics-state
+         book-state
+         book-writes
          epoch-end-reached!
          host-reads
          make-book
@@ -17,7 +23,10 @@
          note-step!
          read-epoch!
          read-groups
-         read-steps!)
+         read-steps!
+         reducers
+         restore-book-state!
+         saved-book-checks)
 
 (struct logged (logger? both?))
 
@@ -27,12 +36,15 @@
 
 (struct ledger (steps epoch stepped latest closed))
 
-(struct book (train eval host))
+(struct book (train eval host [writes #:mutable]))
 
 (define (fresh-ledger)
   (ledger (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq)))
 
-(define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq)))
+(define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq) 0))
+
+(define (count-write! b)
+  (set-book-writes! b (add1 (book-writes b))))
 
 (define reads (box 0))
 
@@ -49,6 +61,7 @@
 
 (define (note-step! b loop key v logger? both?)
   (define l (loop-ledger b loop))
+  (count-write! b)
   (hash-set! (ledger-steps l) key (pending logger? both? (scalar v)))
   (hash-set! (ledger-stepped l) key #t))
 
@@ -73,6 +86,7 @@
 (define (note-epoch! b loop key v w reduce logger? both?)
   (define t (ledger-epoch (loop-ledger b loop)))
   (define value (scalar v))
+  (count-write! b)
   (match (hash-ref t key #f)
     [#f (hash-set! t key (entry logger? both? (start reduce value w) w reduce))]
     [e
@@ -103,7 +117,10 @@
     (if (tensor? v) (hash-ref read v) v)))
 
 (define (reduced e x)
-  (if (eq? (entry-reduce e) 'mean) (exact->inexact (/ x (entry-weight e))) x))
+  (match* ((entry-reduce e) (entry-weight e))
+    [('mean (? zero?)) +nan.0]
+    [('mean w) (exact->inexact (/ x w))]
+    [(_ _) x]))
 
 (define (cache! es)
   (define stale (filter (lambda (e) (not (entry-cached e))) es))
@@ -171,3 +188,97 @@
 
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))
+
+(struct record-shape (slots make))
+
+(struct leaf-shape (ok?))
+
+(struct slot (get ok?))
+
+(define reducers '(mean sum max min))
+
+(define (metric-value? v) (or (real? v) (and (tensor? v) (= (numel v) 1))))
+
+(define (weight? w) (and (real? w) (not (negative? w))))
+
+(define (reducer? r) (memq r reducers))
+
+(define logged-slots
+  (list (cons "logger" (slot logged-logger? boolean?)) (cons "both" (slot logged-both? boolean?))))
+
+(define pending-shape
+  (record-shape (append logged-slots (list (cons "value" (slot pending-value metric-value?))))
+                pending))
+
+(define entry-shape
+  (record-shape (append logged-slots
+                        (list (cons "value" (slot entry-value metric-value?))
+                              (cons "weight" (slot entry-weight weight?))
+                              (cons "reduce" (slot entry-reduce reducer?))))
+                entry))
+
+(define ledger-fields
+  (list (list "steps" ledger-steps pending-shape)
+        (list "epoch" ledger-epoch entry-shape)
+        (list "stepped" ledger-stepped (leaf-shape boolean?))
+        (list "latest" ledger-latest (leaf-shape real?))
+        (list "closed" ledger-closed (leaf-shape real?))))
+
+(define (shape-state shape v)
+  (match shape
+    [(record-shape slots _)
+     (for/hash ([(name s) (in-dict slots)]) (values name ((slot-get s) v)))]
+    [(leaf-shape _) v]))
+
+(define (state-shape shape saved)
+  (match shape
+    [(record-shape slots make)
+     (apply make (for/list ([name (in-dict-keys slots)]) (hash-ref saved name)))]
+    [(leaf-shape _) saved]))
+
+(define (shape-state? shape saved)
+  (match shape
+    [(record-shape slots _)
+     (and (hash? saved)
+          (for/and ([(name s) (in-dict slots)])
+            (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
+    [(leaf-shape ok?) (ok? saved)]))
+
+(define (ledger-state l loop)
+  (for/hash ([field (in-list ledger-fields)])
+    (match-define (list name table-of shape) field)
+    (values name (string-keyed-state (table-of l) (format "metric_book.~a.~a" loop name)
+                                     (curry shape-state shape)))))
+
+(define (book-metrics-state b)
+  (string-keyed-state (book-host b) "callback_metrics"))
+
+(define (book-state b)
+  (hash "train" (ledger-state (book-train b) "train") "eval" (ledger-state (book-eval b) "eval")))
+
+(define ((saved-table? shape) table)
+  (and (hash? table)
+       (for/and ([(k v) (in-hash table)]) (and (string? k) (shape-state? shape v)))))
+
+(define saved-book-checks
+  (for*/list ([loop (in-list '("train" "eval"))] [field (in-list ledger-fields)])
+    (match-define (list name _ shape) field)
+    (cons (list loop name) (saved-table? shape))))
+
+(define (refill! table saved [load values])
+  (hash-clear! table)
+  (for ([(k v) (in-hash saved)])
+    (hash-set! table (string->symbol k) (load v))))
+
+(define (restore-ledger! l saved)
+  (for ([field (in-list ledger-fields)])
+    (match-define (list name table-of shape) field)
+    (refill! (table-of l) (hash-ref saved name) (curry state-shape shape))))
+
+(define (restore-book-state! b metrics saved #:close-train-epoch? close?)
+  (refill! (book-host b) metrics)
+  (when saved
+    (restore-ledger! (book-train b) (hash-ref saved "train"))
+    (restore-ledger! (book-eval b) (hash-ref saved "eval")))
+  (when close?
+    (void (read-epoch! b 'train))))

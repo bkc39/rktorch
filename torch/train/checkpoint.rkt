@@ -12,10 +12,12 @@
          (only-in "../nn/state-dict.rkt" load-state! state-dict)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "optimization.rkt" set-hparam! trainer-hparams)
-         (only-in "private/book.rkt" book-metrics)
+         (only-in "private/book.rkt" book-metrics-state book-state)
          (only-in "private/checks.rkt"
                   formal-name init-capture-kept init-capture-shapes)
-         (only-in "private/dispatch.rkt" call-callback call-hooks call-trainer trainer-device)
+         (only-in "private/dispatch.rkt"
+                  after-trainer-hook? call-callback call-hooks call-trainer note-epoch-end-save!
+                  trainer-device)
          (only-in "private/format.rkt" read-checkpoint-file write-checkpoint!)
          (only-in "private/restore.rkt" rng-bundle)
          (only-in "private/state.rkt"
@@ -27,7 +29,8 @@
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
                   scheduler-config-scheduler trainer-hook trainer-hparam-names trainer?)
-         (only-in "private/value.rkt" checkpoint-value? string-keyed? value-problem))
+         (only-in "private/value.rkt"
+                  checkpoint-value? string-keyed-state string-keyed? value-problem))
 
 (define-named-contract checkpoint-value/c checkpoint-value?)
 
@@ -61,10 +64,8 @@
   (match* (at (run-train-batch-index r))
     [((or "batch-end" "validation-end" "exception") (? exact-integer? i))
      (hash-set counters "batch_index" i)]
+    [("epoch-end" _) (hash-set counters "epoch_end_logged" (after-trainer-hook?))]
     [(_ _) counters]))
-
-(define (keys->strings h)
-  (for/hash ([(k v) (in-hash h)]) (values (symbol->string k) v)))
 
 (define (formal-entry shape)
   (match shape
@@ -76,7 +77,7 @@
   (define captured ((trainer-hook tr 'init-arguments) tr))
   (define kept (init-capture-kept captured))
   (define shapes (init-capture-shapes captured))
-  (hash "hyper_parameters" (keys->strings kept)
+  (hash "hyper_parameters" (string-keyed-state kept "hyper_parameters")
         "init_formals" (map formal-entry shapes)
         "init_dropped" (for/list ([shape (in-list shapes)]
                                   #:unless (hash-has-key? kept (formal-name shape)))
@@ -106,14 +107,16 @@
              "global_step" (run-global-step r)
              "state_dict" (make-immutable-hash (state-dict tr))
              "loops" (hash "fit_loop" (fit-loop r))
-             "trainer_hparams" (keys->strings (trainer-hparams tr))
-             "callback_metrics" (keys->strings (book-metrics (run-book r)))))
+             "trainer_hparams" (string-keyed-state (trainer-hparams tr) "trainer_hparams")
+             "callback_metrics" (book-metrics-state (run-book r))))
 
 (define (with-training-state r tree)
+  (note-epoch-end-save! r)
   (define full
     (hash-set* tree
                "rng" (rng-bundle (run-device r))
                "callbacks" (callback-states r)
+               "metric_book" (book-state (run-book r))
                "optimizer_states" (for/list ([opt (in-list (run-optimizers r))])
                                     (optimizer-state-dict opt (run-trainer r)))
                "lr_schedulers" (for/list ([c (in-list (run-scheduler-configs r))])

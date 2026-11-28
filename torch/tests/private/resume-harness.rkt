@@ -22,23 +22,24 @@
                   apply-keywords collecting-hparams collecting-logger collecting-steps))
 
 (provide check-resume
+         every-epoch-saver
          fixture-fit-args
          fixture-world
          training-world
-         (struct-out world)
-         every-epoch-saver)
+         (struct-out world))
 
 (struct world (trainer train val callbacks generators fingerprints))
 
 (define (resumable-net)
   (Sequential (Linear 4 8) (Dropout #:p 0.5) (Linear 8 1)))
 
-(define-trainer Resumable (net temperature seen)
+(define-trainer Resumable (net temperature scale seen)
   (define-init (s)
     (set! net (resumable-net))
     (set! temperature 1.0)
+    (set! scale 1.0)
     (set! seen s))
-  (define-hparams temperature)
+  (define-hparams temperature scale)
   (define-optimizers
     (define opt (adamw (weight-decay-param-groups net #:weight-decay 0.1) #:lr 0.01))
     (define warmup (linear-lr opt #:start-factor 0.1 #:total-iters 2))
@@ -48,11 +49,28 @@
                               #:interval 'step)))
   (define-training-step (x y i)
     (set-box! seen (cons (tensor->list i) (unbox seen)))
-    (define loss (* (mse-loss (net x) y) temperature))
+    (define loss (* (mse-loss (net x) y) temperature scale))
     (log! 'train-loss loss)
+    (log! 'train-mean loss #:on-step? #f #:on-epoch? #t)
+    (when (= (run-batch-index run) 6)
+      (log! 'rare loss))
     loss)
+  (define-hook (on-train-epoch-start)
+    (set! scale (* scale 0.5)))
   (define-validation-step (x y _i)
-    (log! 'val-loss (mse-loss (net x) y))))
+    (log! 'val-loss (mse-loss (net x) y) #:on-step? #t)))
+
+(define (metric-reader)
+  (define reads '())
+  (lambda-callback #:state-key "metric-reader"
+                   #:on-train-epoch-start
+                   (lambda (r)
+                     (define named
+                       (for/list ([key (in-list '(train-loss train-mean rare val-loss))])
+                         (run-metric r key)))
+                     (set! reads (cons (list (run-epoch r) named (run-metrics r)) reads)))
+                   #:state-dict (lambda (_r) reads)
+                   #:load-state! (lambda (_r state) (set! reads state))))
 
 (define (counting-callback)
   (define count 0)
@@ -87,7 +105,7 @@
                   (arange n)))
 
 (define fixture-fit-args
-  '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5)))
+  '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5) (#:log-every-n-steps . 3)))
 
 (define (training-world #:generator? [generator? #f] #:workers [workers 0])
   (define seen (box '()))
@@ -99,7 +117,8 @@
          (dataloader (data 8 source) #:batch-size 4)
          (list (hparam-scheduler 'temperature (lambda (t) (/ 1.0 (add1 t))))
                (counting-callback)
-               (averaging))
+               (averaging)
+               (metric-reader))
          (if g (list g) '())
          seen))
 
@@ -139,6 +158,7 @@
   (match-define (leg w r _logger _saver dir) leg-run)
   (define tr (world-trainer w))
   (hasheq 'parameters (comparable (state-dict tr))
+          'hparams (trainer-hparams tr)
           'optimizers (for/list ([opt (in-list (run-optimizers r))])
                         (comparable (optimizer-state-dict opt tr)))
           'schedulers (for/list ([c (in-list (run-schedulers r))])
@@ -151,9 +171,10 @@
                                   (world-generators w))
           'epoch (run-epoch r)
           'global-step (run-global-step r)
-          'best-k (for/hash ([(path score) (in-hash (model-checkpoint-best-k-models
-                                                     (monitor-checkpoint w)))])
-                    (values (path->string (file-name-from-path path)) score))))
+          'best-k (match (monitor-checkpoint w)
+                    [#f #f]
+                    [cb (for/hash ([(path score) (in-hash (model-checkpoint-best-k-models cb))])
+                          (values (path->string (file-name-from-path path)) score))])))
 
 (struct leg (world run logger saver dir))
 
@@ -182,9 +203,15 @@
 (define (fingerprints l)
   (reverse (unbox (world-fingerprints (leg-world l)))))
 
+(define (latest-best saver _r _dir)
+  (model-checkpoint-best-model-path saver))
+
 (define (check-resume make-world #:split [splits '()] #:total n #:fit-args [fit-args '()]
-                      #:split-step [split-step #f])
-  (define make-saver (if split-step (every-steps-saver split-step) every-epoch-saver))
+                      #:split-step [split-step #f]
+                      #:saver [chosen-saver #f]
+                      #:resume-path [resume-path latest-best])
+  (define make-saver
+    (or chosen-saver (if split-step (every-steps-saver split-step) every-epoch-saver)))
   (with-temporary-directory (root #:template "resume-~a")
     (define straight (fit-leg make-world (build-path root "straight") fit-args #:saver make-saver
                               #:seed 0 #:bounds (list (cons '#:max-epochs n))))
@@ -201,7 +228,8 @@
                 ([epochs (in-list later-ends)])
         (match-define (cons previous _) legs)
         (cons (fit-leg make-world split-dir fit-args #:seed 12345 #:saver make-saver
-                       #:ckpt-path (model-checkpoint-best-model-path (leg-saver previous))
+                       #:ckpt-path (resume-path (leg-saver previous) (leg-run previous)
+                                                (leg-dir previous))
                        #:bounds (list (cons '#:max-epochs epochs)))
               legs)))
     (define actual (snapshot (last legs)))
