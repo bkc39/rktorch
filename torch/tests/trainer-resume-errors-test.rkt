@@ -88,9 +88,10 @@
       [(cons k more) (hash-set h k (path-set (hash-ref h k #f) more v))]))
 
   (define ((edit-at keys v) tree)
-    (match keys
-      [(list k) #:when (eq? v removed) (hash-remove! tree k)]
-      [(cons k more) (hash-set! tree k (path-set (hash-ref tree k #f) more v))]))
+    (match-define (cons k _) keys)
+    (match (path-set (hash k (hash-ref tree k #f)) keys v)
+      [(hash-table (k edited)) (hash-set! tree k edited)]
+      [_ (hash-remove! tree k)]))
 
   (define (setup-seen seen)
     (lambda-callback #:setup (lambda (_r _stage) (set-box! seen '(setup)))))

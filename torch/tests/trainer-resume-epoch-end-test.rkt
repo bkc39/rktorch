@@ -49,33 +49,27 @@
     (define-hook (on-train-epoch-end)
       (log! 'tag (exact->inexact (run-epoch run)))))
 
-  (define-callback logging-saver (dir)
+  (define-callback saver (dir on-epoch-end)
     #:kind checkpoint
-    (define-init (d) (set! dir d))
+    (define-init (d on-end) (set! dir d) (set! on-epoch-end on-end))
     (define-hook (on-train-epoch-end)
-      (log! 'tag (exact->inexact (run-epoch run)))
-      (save-checkpoint! run (epoch-path dir run "late"))))
+      (on-epoch-end run dir)))
 
-  (define-callback save-log-saver (dir)
-    #:kind checkpoint
-    (define-init (d) (set! dir d))
-    (define-hook (on-train-epoch-end)
-      (save-checkpoint! run (epoch-path dir run))
-      (log! 'tag (exact->inexact (run-epoch run)))
-      (save-checkpoint! run (epoch-path dir run "late"))))
+  (define ((saver-doing . steps) d)
+    (saver d (lambda (r dir) (for ([step (in-list steps)]) (step r dir)))))
 
-  (define-callback weights-saver (dir)
-    #:kind checkpoint
-    (define-init (d) (set! dir d))
-    (define-hook (on-train-epoch-end)
-      (save-checkpoint! run (epoch-path dir run "weights") #:weights-only? #t)))
+  (define (tag! r _dir) (run-log! r 'tag (exact->inexact (run-epoch r))))
 
-  (define-callback save-then-log (dir)
-    #:kind checkpoint
-    (define-init (d) (set! dir d))
-    (define-hook (on-train-epoch-end)
-      (save-checkpoint! run (epoch-path dir run))
-      (log! 'tag (exact->inexact (run-epoch run)))))
+  (define ((save! [prefix "epoch"] #:weights-only? [weights-only? #f]) r dir)
+    (save-checkpoint! r (epoch-path dir r prefix) #:weights-only? weights-only?))
+
+  (define logging-saver (saver-doing tag! (save! "late")))
+
+  (define save-log-saver (saver-doing (save!) tag! (save! "late")))
+
+  (define weights-saver (saver-doing (save! "weights" #:weights-only? #t)))
+
+  (define save-then-log (saver-doing (save!) tag!))
 
   (struct legs (straight split saving resuming))
 
@@ -147,7 +141,7 @@
     (match-define (legs _ split saving _) (resumed plain (lambda (d) (list (save-then-log d)))))
     (check-equal? split '(#f 0.0 0.0 2.0) "the resumed epoch reads a stale tag")
     (check-equal? (length saving) 1 "one warning in the saving run")
-    (check-regexp-match #rx"save-then-log[0-9]* callback logged in on-train-epoch-end after"
+    (check-regexp-match #rx"saver[0-9]* callback logged in on-train-epoch-end after"
                         (car saving))
     (check-regexp-match #rx"log before saving" (car saving))
     (check-false (regexp-match? #rx"list the saving callback last" (car saving))))
