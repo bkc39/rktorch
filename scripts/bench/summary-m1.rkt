@@ -221,7 +221,7 @@
   (match-define (list us free kb) t)
   (format "~a / ~a / ~a" (num us 2) (num free 2) (num kb 2)))
 
-(define (registration-markdown records)
+(define (registration-markdown records racket)
   (define-values (threads layers pieces chain backlog) (registration-rows records))
   (define by-threads (map (lambda (n) (format "~a threads" n)) threads))
   (define (rows xs)
@@ -235,8 +235,9 @@
   (define peaks
     (cons "kept backlog peak, handles"
           (map (lambda (b) (num (and b (car b)) 0)) backlog)))
+  (define on (if racket (string-append ", Racket " racket) ""))
   (string-append
-   "### Registration and accounting per op, the loader's op mix\n\n"
+   "### Registration and accounting per op, the loader's op mix" on "\n\n"
    (table (cons "µs/op, excl. GC / KB/op" by-threads) (append (rows layers) (list peaks))) "\n\n"
    (table (cons "piece" by-threads) (rows pieces)) "\n\n"
    (if (ormap (lambda (b) (and b (cdr b))) backlog)
@@ -245,6 +246,12 @@
        "")
    (table (cons "cifar chain, µs/sample" by-threads) (list (cons "facade" (map num chain))))
    "\n"))
+
+(define (registration-sections records)
+  (define rackets
+    (for/list ([r (in-list records)] #:when (equal? (ref r 'kind) "op")) (ref r 'racket)))
+  (for/list ([v (in-list (remove-duplicates rackets))])
+    (registration-markdown (filter (lambda (r) (equal? (ref r 'racket) v)) records) v)))
 
 (define (column header format-of key)
   (cons header (lambda (row) (format-of (hash-ref row key)))))
@@ -315,7 +322,5 @@
       (define in-g (filter (lambda (r) (and (equal? (ref r 'tree) tree) (equal? (ref r 'racket) racket))) rs))
       (format "## ~a, Racket ~a\n\n~a\n~a" tree racket
               (loss-markdown in-g pipelines workers) (gc-markdown in-g pipelines workers trips)))
-    (if (ormap (lambda (r) (equal? (ref r 'kind) "op")) records)
-        (list (registration-markdown records))
-        '()))
+    (registration-sections records))
    "\n"))

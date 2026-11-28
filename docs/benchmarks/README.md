@@ -769,14 +769,14 @@ racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
 ```
 
 - **Cells.** `cifar-png` and `jpeg` (M0's) at `--workers` (0, 4, 7) and
-  `--trips` (`-`, Racket's own collect trip, or MB). A trip cell has no
+  `--trips` (`-`, Racket's own collect trip, or whole MB). A trip cell has no
   PyTorch arm. A block missing an arm is dropped, as M0 drops one.
   `--out-dir` inside the checkout is refused, and so is more than one
   ATen intra-op thread.
 - **Spans.** The rktorch arm wraps the dataset and the collate, and
   steps the traversal itself, so every batch build, collate, `next` and
   step is a span with its OS thread (`gettid`, `pthread_threadid_np` on
-  macOS), wall clock and that thread's CPU clock
+  macOS; a host with neither refuses the cell), wall clock and that thread's CPU clock
   (`CLOCK_THREAD_CPUTIME_ID`). Each collection comes from the `GC` log
   topic with its mode, real interval, CPU and the ledger's published
   live entries when the listener saw it (read without a flush, so up to
@@ -819,4 +819,4 @@ racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
 
 Records go to `--out-dir` as `m1-<tree>-<racket>-<stamp>.jsonl`; the
 summary has the split, GC against live entries per trip, and the
-registration pieces.
+registration pieces, one table per Racket version.

@@ -8,6 +8,7 @@
 (provide flag-count
          flag-counts
          flag-positive
+         flag-trip
          flag-trips
          refuse-repo-out-dir!
          require-one-aten-thread!)
@@ -27,11 +28,17 @@
     (raise-user-error who "expected a positive number, got ~s" text))
   x)
 
+(define (flag-trip who text)
+  (define mb (string->number text))
+  (unless (exact-positive-integer? mb)
+    (raise-user-error who "expected a trip in whole MB, got ~s" text))
+  mb)
+
 (define (flag-trips who text)
   (for/list ([t (in-list (string-split text ","))])
     (match t
       ["-" #f]
-      [_ (flag-positive who t)])))
+      [_ (flag-trip who t)])))
 
 (define (refuse-repo-out-dir! who dir root)
   (when (inside-repo? dir root)
@@ -44,14 +51,24 @@
   aten)
 
 (module+ test
-  (require rackunit)
+  (require rackunit
+           (only-in "runtime-work.rkt" with-trip-bytes))
 
   (test-case "counts, positives and trips read their text or name it"
     (check-equal? (flag-counts 'probe "0,7") '(0 7))
-    (check-equal? (flag-trips 'probe "-,32,0.5") '(#f 32 0.5))
+    (check-equal? (flag-trips 'probe "-,32") '(#f 32))
     (check-exn #rx"probe: expected a count, got \"0\"" (lambda () (flag-count 'probe "0")))
-    (check-exn #rx"expected a positive number, got \"-1\"" (lambda () (flag-trips 'probe "-1")))
+    (check-exn #rx"expected a trip in whole MB, got \"-1\"" (lambda () (flag-trips 'probe "-1")))
     (check-exn #rx"expected a positive number" (lambda () (flag-positive 'probe "+inf.0"))))
+
+  (test-case "every trip the reader accepts is one the VM's collect-trip-bytes takes"
+    (for ([text (in-list '("-,32" "32.0" "0.5" "1e1" "3/2"))])
+      (check-not-exn (lambda ()
+                       (with-handlers ([exn:fail:user? void])
+                         (for ([t (in-list (flag-trips 'probe text))])
+                           (with-trip-bytes t (void)))))
+                     text))
+    (check-exn #rx"expected a trip in whole MB, got \"0.5\"" (lambda () (flag-trip 'probe "0.5"))))
 
   (test-case "a run needs one ATen intra-op thread, and names the setting otherwise"
     (if (eqv? (aten-threads) 1)

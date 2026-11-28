@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/dict in-dict)
+(require (only-in racket/cmdline command-line)
+         (only-in racket/dict in-dict)
+         (only-in racket/hash hash-union)
          (only-in racket/list last remove-duplicates)
          (only-in racket/match match match* match-define)
          (only-in racket/os getpid)
@@ -17,19 +19,23 @@
          (only-in torch/foreign/raw/fault with-crossing-hook)
          (only-in (submod torch/runtime/reaper private) reaper-statistics)
          (only-in torch/tests/private/race-harness with-race-hook)
+         (only-in "flags.rkt" flag-count flag-trip)
          (only-in "harness.rkt" mean)
          (only-in "m1-clocks.rkt"
-                  gc-event-cpu-ms gc-event-end gc-event-live gc-event-mode gc-event-start
-                  gc-overlap-ms os-thread-id published-entries span span-kind span-tid span-wall₀
-                  span-wall₁ spans task-cpu-ms thread-cpu-ms timed with-gc-log)
+                  call-with-gc-log gc-event-cpu-ms gc-event-end gc-event-live gc-event-mode
+                  gc-event-start gc-overlap-ms os-thread-id published-entries span span-kind
+                  span-tid span-wall₀ span-wall₁ spans task-cpu-ms thread-cpu-ms timed)
          (only-in "runtime-work.rkt" with-trip-bytes)
          (only-in (submod "threads.rkt" private) collector-sweepers)
          (only-in "workloads/cifar-pipeline.rkt" cifar-folder-dataset cifar-folder-root)
          (only-in "workloads/pipelines.rkt" pipeline))
 
-(provide cell-pipelines
+(provide call-with-counted-window
+         cell-pipelines
+         cell-settings
          handoff-cell
-         span-split)
+         span-split
+         window-delta)
 
 (define cell-pipelines '(cifar-png jpeg))
 
@@ -202,78 +208,90 @@
           'other_persistent_ms (for/sum ([t (in-list persistent)] #:unless (= t main)) (moved t))
           'workers_span_ms workers-cpu))
 
+(struct window (main-cpu tasks process gc runs released))
+
+(define (window-now)
+  (window (thread-cpu-ms) (task-cpu-ms) (current-process-milliseconds) (current-gc-milliseconds)
+          (finalizer-runs) (hash-ref (reaper-statistics) 'released)))
+
+(define (call-with-counted-window thunk #:gc-log [gc-log call-with-gc-log])
+  (define w₀ (window-now))
+  (define-values (ended events)
+    (gc-log (lambda ()
+              (define result (thunk))
+              (cons result (window-now)))
+            #:live published-entries))
+  (match-define (cons result w₁) ended)
+  (values result w₀ w₁ events))
+
+(define (window-delta w₀ w₁)
+  (define (moved get) (- (get w₁) (get w₀)))
+  (hasheq 'main_cpu_ms (and (window-main-cpu w₀) (window-main-cpu w₁) (moved window-main-cpu))
+          'process_cpu_ms (moved window-process)
+          'gc_ms (moved window-gc)
+          'finalizer_runs (moved window-runs)
+          'reaper_released (moved window-released)))
+
 (define (handoff-cell name workers #:warmup warmup #:epochs epochs #:samples samples
-                      #:dataset [dataset "full"] #:trip [trip #f] #:count? [count? (zero? workers)])
+                      #:dataset [dataset "full"] #:trip [trip #f] #:count? [count? (zero? workers)]
+                      #:thread-id [thread-id os-thread-id])
+  (define main (thread-id))
+  (unless main
+    (raise-user-error 'm1-cell "attribution unavailable: this OS gives no thread id"))
   (force collector-sweepers)
   (define loader (cell-loader name workers #:samples samples #:dataset dataset))
-  (define main (os-thread-id))
   (with-trip-bytes trip
     (for ([_ (in-range warmup)]) (epoch! loader))
     (spans #:clear? #t)
-    (define tasks₀ (task-cpu-ms))
-    (define process₀ (current-process-milliseconds))
-    (define gc₀ (current-gc-milliseconds))
-    (define runs₀ (finalizer-runs))
-    (define reaper₀ (reaper-statistics))
-    (define main-cpu₀ (thread-cpu-ms))
-    (define-values (n events)
-      (with-gc-log (#:live published-entries)
-        (for/sum ([_ (in-range epochs)]) (epoch! loader))))
-    (define main-cpu₁ (thread-cpu-ms))
+    (define-values (n w₀ w₁ events)
+      (call-with-counted-window (lambda () (for/sum ([_ (in-range epochs)]) (epoch! loader)))))
     (define all (spans #:clear? #t))
-    (define tasks₁ (task-cpu-ms))
     (define split (span-split all events #:main main #:workers workers))
     (define elapsed-ms (hash-ref (hash-ref split 'epoch) 'wall_ms))
-    (define reaper₁ (reaper-statistics))
     (hash-set*
-     (hasheq 'pipeline (symbol->string name)
-             'workers workers
-             'samples n
-             'elapsed_s (/ elapsed-ms 1000.0)
-             'samples_per_s (/ n (/ elapsed-ms 1000.0))
-             'us_per_sample (/ (* 1000.0 elapsed-ms) n)
-             'trip_mb trip
-             'split split
-             'gc (gc-summary events (/ elapsed-ms 1000.0))
-             'gc_ms (- (current-gc-milliseconds) gc₀)
-             'process_cpu_ms (- (current-process-milliseconds) process₀)
-             'tasks (cpu-by-task tasks₀ tasks₁ (getpid)
-                                 (hash-ref (hash-ref split 'worker_build) 'cpu_ms))
-             'main_tid main
-             'main_cpu_ms (and main-cpu₀ main-cpu₁ (- main-cpu₁ main-cpu₀))
-             'finalizer_runs (- (finalizer-runs) runs₀)
-             'reaper_released (- (hash-ref reaper₁ 'released) (hash-ref reaper₀ 'released))
-             'ledger_entries_end (ledger-entries)
-             'racket (version)
-             'warmup warmup
-             'epochs epochs)
+     (hash-union
+      (hasheq 'pipeline (symbol->string name)
+              'workers workers
+              'samples n
+              'elapsed_s (/ elapsed-ms 1000.0)
+              'samples_per_s (/ n (/ elapsed-ms 1000.0))
+              'us_per_sample (/ (* 1000.0 elapsed-ms) n)
+              'trip_mb trip
+              'split split
+              'gc (gc-summary events (/ elapsed-ms 1000.0))
+              'tasks (cpu-by-task (window-tasks w₀) (window-tasks w₁) (getpid)
+                                  (hash-ref (hash-ref split 'worker_build) 'cpu_ms))
+              'main_tid main
+              'ledger_entries_end (ledger-entries)
+              'racket (version)
+              'warmup warmup
+              'epochs epochs)
+      (window-delta w₀ w₁))
      'counts (and count? (counted-epoch! loader)))))
 
-(module+ main
-  (require (only-in json write-json)
-           (only-in racket/cmdline command-line)
-           (only-in "flags.rkt" flag-count flag-positive))
+(define (cell-settings argv)
+  (define settings (hasheq 'warmup 1 'epochs 2 'samples #f 'dataset "full" 'trip #f))
+  (define (put! key value) (set! settings (hash-set settings key value)))
+  (define (count text [ok? exact-positive-integer?]) (flag-count 'm1-cell text ok?))
+  (define-values (name workers)
+    (command-line
+     #:program "m1-cell"
+     #:argv argv
+     #:once-each
+     [("--warmup") n "Untimed epochs" (put! 'warmup (count n exact-nonnegative-integer?))]
+     [("--epochs") n "Timed epochs" (put! 'epochs (count n))]
+     [("--samples") n "Samples per epoch" (put! 'samples (count n))]
+     [("--dataset") d "The CIFAR-10 PNG tree: full or fixture" (put! 'dataset d)]
+     [("--trip") mb "collect-trip-bytes in whole MB while the cell runs (default: Racket's)"
+                 (put! 'trip (flag-trip 'm1-cell mb))]
+     #:args (_loader name workers)
+     (values (string->symbol name) (count workers exact-nonnegative-integer?))))
+  (unless (memq name cell-pipelines)
+    (raise-user-error 'm1-cell "loader ~a: expected cifar-png or jpeg" name))
+  (hash-set* settings 'name name 'workers workers))
 
-  (define (cell-settings argv)
-    (define settings (hasheq 'warmup 1 'epochs 2 'samples #f 'dataset "full" 'trip #f))
-    (define (put! key value) (set! settings (hash-set settings key value)))
-    (define (count text [ok? exact-positive-integer?]) (flag-count 'm1-cell text ok?))
-    (define-values (name workers)
-      (command-line
-       #:program "m1-cell"
-       #:argv argv
-       #:once-each
-       [("--warmup") n "Untimed epochs" (put! 'warmup (count n exact-nonnegative-integer?))]
-       [("--epochs") n "Timed epochs" (put! 'epochs (count n))]
-       [("--samples") n "Samples per epoch" (put! 'samples (count n))]
-       [("--dataset") d "The CIFAR-10 PNG tree: full or fixture" (put! 'dataset d)]
-       [("--trip") mb "collect-trip-bytes in MB while the cell runs (default: Racket's)"
-                   (put! 'trip (flag-positive 'm1-cell mb))]
-       #:args (_loader name workers)
-       (values (string->symbol name) (count workers exact-nonnegative-integer?))))
-    (unless (memq name cell-pipelines)
-      (raise-user-error 'm1-cell "loader ~a: expected cifar-png or jpeg" name))
-    (hash-set* settings 'name name 'workers workers))
+(module+ main
+  (require (only-in json write-json))
 
   (define settings (cell-settings (current-command-line-arguments)))
   (define (setting key) (hash-ref settings key))

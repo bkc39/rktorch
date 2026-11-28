@@ -4,15 +4,17 @@
   (require (only-in racket/file make-temporary-directory)
            (only-in racket/hash hash-union)
            (only-in racket/list remove-duplicates)
+           (only-in racket/match match)
            (only-in racket/path path-only)
            (only-in racket/port open-output-nowhere)
            (only-in racket/string string-contains?)
            rackunit
            (only-in "cifar-folder.rkt" ensure-cifar10-folder!)
            (only-in "harness.rkt" with-temporary-path)
-           (only-in "m1.rkt" m1-plan m1-settings run-m1)
-           (only-in "m1-cell.rkt" handoff-cell span-split)
+           (only-in "m1-cell.rkt"
+                    call-with-counted-window cell-settings handoff-cell span-split window-delta)
            (only-in "m1-clocks.rkt" gc-event os-thread-id span spans timed with-gc-log)
+           (only-in "m1.rkt" m1-plan m1-settings run-m1)
            (only-in "summary-m1.rkt"
                     gc-row handoff-terms loss-row m1-arms m1-markdown registration-rows valid-arms))
 
@@ -35,7 +37,8 @@
     (check-equal? (hash-ref s 'workers) '(0 7))
     (check-equal? (hash-ref s 'summarize) '("a.jsonl"))
     (check-exn #rx"expected a count, got \"x\"" (lambda () (m1-settings (vector "--rounds" "x"))))
-    (check-exn #rx"expected a positive number" (lambda () (m1-settings (vector "--trips" "0")))))
+    (check-exn #rx"expected a trip in whole MB" (lambda () (m1-settings (vector "--trips" "0"))))
+    (check-exn #rx"expected a trip in whole MB" (lambda () (m1-settings (vector "--trips" "0.5")))))
 
   (test-case "a run whose records would land inside the repository is refused before it starts"
     (define here (path-only (variable-reference->module-source (#%variable-reference))))
@@ -186,6 +189,23 @@
                   '(("free" (0.25 0.25 0.0)) ("guardian" (1.25 1.25 0.0)) ("lifetimes" (0.5 0.5 0.0))
                     ("registration" (2.25 2.25 0.0)))))
 
+  (test-case "registration runs on two Rackets give two tables, each of its own runs' medians"
+    (define (op racket layer us)
+      `#hasheq((kind . "op") (op . "mix") (layer . ,layer) (threads . 1) (us_per_op . ,us)
+               (ops_per_call . 4) (heap_bytes_per_op . 4096.0) (gc_real_ms . 0.0) (ops . 100)
+               (racket . ,racket)))
+    (define text
+      (m1-markdown (list (op "9.1" "kept" 3.0) (op "9.1" "raw" 4.0)
+                         (op "9.3" "kept" 5.0) (op "9.3" "raw" 8.0))))
+    (match (regexp-split #rx"### Registration and accounting per op" text)
+      [(list _ older newer)
+       (check-regexp-match #rx"^[^\n]*, Racket 9.1\n" older)
+       (check-regexp-match #rx"\\| kept \\| 0.75 / 0.75 / 1.00 \\|" older)
+       (check-regexp-match #rx"\\| free \\| 0.25 / 0.25 / 0.00 \\|" older)
+       (check-regexp-match #rx"^[^\n]*, Racket 9.3\n" newer)
+       (check-regexp-match #rx"\\| kept \\| 1.25 / 1.25 / 1.00 \\|" newer)
+       (check-regexp-match #rx"\\| free \\| 0.75 / 0.75 / 0.00 \\|" newer)]))
+
   (test-case "a cell on the PNG fixture splits main's and the workers' time, at tiny sizes"
     (with-temporary-path (base (make-temporary-directory "m1-test-~a"))
       (ensure-cifar10-folder! "fixture" #:base base)
@@ -211,6 +231,32 @@
                      "the workers' epochs are their builds and their idle time"))
           (when (zero? w)
             (check-true (positive? (hash-ref (hash-ref r 'counts) 'tensors_per_sample))))))))
+
+  (test-case "the cell reads its trip in whole MB, so collect-trip-bytes gets an exact count"
+    (define (cell . flags) (cell-settings (list->vector (append flags '("loader" "jpeg" "0")))))
+    (check-equal? (hash-ref (cell "--trip" "32") 'trip) 32)
+    (for ([mb (in-list '("0.5" "32.0" "0"))])
+      (check-exn #rx"m1-cell: expected a trip in whole MB" (lambda () (cell "--trip" mb)) mb)))
+
+  (test-case "a cell refuses to run where no OS thread id tells main's work from the workers'"
+    (check-exn #rx"m1-cell: attribution unavailable"
+               (lambda ()
+                 (handoff-cell 'jpeg 2 #:warmup 0 #:epochs 1 #:samples 1
+                               #:thread-id (lambda () #f)))))
+
+  (test-case "the window's counters stop at the body's end, before the GC log drains"
+    (define spin-ms 300.0)
+    (define (draining thunk #:live _live)
+      (define result (thunk))
+      (define c₀ (current-process-milliseconds))
+      (let spin ()
+        (when (< (- (current-process-milliseconds) c₀) spin-ms)
+          (spin)))
+      (values result '()))
+    (define-values (v w₀ w₁ events) (call-with-counted-window (lambda () 'done) #:gc-log draining))
+    (check-equal? (list v events) '(done ()))
+    (define counted (hash-ref (window-delta w₀ w₁) 'process_cpu_ms))
+    (check-true (< counted (/ spin-ms 2)) (format "~a ms of the drain's CPU counted" counted)))
 
   (test-case "every pipeline name the cell takes is a loader the driver plans"
     (check-equal? (remove-duplicates (map (lambda (b) (hash-ref b 'pipeline)) (plan)))
