@@ -12,7 +12,7 @@
          (only-in torch/runtime/reaper reap-when-dead! reaped)
          (only-in "harness.rkt" rotate)
          (only-in "flags.rkt" flag-count flag-counts flag-positive require-one-aten-thread!)
-         (only-in "m1-clocks.rkt" gc-overlap-ms with-gc-log)
+         (only-in "m1-clocks.rkt" call-with-gc-log gc-overlap-ms)
          (only-in "op-cost-measure.rkt" condition condition-layer condition-op sample-condition)
          (only-in "op-cost-ops.rkt"
                   add-scalar/c add/c build-case narrow/c op-case-layer tensors-per-call zeros-on/c))
@@ -179,9 +179,12 @@
 (define (chain-tensors)
   (tensors-per-call (chain-thunk)))
 
-(define (registration-record c seconds rep #:keeper [k kept])
+(define (registration-record c seconds rep
+                             #:keeper [k kept]
+                             #:sample [sample sample-condition]
+                             #:gc-log [gc-log call-with-gc-log])
   (set-box! (keeper-peak k) (unbox (keeper-pending k)))
-  (define-values (r events) (with-gc-log () (sample-condition c seconds #:rep rep)))
+  (define-values (r events) (gc-log (lambda () (sample c seconds #:rep rep))))
   (define backlog
     (if (eq? (condition-layer c) 'kept)
         (list 'kept_pending_peak (unbox (keeper-peak k)) 'kept_batch (keeper-batch k))
@@ -284,6 +287,26 @@
     (define-values (_threads _layers _pieces _chain backlog) (registration-rows records))
     (check-equal? backlog (list (cons peak #t)))
     (check-regexp-match #rx"\\| free \\| [^|]* \\(backlog\\) \\|" (m1-markdown records)))
+
+  (test-case "a collection after the timed window, before the closing probe, is not the window's"
+    (define (late-probe _n _make _seconds)
+      (values 10 100.0
+              #hasheq((gc . 0) (heap . 0) (finalizers . 0) (main-cpu . #f) (process-cpu . 0)
+                      (wall . 1000.0))
+              #hasheq((gc . 0) (heap . 0) (finalizers . 0) (main-cpu . #f) (process-cpu . 0)
+                      (wall . 1250.0))))
+    (define (logged thunk)
+      (values (thunk)
+              '(#s(gc-event major 0 0 0 1020.0 1080.0 #f) #s(gc-event major 0 0 0 1090.0 1240.0 #f))))
+    (define r
+      (registration-record (condition 'mix 'raw 0 void) 0.1 0
+                           #:keeper (make-keeper)
+                           #:sample (lambda (c s #:rep rep)
+                                      (sample-condition c s #:rep rep #:window late-probe))
+                           #:gc-log logged))
+    (check-equal? (map (lambda (k) (hash-ref r k)) '(window_start_ms window_end_ms elapsed_ms))
+                  '(1000.0 1100.0 100.0))
+    (check-equal? (hash-ref r 'gc_real_ms) 70.0))
 
   (test-case "settings read counts and seconds, and refuse what is not one"
     (check-equal? (registration-settings (vector "--threads" "1,4" "--seconds" "0.5"))

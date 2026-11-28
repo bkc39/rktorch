@@ -92,11 +92,12 @@
              (hash-ref run 'probe_start)
              (hash-ref run 'probe_stop))]))
 
-(define (sample-condition c seconds #:rep rep)
+(define (sample-condition c seconds #:rep rep #:window [run-window window])
   (match-define (condition op layer n make) c)
   (settle-native-memory!)
   (define load (load-average))
-  (define-values (ops elapsed-ms before after) (window n make seconds))
+  (define-values (ops elapsed-ms before after) (run-window n make seconds))
+  (define opened (hash-ref before 'wall))
   (define (moved key)
     (define b (hash-ref before key))
     (define a (hash-ref after key))
@@ -112,8 +113,8 @@
           'rep rep
           'ops ops
           'elapsed_ms elapsed-ms
-          'window_start_ms (hash-ref before 'wall)
-          'window_end_ms (hash-ref after 'wall)
+          'window_start_ms opened
+          'window_end_ms (+ opened elapsed-ms)
           'us_per_op (~> (or main-ms 0) (+ thread-ms) (* 1000.0) per-op)
           'thread_us_per_op (per-op (* 1000.0 thread-ms))
           'main_cpu_ms main-ms

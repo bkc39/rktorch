@@ -812,7 +812,12 @@ racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
   same free on the measured thread (guardian and registered against
   kept, `lifetimes` against raw, the inline free as raw against kept),
   in µs per op with and without the real time of the collections inside
-  the timed window, and in KB per op. The free piece is net of kept's
+  the timed window, and in KB per op. A record's window opens at
+  `window_start_ms`, the wall clock read as the timed loop starts, and
+  closes at `window_end_ms`, that plus `elapsed_ms`; `gc_real_ms` is the
+  union of the logged collections' real intervals clipped to it, so it
+  never exceeds `elapsed_ms`. Every measured thread waits through a
+  collection, so the net time takes `gc_real_ms` off each thread's. The free piece is net of kept's
   own cost of reusing memory late and from another OS thread; a cell is
   marked `(backlog)` where the freeing thread fell more than a batch per
   measured thread behind.

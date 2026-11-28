@@ -2,7 +2,7 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in racket/file file->string)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
          (only-in racket/string string-split)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
@@ -58,9 +58,8 @@
 (struct gc-event (mode pre post cpu-ms start end live) #:prefab)
 
 (define (gc-info->event info live)
-  (match (struct->vector info)
-    [(vector _ mode pre _ _ post _ cpu₀ cpu₁ start end)
-     (gc-event mode pre post (- cpu₁ cpu₀) start end live)]))
+  (match-define (vector _ mode pre _ _ post _ cpu₀ cpu₁ start end) (struct->vector info))
+  (gc-event mode pre post (- cpu₁ cpu₀) start end live))
 
 (define (published-entries)
   (for/sum ([a (in-list (hash-values (unbox accounts)))])
@@ -100,8 +99,14 @@
   (call-with-gc-log (lambda () body ...) (~? (~@ #:live live))))
 
 (define (gc-overlap-ms events w₀ w₁)
-  (for/sum ([e (in-list events)])
-    (max 0.0 (- (min w₁ (gc-event-end e)) (max w₀ (gc-event-start e))))))
+  (define clipped
+    (sort (for/list ([e (in-list events)])
+            (cons (max w₀ (gc-event-start e)) (min w₁ (gc-event-end e))))
+          <
+          #:key car))
+  (for/fold ([total 0.0] [reached w₀] #:result total) ([iv (in-list clipped)])
+    (match-define (cons s t) iv)
+    (values (+ total (max 0.0 (- t (max s reached)))) (max reached t))))
 
 (define user-hz-ms 10.0)
 
@@ -178,6 +183,13 @@
     (define events (list (gc-event 'minor 0 0 1 10.0 20.0 #f) (gc-event 'major 0 0 1 30.0 40.0 #f)))
     (check-equal? (gc-overlap-ms events 15.0 35.0) 10.0)
     (check-equal? (gc-overlap-ms events 0.0 5.0) 0.0))
+
+  (test-case "collections whose intervals overlap count their union once"
+    (check-equal? (gc-overlap-ms '(#s(gc-event major 0 0 1 10.0 20.0 #f)
+                                   #s(gc-event minor 0 0 1 15.0 30.0 #f)
+                                   #s(gc-event minor 0 0 1 12.0 14.0 #f))
+                                 0.0 25.0)
+                  15.0))
 
   (test-case "a task's CPU is its user and system ticks, fields 14 and 15 of its stat line"
     (check-equal? (stat-cpu-ms "S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15") 230.0)
