@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in racket/contract exn:fail:contract:blame?)
-           (only-in racket/match match match-define)
+           (only-in racket/match == match match-define)
            (only-in racket/port open-output-nowhere)
            (only-in racket/string string-contains? string-join)
            rackunit
@@ -88,10 +88,10 @@
       [(cons k more) (hash-set h k (path-set (hash-ref h k #f) more v))]))
 
   (define ((edit-at keys v) tree)
-    (match-define (cons k _) keys)
-    (match (path-set (hash k (hash-ref tree k #f)) keys v)
-      [(hash-table (k edited)) (hash-set! tree k edited)]
-      [_ (hash-remove! tree k)]))
+    (match-define (cons k more) keys)
+    (match (path-set (hash-ref tree k #f) more v)
+      [(== removed eq?) (hash-remove! tree k)]
+      [edited (hash-set! tree k edited)]))
 
   (define (setup-seen seen)
     (lambda-callback #:setup (lambda (_r _stage) (set-box! seen '(setup)))))
