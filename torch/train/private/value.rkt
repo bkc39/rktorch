@@ -1,14 +1,20 @@
 #lang racket/base
 
 (require (only-in racket/match match)
-         (only-in "../../foreign.rkt" dtype tensor?))
+         (only-in "../../foreign.rkt" tensor?)
+         (only-in "../../foreign/raw/tensor.rkt" dtype-code->symbol tr-tensor-dtype/raw))
 
 (provide checkpoint-value?
          decode-value
          encode-value
+         string-keyed?
          value-problem)
 
-(define tagged-dtypes '(float32 float64 float16 bfloat16 int64 int32 int16 int8 uint8 bool))
+(define tagged-dtypes '(float32 float64 float16 bfloat16 int64 uint8 bool))
+
+(define (tagged-dtype? t)
+  (define-values (rc code) (tr-tensor-dtype/raw t))
+  (and (zero? rc) (memq (dtype-code->symbol code) tagged-dtypes) #t))
 
 (define (reserved-key? k)
   (and (string? k) (positive? (string-length k)) (char=? (string-ref k 0) #\$)))
@@ -21,20 +27,41 @@
        (not (hash-weak? h))
        (not (hash-ephemeron? h))))
 
+(define (identity-survives-read? k)
+  (or (boolean? k) (null? k) (fixnum? k) (and (symbol? k) (symbol-interned? k))))
+
+(define (key-survives-read? h k)
+  (cond
+    [(hash-eq? h) (identity-survives-read? k)]
+    [(hash-eqv? h) (or (identity-survives-read? k) (flonum? k) (exact-rational? k))]
+    [else #t]))
+
 (define (value-problem v)
   (define on-path (make-hasheq))
   (define accepted (make-hasheq))
+  (define identity-bound (make-hasheq))
+  (define (bound-to-identity? k)
+    (match k
+      [(? tensor?) #t]
+      [(cons a d)
+       (hash-ref! identity-bound k (lambda () (or (bound-to-identity? a) (bound-to-identity? d))))]
+      [(? hash?) (hash-ref! identity-bound k (lambda () (hash-bound-to-identity? k)))]
+      [_ #f]))
+  (define (hash-bound-to-identity? h)
+    (or (not (immutable? h))
+        (for/or ([(a x) (in-hash h)])
+          (or (bound-to-identity? a) (bound-to-identity? x)))))
+  (define (bad path v) (cons path v))
   (define (node v path walk)
     (cond
       [(hash-ref accepted v #f) #f]
-      [(hash-ref on-path v #f) (cons path v)]
+      [(hash-ref on-path v #f) (bad path v)]
       [else
        (hash-set! on-path v #t)
        (define problem (walk))
        (hash-remove! on-path v)
        (unless problem (hash-set! accepted v #t))
        problem]))
-  (define (bad path v) (cons path v))
   (define (spine p i path)
     (node p path
           (lambda ()
@@ -47,16 +74,19 @@
       [(or #t #f '()) #f]
       [(or (? flonum?) (? string?) (? exact-rational?)) #f]
       [(? symbol?) (and (not (symbol-interned? v)) (bad path v))]
-      [(? tensor?) (and (not (memq (dtype v) tagged-dtypes)) (bad path v))]
+      [(? tensor?) (and (not (tagged-dtype? v)) (bad path v))]
       [(? pair?) (spine v 0 path)]
       [(? hash?)
        #:when (taggable-hash? v)
        (node v path
              (lambda ()
                (for/or ([(k x) (in-hash v)])
-                 (cond
-                   [(reserved-key? k) (bad (cons k path) k)]
-                   [else (or (check k (cons k path)) (check x (cons k path)))]))))]
+                 (define at (cons k path))
+                 (if (or (reserved-key? k) (not (key-survives-read? v k)))
+                     (bad at k)
+                     (or (check k at)
+                         (and (bound-to-identity? k) (bad at k))
+                         (check x at))))))]
       [_ (bad path v)]))
   (match (check v '())
     [#f #f]
@@ -71,86 +101,85 @@
     [(hash-eqv? h) "eqv"]
     [else "equal"]))
 
+(define (string-keyed? v)
+  (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))
+
 (define (object-hash? h)
-  (and (hash-equal? h) (for/and ([k (in-hash-keys h)]) (string? k))))
+  (and (hash-equal? h) (string-keyed? h)))
 
-;; entries are visited in a fixed order so tensors are numbered the same way
-;; on every save of an equal tree
-(define (order-key k)
-  (format "~s" (let strip ([k k])
-                 (match k
-                   [(? tensor?) '|#<tensor>|]
-                   [(cons a d) (cons (strip a) (strip d))]
-                   [_ k]))))
+(define (keys-in-a-fixed-order h)
+  (define (printed k)
+    (format "~s" (let strip ([k k])
+                   (match k
+                     [(? tensor?) '|#<tensor>|]
+                     [(cons a d) (cons (strip a) (strip d))]
+                     [_ k]))))
+  (sort (hash-keys h) string<? #:key printed #:cache-keys? #t))
 
-(define (special-float x)
-  (cond
-    [(eqv? x +inf.0) "+inf.0"]
-    [(eqv? x -inf.0) "-inf.0"]
-    [(eqv? x +nan.0) "+nan.0"]
-    [else #f]))
+(define (special-float? x)
+  (or (eqv? x -0.0) (not (< -inf.0 x +inf.0))))
 
-(define (encode-value v name-tensor #:path [path '()])
-  (let encode ([v v] [path path])
+(define (encode-value v name-tensor)
+  (define encoded (make-hasheq))
+  (let encode ([v v])
     (match v
       [(or #t #f (? string?) (? exact-integer?) '()) v]
       [(? exact-rational?) (hasheq '$rational (number->string v))]
-      [(? flonum?)
-       (match (special-float v)
-         [#f v]
-         [s (hasheq '$float s)])]
+      [(? flonum?) (if (special-float? v) (hasheq '$float (number->string v)) v)]
       [(? symbol?) (hasheq '$symbol (symbol->string v))]
-      [(? tensor?) (hasheq '$tensor (name-tensor v (reverse path)))]
-      [(? list?) (for/list ([x (in-list v)] [i (in-naturals)]) (encode x (cons i path)))]
-      [(cons a d) (hasheq '$pair (list (encode a (cons 0 path)) (encode d (cons 1 path))))]
-      [(? object-hash?)
-       (for/hasheq ([k (in-list (sort (hash-keys v) string<?))])
-         (values (string->symbol k) (encode (hash-ref v k) (cons k path))))]
-      [(? hash?)
-       (hasheq '$hash (hash-kind v)
-               'entries
-               (for/list ([k (in-list (sort (hash-keys v) string<? #:key order-key
-                                            #:cache-keys? #t))])
-                 (list (encode k (cons k path)) (encode (hash-ref v k) (cons k path)))))])))
+      [(? tensor?) (hasheq '$tensor (name-tensor v))]
+      [_
+       (hash-ref! encoded v
+                  (lambda ()
+                    (match v
+                      [(? list?) (map encode v)]
+                      [(cons a d) (hasheq '$pair (list (encode a) (encode d)))]
+                      [(? object-hash?)
+                       (for/hasheq ([k (in-list (sort (hash-keys v) string<?))])
+                         (values (string->symbol k) (encode (hash-ref v k))))]
+                      [_
+                       (hasheq '$hash (hash-kind v)
+                               'entries (for/list ([k (in-list (keys-in-a-fixed-order v))])
+                                          (list (encode k) (encode (hash-ref v k)))))])))])))
 
-(define (malformed j)
-  (raise-arguments-error 'read-checkpoint "malformed checkpoint value" "value" j))
-
-(define (decode-value j tensor-named)
+(define (decode-value j tensor-named malformed)
+  (define (payload tagged tag ok?)
+    (match (hash-ref tagged tag)
+      [(? ok? x) x]
+      [_ (malformed)]))
+  (define (tagged-number tagged tag ok?)
+    (match (string->number (payload tagged tag string?) 10)
+      [(? ok? x) x]
+      [_ (malformed)]))
   (let decode ([j j])
     (match j
+      [(or #t #f (? string?) (? exact-integer?) (? flonum?)) j]
       [(? list?) (map decode j)]
       [(? hash?)
        (match (hash-keys j)
-         [(list '$tensor) (tensor-named (hash-ref j '$tensor))]
-         [(list '$symbol) (string->symbol (hash-ref j '$symbol))]
-         [(list '$float) (match (hash-ref j '$float)
-                           ["+inf.0" +inf.0]
-                           ["-inf.0" -inf.0]
-                           ["+nan.0" +nan.0]
-                           [_ (malformed j)])]
-         [(list '$rational)
-          (match (string->number (hash-ref j '$rational) 10)
-            [(? exact-rational? q) q]
-            [_ (malformed j)])]
+         [(list '$tensor) (tensor-named (payload j '$tensor string?))]
+         [(list '$symbol) (string->symbol (payload j '$symbol string?))]
+         [(list '$float)
+          (tagged-number j '$float (lambda (x) (and (flonum? x) (special-float? x))))]
+         [(list '$rational) (tagged-number j '$rational exact-rational?)]
          [(list '$pair)
           (match (hash-ref j '$pair)
             [(list a d) (cons (decode a) (decode d))]
-            [_ (malformed j)])]
+            [_ (malformed)])]
          [(or (list '$hash 'entries) (list 'entries '$hash))
           (define pairs
-            (for/list ([e (in-list (hash-ref j 'entries))])
+            (for/list ([e (in-list (payload j 'entries list?))])
               (match e
                 [(list k v) (cons (decode k) (decode v))]
-                [_ (malformed j)])))
+                [_ (malformed)])))
           (match (hash-ref j '$hash)
             ["eq" (make-immutable-hasheq pairs)]
             ["eqv" (make-immutable-hasheqv pairs)]
             ["equal" (make-immutable-hash pairs)]
-            [_ (malformed j)])]
+            [_ (malformed)])]
          [keys
           (for/hash ([k (in-list keys)])
             (define s (symbol->string k))
-            (when (reserved-key? s) (malformed j))
+            (when (reserved-key? s) (malformed))
             (values s (decode (hash-ref j k))))])]
-      [_ j])))
+      [_ (malformed)])))

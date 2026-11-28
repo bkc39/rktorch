@@ -1,17 +1,19 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match match*)
+  (require (only-in racket/match match match* match-define)
            rackunit
            (only-in "../main.rkt"
                     * + - abs backward! copy! item max sum with-no-grad)
            (only-in "../nn.rkt"
                     Linear adam adamw in-named-parameters load-optimizer-state! named-parameters
-                    optimizer-state-dict param-group rmsprop sgd step! zero-grads!)
+                    optimizer-state-dict param-group param-group-set! rmsprop sgd step! zero-grads!)
            (only-in "private/optim-oracle.rkt" call-with-optim-oracle oracle-json oracle-tensors)
            (only-in "private/trainer-kit.rkt" apply-keywords))
 
-  (define cases '("sgd" "sgd-momentum" "sgd-nesterov" "adam" "adamw" "rmsprop" "rmsprop-momentum"))
+  (define cases
+    '("sgd" "sgd-momentum" "sgd-nesterov" "adam" "adamw" "rmsprop" "rmsprop-momentum"
+      "sgd-momentum-fall" "sgd-momentum-rise" "rmsprop-momentum-fall"))
 
   (define makers (hash "sgd" sgd "adam" adam "adamw" adamw "rmsprop" rmsprop))
 
@@ -24,8 +26,9 @@
         ['nesterov (cons (cons '#:nesterov? v) kws)]
         ['alpha (cons (cons '#:alpha v) kws)]
         ['eps (cons (cons '#:eps v) kws)]
-        ['betas (match v
-                  [(list beta1 beta2) (list* (cons '#:beta1 beta1) (cons '#:beta2 beta2) kws)])])))
+        ['betas
+         (match-define (list beta1 beta2) v)
+         (list* (cons '#:beta1 beta1) (cons '#:beta2 beta2) kws)])))
 
   (define (build j net)
     (define params (make-immutable-hash (named-parameters net)))
@@ -41,18 +44,27 @@
       (for ([(name p) (in-named-parameters net)])
         (copy! p (hash-ref tensors (string-append prefix name))))))
 
-  (define (gradient-steps! opt net tensors from to)
+  (define (gradient-steps! opt net j tensors from to)
+    (define momentum-after
+      (for/hash ([change (in-list (hash-ref j 'momentum_after))])
+        (match-define (list k m) change)
+        (values k m)))
     (for ([k (in-range from to)])
       (zero-grads! opt)
       (backward! (for/fold ([loss #f]) ([e (in-list (named-parameters net))])
                    (define grad (hash-ref tensors (format "grad.~a.~a" k (car e))))
                    (define term (sum (* (cdr e) grad)))
                    (if loss (+ loss term) term)))
-      (step! opt)))
+      (step! opt)
+      (match (hash-ref momentum-after (add1 k) #f)
+        [#f (void)]
+        [m (for ([i (in-range (length (hash-ref j 'groups)))])
+             (param-group-set! opt i 'momentum (exact->inexact m)))])))
 
   (define (gap a b) (item (max (abs (- a b)))))
 
-  ;; torch's defaults are Python ints (`weight_decay: float = 0`), rktorch's store flonums
+  (define (keys h) (sort (hash-keys h) string<?))
+
   (define (same-setting? mine theirs)
     (match* (mine theirs)
       [((? real?) (? real?)) (= mine theirs)]
@@ -78,14 +90,15 @@
     (for/hash ([(key v) (in-hash grp)] #:unless (torch-only? key))
       (values (symbol->string key) v)))
 
-  (define (rktorch-state j tensors)
+  (define (rktorch-state j tensors #:rmsprop-step? [rmsprop-step? #f])
     (define optimizer (hash-ref j 'optimizer))
     (define sd (hash-ref j 'state_dict))
     (hash "state"
           (for/hash ([(name slots) (in-hash (hash-ref sd 'state))])
             (values (symbol->string name)
                     (for/hash ([(slot v) (in-hash slots)]
-                               #:unless (and (equal? optimizer "rmsprop") (eq? slot 'step)))
+                               #:unless (and (not rmsprop-step?) (equal? optimizer "rmsprop")
+                                             (eq? slot 'step)))
                       (values (symbol->string slot) (if (string? v) (hash-ref tensors v) v)))))
           "param_groups"
           (for/list ([grp (in-list (hash-ref sd 'param_groups))])
@@ -101,19 +114,27 @@
          (define net (Linear 3 2))
          (load-parameters! net tensors "initial.")
          (define opt (build j net))
-         (gradient-steps! opt net tensors 0 3)
+         (gradient-steps! opt net j tensors 0 3)
          (define ours (optimizer-state-dict opt net))
          (define torch (rktorch-state j tensors))
+         (check-equal? (keys (hash-ref ours "state")) (keys (hash-ref torch "state"))
+                       (format "~a: the parameters with state" case))
          (for* ([(name slots) (in-hash (hash-ref torch "state"))]
-                [(slot v) (in-hash slots)])
-           (define mine (hash-ref (hash-ref (hash-ref ours "state") name) slot))
-           (define where (format "~a: ~a.~a" case name slot))
-           (if (exact-integer? v)
-               (check-equal? mine v where)
-               (check-true (< (gap mine v) 1e-6) where)))
+                [mine-slots (in-value (hash-ref (hash-ref ours "state") name (hash)))])
+           (check-equal? (keys mine-slots) (keys slots) (format "~a: ~a's slots" case name))
+           (for ([(slot v) (in-hash slots)] #:when (hash-has-key? mine-slots slot))
+             (define mine (hash-ref mine-slots slot))
+             (define where (format "~a: ~a.~a" case name slot))
+             (if (exact-integer? v)
+                 (check-equal? mine v where)
+                 (check-true (< (gap mine v) 1e-6) where))))
+         (check-equal? (length (hash-ref ours "param_groups"))
+                       (length (hash-ref torch "param_groups"))
+                       (format "~a: the group count" case))
          (for ([mine (in-list (hash-ref ours "param_groups"))]
                [theirs (in-list (hash-ref torch "param_groups"))])
-           (for ([(key v) (in-hash theirs)])
+           (check-equal? (keys mine) (keys theirs) (format "~a: the group keys" case))
+           (for ([(key v) (in-hash theirs)] #:when (hash-has-key? mine key))
              (check-true (same-setting? (hash-ref mine key) v) (format "~a: group ~a" case key))))))
 
      (test-case "T3-L29: torch's state loaded into rktorch steps as torch does"
@@ -123,8 +144,13 @@
          (define net (Linear 3 2))
          (load-parameters! net tensors "after3.")
          (define opt (build j net))
-         (load-optimizer-state! opt net (rktorch-state j tensors))
-         (gradient-steps! opt net tensors 3 5)
+         (define theirs (rktorch-state j tensors #:rmsprop-step? #t))
+         (when (equal? (hash-ref j 'optimizer) "rmsprop")
+           (check-true (for/and ([slots (in-hash-values (hash-ref theirs "state"))])
+                         (hash-has-key? slots "step"))
+                       (format "~a: torch's rmsprop state keeps a step" case)))
+         (load-optimizer-state! opt net theirs)
+         (gradient-steps! opt net j tensors 3 5)
          (for ([e (in-list (named-parameters net))])
            (check-true (< (gap (cdr e) (hash-ref tensors (string-append "after5." (car e)))) 1e-6)
                        (format "~a: ~a after two more steps" case (car e)))))))))

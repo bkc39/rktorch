@@ -6,10 +6,13 @@
            (only-in "../nn.rkt" Linear Sequential mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
+           (only-in "../train/private/state.rkt" run-outcome)
+           (only-in "private/checkpoint-kit.rkt" check-exn/contract)
            (only-in "private/comparable.rkt" host-bytes layer-bytes)
-           (only-in "private/trainer-kit.rkt" toy-loader))
+           (only-in "private/trainer-kit.rkt" call-with-logged-warnings toy-loader))
 
   (define observed (box #f))
+  (define loading-run (box #f))
 
   (define-trainer Shaped (net scale enc)
     (define-init (hidden #:scale [s 1.0] #:encoder [encoder (Linear 2 2)])
@@ -21,6 +24,7 @@
     (define-forward (x) (* (net (enc x)) scale))
     (define-training-step (x y) (mse-loss (net (enc x)) y))
     (define-hook (on-load-checkpoint _ckpt)
+      (set-box! loading-run run)
       (set-box! observed (list (run-stage run) (run-epoch run) (run-global-step run)
                                (run-optimizers run)))))
 
@@ -59,7 +63,8 @@
       (define tree (read-checkpoint path))
       (check-equal? (unbox observed)
                     (list #f (hash-ref tree "epoch") (hash-ref tree "global_step") '())
-                    "on-load-checkpoint sees a run that has not started")))
+                    "on-load-checkpoint sees a run that has not started")
+      (check-eq? (run-outcome (unbox loading-run)) 'loaded)))
 
   (test-case "T3-L22: keyword and positional init args are reapplied, init-args replace them"
     (with-temporary-directory (dir #:template "init-~a")
@@ -91,4 +96,228 @@
         (check-equal? (device p) cpu))
       (check-exn #rx"head" (lambda () (load-from-checkpoint Wider path #:init-args (an-encoder))))
       (check-not-exn
-       (lambda () (load-from-checkpoint Wider path #:strict? #f #:init-args (an-encoder)))))))
+       (lambda () (load-from-checkpoint Wider path #:strict? #f #:init-args (an-encoder))))))
+
+  (define-trainer Unscaled (net enc)
+    (define-init (hidden #:scale [_s 1.0] #:encoder [encoder (Linear 2 2)])
+      (set! net (Sequential (Linear 2 hidden) (Linear hidden 1)))
+      (set! enc encoder))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net (enc x)) y)))
+
+  (test-case "a saved hparam the trainer lacks is skipped with one warning, as Lightning's"
+    (with-temporary-directory (dir #:template "hparam-~a")
+      (define-values (_tr path) (trained dir))
+      (for ([strict? (in-list '(#t #f))])
+        (define-values (back warnings)
+          (call-with-logged-warnings
+           (lambda ()
+             (load-from-checkpoint Unscaled path #:strict? strict? #:init-args (an-encoder)))))
+        (check-equal? (trainer-hparams back) (hasheq))
+        (check-equal? (length warnings) 1 (format "strict? ~a" strict?))
+        (check-regexp-match #rx"scale.*shaped[.]ckpt" (car warnings)))))
+
+  (define-trainer Spread (net)
+    (define-init (width . more) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (test-case "a rest formal's #:init-args value must be a list"
+    (with-temporary-directory (dir #:template "rest-~a")
+      (define path (build-path dir "rest.ckpt"))
+      (void (fit (Spread 1 'a) (toy-loader 4) #:max-epochs 1 #:logger #f
+                 #:callbacks (list (lambda-callback
+                                    #:on-train-end (lambda (r) (save-checkpoint! r path))))))
+      (check-exn/contract #rx"load-from-checkpoint:.*list.*formal: 'more"
+                          (lambda ()
+                            (load-from-checkpoint Spread path #:init-args (hasheq 'more 5))))
+      (check-not-exn
+       (lambda () (load-from-checkpoint Spread path #:init-args (hasheq 'more '(1 2)))))))
+
+  (define given (box #f))
+
+  (define-trainer Old (net)
+    (define-init (width [depth 1] #:rate [r 0.1] #:tag [tag 'a] . more)
+      (set-box! given (list width depth more))
+      (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Narrow (net)
+    (define-init (width #:rate [r 0.1]) (set-box! given (list width r)) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Plain (net)
+    (define-init (width) (set-box! given (list width)) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Renamed (net)
+    (define-init (width #:lr r) (set-box! given (list width r)) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Taller (net)
+    (define-init (width height) (set! net (Linear 2 (* width height))))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Keyed (net)
+    (define-init (width #:depth [d 1] #:rate [r 0.1])
+      (set-box! given (list width d r))
+      (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define-trainer Optional (net)
+    (define-init (width [depth 1]) (set-box! given (list width depth)) (set! net (Linear 2 width)))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (define (saved-from tr dir)
+    (define path (build-path dir "old.ckpt"))
+    (void (fit tr (toy-loader 2) #:max-epochs 1 #:logger #f
+               #:callbacks (list (lambda-callback
+                                  #:on-train-end (lambda (r) (save-checkpoint! r path))))))
+    path)
+
+  (define (loaded make-trainer path #:init-args [init-args (hasheq)])
+    (set-box! given #f)
+    (define-values (_tr warnings)
+      (call-with-logged-warnings
+       (lambda () (load-from-checkpoint make-trainer path #:init-args init-args))))
+    (values (unbox given) warnings))
+
+  (test-case "saved init arguments the constructor does not take are dropped with one warning"
+    (with-temporary-directory (dir #:template "narrow-~a")
+      (define path (saved-from (Old 1 2 #:rate 1/3 #:tag 'b 'x 2.5) dir))
+      (define-values (args warnings) (loaded Narrow path))
+      (check-equal? args '(1 1/3))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match
+       (pregexp (string-append "dropped init arguments saved in .*old[.]ckpt: the constructor"
+                               " takes no positional depth, keyword #:tag; saved rest values"
+                               " for more are never passed$"))
+       (car warnings))))
+
+  (test-case "the drop warning names only formals the checkpoint saved a value for"
+    (with-temporary-directory (dir #:template "unsaved-drop-~a")
+      (define path (saved-from (Old 1 (lambda () 0) #:tag (lambda () 1)) dir))
+      (check-equal? (hash-ref (read-checkpoint path) "init_dropped") '("depth" "tag"))
+      (define-values (args warnings) (loaded Plain path))
+      (check-equal? args '(1))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"ckpt: the constructor takes no keyword #:rate$" (car warnings))))
+
+  (test-case "a rest formal the constructor does not take is dropped"
+    (with-temporary-directory (dir #:template "rest-drop-~a")
+      (define path (saved-from (Spread 1 'a 'b) dir))
+      (define-values (args warnings) (loaded Plain path))
+      (check-equal? args '(1))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"saved in .*old[.]ckpt: saved rest values for more are never passed$"
+                          (car warnings))))
+
+  (test-case "a saved rest formal's values do not fill optional positionals, as Lightning's *args"
+    (with-temporary-directory (dir #:template "rest-optional-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define-values (args warnings) (loaded Optional path))
+      (check-equal? args '(1 1))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"ckpt: saved rest values for more are never passed$" (car warnings))))
+
+  (test-case "saved rest values never reach a constructor that takes a rest formal, as Lightning's"
+    (with-temporary-directory (dir #:template "rest-rest-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define-values (args warnings) (loaded Old path))
+      (check-equal? args '(1 1 ()))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"ckpt: saved rest values for more are never passed$" (car warnings))
+      (define-values (given-args none) (loaded Old path #:init-args (hasheq 'more '(5))))
+      (check-equal? given-args '(1 5 ()) "an #:init-args rest value follows the saved positionals")
+      (check-equal? none '())))
+
+  (test-case "a positional that became a keyword keeps its default; the warning says positional"
+    (with-temporary-directory (dir #:template "became-keyword-~a")
+      (define path (saved-from (Old 1 3 #:rate 1/3) dir))
+      (define-values (args warnings) (loaded Keyed path))
+      (check-equal? args '(1 1 1/3))
+      (check-equal? (length warnings) 1)
+      (check-regexp-match #rx"ckpt: the constructor takes no positional depth, keyword #:tag$"
+                          (car warnings))))
+
+  (test-case "a positional count the constructor's arity leaves out raises the named error"
+    (with-temporary-directory (dir #:template "gap-~a")
+      (define path (saved-from (Taller 1 2) dir))
+      (define one-or-three (case-lambda [(w) (Plain w)] [(w _a _b) (Plain w)]))
+      (check-exn/contract
+       (pregexp (string-append "load-from-checkpoint: .*not accept the number of positional"
+                               " arguments it would be passed; wrap"
+                               ".*saved: 2.*accepts: '[(]1 3[)].*old[.]ckpt"))
+       (lambda () (load-from-checkpoint one-or-three path)))))
+
+  (test-case "a renamed keyword: the old one is dropped, the new one comes from #:init-args"
+    (with-temporary-directory (dir #:template "renamed-~a")
+      (define path (saved-from (Narrow 1 #:rate 1/3) dir))
+      (check-exn/contract #rx"load-from-checkpoint:.*formal: '#:lr.*old[.]ckpt"
+                          (lambda () (load-from-checkpoint Renamed path)))
+      (define-values (args warnings) (loaded Renamed path #:init-args (hasheq 'lr 0.2)))
+      (check-equal? args '(1 0.2))
+      (check-regexp-match #rx"#:rate" (car warnings))
+      (check-exn/contract
+       (pregexp (string-append "load-from-checkpoint: .*positional arguments it would be passed"
+                               ".*saved: 1.*accepts: 2.*old[.]ckpt"))
+       (lambda () (load-from-checkpoint Taller path)))))
+
+  (test-case "the positional-count error counts the saved values apart from #:init-args' rest"
+    (with-temporary-directory (dir #:template "gap-given-~a")
+      (define path (saved-from (Spread 1 5) dir))
+      (define (deeper w _h _d . _more) (Plain w))
+      (check-exn/contract
+       (pregexp (string-append "load-from-checkpoint: .*positional arguments it would be passed"
+                               ".*saved: 1.*given: 1.*accepts: [(]arity-at-least 3[)].*old[.]ckpt"))
+       (lambda () (load-from-checkpoint deeper path #:init-args (hasheq 'more '(9)))))))
+
+  (test-case "a load that raises for a missing keyword logs no drop warning"
+    (with-temporary-directory (dir #:template "raised-~a")
+      (define path (saved-from (Old 1 2 #:rate 1/3 #:tag 'b) dir))
+      (define-values (raised warnings)
+        (call-with-logged-warnings
+         (lambda ()
+           (with-handlers ([exn:fail:contract? values]) (load-from-checkpoint Renamed path)))))
+      (check-regexp-match #rx"load-from-checkpoint:.*formal: '#:lr" (exn-message raised))
+      (check-equal? warnings '())))
+
+  (define (saved-with dir name edit)
+    (define path (build-path dir name))
+    (void (fit (Plain 1) (toy-loader 2) #:max-epochs 1 #:logger #f
+               #:callbacks (list (lambda-callback
+                                  #:on-save-checkpoint (lambda (_r ckpt) (edit ckpt))
+                                  #:on-train-end (lambda (r) (save-checkpoint! r path))))))
+    path)
+
+  (test-case "hparams a hook removed load as empty, as Lightning's .get(..., {})"
+    (with-temporary-directory (dir #:template "removed-~a")
+      (define path
+        (saved-with dir "bare.ckpt"
+                    (lambda (ckpt)
+                      (hash-remove! ckpt "hyper_parameters")
+                      (hash-remove! ckpt "trainer_hparams"))))
+      (check-exn/contract #rx"load-from-checkpoint:.*formal: 'width.*bare[.]ckpt"
+                          (lambda () (load-from-checkpoint Plain path)))
+      (define back (load-from-checkpoint Plain path #:init-args (hasheq 'width 1)))
+      (check-equal? (trainer-hparams back) (hasheq))))
+
+  (test-case "missing or malformed init formals raise naming the entry and the path"
+    (with-temporary-directory (dir #:template "formals-~a")
+      (for ([edit (list (lambda (ckpt) (hash-remove! ckpt "init_formals"))
+                        (lambda (ckpt) (hash-set! ckpt "init_formals" 5))
+                        (lambda (ckpt) (hash-set! ckpt "init_formals" '(("keyword" "rate" "r"))))
+                        (lambda (ckpt) (hash-set! ckpt "epoch" "one")))]
+            [i (in-naturals)])
+        (define path (saved-with dir (format "f~a.ckpt" i) edit))
+        (check-exn/contract
+         #rx"^load-from-checkpoint: the checkpoint's entry is missing.*f[0-9][.]ckpt"
+         (lambda () (load-from-checkpoint Plain path))
+         (format "edit ~a" i))))))

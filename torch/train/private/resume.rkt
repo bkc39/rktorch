@@ -22,7 +22,8 @@
                   run-book run-callbacks run-device run-entry run-grad-scaler run-optimizers
                   run-scheduler-configs run-trainer set-run-batches-stepped! set-run-epoch!
                   set-run-eval-batches! set-run-global-step!)
-         (only-in "types.rkt" callback-state-key not-implemented scheduler-config-scheduler))
+         (only-in "types.rkt" callback-state-key not-implemented scheduler-config-scheduler)
+         (only-in "value.rkt" string-keyed?))
 
 (provide check-resume-epoch!
          checkpoint-source
@@ -51,9 +52,6 @@
      "key" (string-join keys ".")
      "path" path))
   v)
-
-(define (string-keyed? h)
-  (and (hash? h) (andmap string? (hash-keys h))))
 
 (define (metrics-table? h)
   (and (string-keyed? h) (andmap real? (hash-values h))))

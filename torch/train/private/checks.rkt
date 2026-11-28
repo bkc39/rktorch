@@ -19,8 +19,8 @@
          checked-hparam
          checked-hparams!
          formal-name
+         init-capture-kept
          init-capture-shapes
-         init-capture-values
          readable-arguments)
 
 (define (optimizer-only? v)
@@ -90,24 +90,23 @@
   (or (real? v) (string? v) (symbol? v) (boolean? v)
       (and (list? v) (andmap readable? v))))
 
-(struct init-capture (shapes values))
-
-;; a value no checkpoint can hold is not kept, so the trainer does not pin it
-(define (captured-arguments shapes vals)
-  (init-capture shapes
-                (for/list ([v (in-list vals)])
-                  (when (checkpoint-value? v) v))))
+(struct init-capture (shapes kept))
 
 (define (formal-name shape)
   (match shape
     [(list _ name) name]
     [(list 'keyword _ name) name]))
 
+(define (captured-arguments shapes vals)
+  (init-capture shapes
+                (for/hasheq ([shape (in-list shapes)]
+                             [v (in-list vals)]
+                             #:when (checkpoint-value? v))
+                  (values (formal-name shape) v))))
+
 (define (readable-arguments captured)
-  (for/hasheq ([shape (in-list (init-capture-shapes captured))]
-               [v (in-list (init-capture-values captured))]
-               #:when (readable? v))
-    (values (formal-name shape) v)))
+  (for/hasheq ([(name v) (in-hash (init-capture-kept captured))] #:when (readable? v))
+    (values name v)))
 
 (define/contract-out (checked-state-key key)
   (->i ([key state-key/c]) [result any/c])

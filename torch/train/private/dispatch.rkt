@@ -15,8 +15,8 @@
                   run-book run-callbacks run-epoch run-epoch-end-save-writes run-hook
                   run-loggers run-set-up? run-stale-save-warned? run-torn-down? run-trainer
                   set-run-batch-size! set-run-callbacks! set-run-epoch-end-save-writes!
-                  set-run-finished?! set-run-hook! set-run-set-up?! set-run-stale-save-warned?!
-                  set-run-torn-down?!)
+                  set-run-finished?! set-run-hook! set-run-outcome! set-run-set-up?!
+                  set-run-stale-save-warned?! set-run-torn-down?!)
          (only-in "types.rkt"
                   callback-hook callback-kind callback-state-key callback-type
                   trainer-hook))
@@ -190,6 +190,7 @@
 
 (define (finish! r status)
   (set-run-finished?! r #t)
+  (set-run-outcome! r status)
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
 
@@ -219,6 +220,7 @@
     (when (and (run-set-up? r) (not (run-torn-down? r)))
       (logged-attempt 'teardown (lambda () (tear-down! r stage))))
     (set-run-finished?! r #t)
+    (set-run-outcome! r 'failure)
     (when absorb-break?
       (with-handlers ([exn:break? void])
         (parameterize-break #t (sleep 0))))))

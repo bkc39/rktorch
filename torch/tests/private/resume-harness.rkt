@@ -107,7 +107,7 @@
 (define fixture-fit-args
   '((#:accumulate-grad-batches . 2) (#:gradient-clip-val . 0.5) (#:log-every-n-steps . 3)))
 
-(define (training-world _dir #:generator? [generator? #f] #:workers [workers 0])
+(define (training-world #:generator? [generator? #f] #:workers [workers 0])
   (define seen (box '()))
   (define g (and generator? (make-generator 11)))
   (define source (make-generator 3))
@@ -123,7 +123,7 @@
          seen))
 
 (define (fixture-world dir #:generator? [generator? #f] #:workers [workers 0])
-  (define w (training-world dir #:generator? generator? #:workers workers))
+  (define w (training-world #:generator? generator? #:workers workers))
   (struct-copy world w
                [callbacks (append (world-callbacks w)
                                   (list (model-checkpoint #:dirpath dir #:monitor 'val-loss
@@ -215,6 +215,7 @@
   (with-temporary-directory (root #:template "resume-~a")
     (define straight (fit-leg make-world (build-path root "straight") fit-args #:saver make-saver
                               #:seed 0 #:bounds (list (cons '#:max-epochs n))))
+    (define expected (snapshot straight))
     (define split-dir (build-path root "split"))
     (define-values (first-bounds later-ends)
       (match* (split-step splits)
@@ -231,7 +232,6 @@
                                                 (leg-dir previous))
                        #:bounds (list (cons '#:max-epochs epochs)))
               legs)))
-    (define expected (snapshot straight))
     (define actual (snapshot (last legs)))
     (for ([(key v) (in-hash expected)])
       (check-equal? (hash-ref actual key) v (format "resume law: ~a" key)))

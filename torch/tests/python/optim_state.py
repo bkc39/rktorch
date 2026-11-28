@@ -6,7 +6,8 @@ For each optimizer case, writes <case>.safetensors and <case>.json into the
 directory given as the first argument. The safetensors file holds a
 Linear(3, 2)'s initial parameters, five fixed gradients, the parameters after
 three and after five steps, and the state tensors after three steps; the JSON
-holds the constructor's groups and torch's state_dict after three steps, with
+holds the constructor's groups, the momentum some cases set after a given step,
+and torch's state_dict after three steps, with
 parameter indices mapped to names in named_parameters order and every state
 tensor replaced by the name of its safetensors entry. Each scheduler case
 writes <case>.json: the state_dict after every step. The grad-scaler case
@@ -49,12 +50,14 @@ def gradients(net):
             for _ in range(STEPS_BEFORE + STEPS_AFTER)]
 
 
-def stepped(opt, net, grads):
+def stepped(opt, net, grads, start, changes):
     params = dict(net.named_parameters())
-    for g in grads:
+    for k, g in enumerate(grads, start + 1):
         for name, p in params.items():
             p.grad = g[name].clone()
         opt.step()
+        for group in opt.param_groups if k in changes else []:
+            group["momentum"] = changes[k]
 
 
 def named_state(opt, net, entries):
@@ -81,7 +84,8 @@ def groups_of(net, split):
     return [{"params": ["weight"], **split[0]}, {"params": ["bias"], **split[1]}]
 
 
-def optimizer_case(out, case, make, kwargs, split=None):
+def optimizer_case(out, case, make, kwargs, split=None, changes=None):
+    changes = changes or {}
     net = model()
     entries = {"initial." + n: p.detach().clone() for n, p in net.named_parameters()}
     grads = gradients(net)
@@ -90,14 +94,15 @@ def optimizer_case(out, case, make, kwargs, split=None):
     params = dict(net.named_parameters())
     groups = groups_of(net, split)
     opt = make([{**g, "params": [params[n] for n in g["params"]]} for g in groups], **kwargs)
-    stepped(opt, net, grads[:STEPS_BEFORE])
+    stepped(opt, net, grads[:STEPS_BEFORE], 0, changes)
     entries.update({"after3." + n: p.detach().clone() for n, p in params.items()})
     state = named_state(opt, net, entries)
-    stepped(opt, net, grads[STEPS_BEFORE:])
+    stepped(opt, net, grads[STEPS_BEFORE:], STEPS_BEFORE, changes)
     entries.update({"after5." + n: p.detach().clone() for n, p in params.items()})
     write_safetensors(os.path.join(out, case + ".safetensors"), entries)
     with open(os.path.join(out, case + ".json"), "w") as f:
         json.dump({"optimizer": make.__name__.lower(), "kwargs": kwargs, "groups": groups,
+                   "momentum_after": [[k, m] for k, m in sorted(changes.items())],
                    "state_dict": state}, f, indent=1)
 
 
@@ -110,6 +115,10 @@ OPTIMIZERS = {
               [{"weight_decay": 0.1}, {"lr": 0.02, "weight_decay": 0.0}]),
     "rmsprop": (torch.optim.RMSprop, {"lr": 0.01, "alpha": 0.9}),
     "rmsprop-momentum": (torch.optim.RMSprop, {"lr": 0.01, "alpha": 0.9, "momentum": 0.9}),
+    "sgd-momentum-fall": (torch.optim.SGD, {"lr": 0.1, "momentum": 0.9}, None, {2: 0.0, 4: 0.9}),
+    "sgd-momentum-rise": (torch.optim.SGD, {"lr": 0.1}, None, {3: 0.9}),
+    "rmsprop-momentum-fall": (torch.optim.RMSprop, {"lr": 0.01, "alpha": 0.9, "momentum": 0.9},
+                              None, {2: 0.0, 4: 0.9}),
 }
 
 S = torch.optim.lr_scheduler

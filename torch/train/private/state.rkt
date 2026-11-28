@@ -26,6 +26,7 @@
              [stepping-batches #:auto]
              [current-stage #:auto]
              [batch-index #:auto]
+             [train-batch-index #:auto]
              [hook #:auto]
              [stepped? #:auto]
              [step-pending? #:auto]
@@ -35,6 +36,7 @@
              [set-up? #:auto]
              [torn-down? #:auto]
              [finished? #:auto]
+             [outcome #:auto]
              [epoch-end-save-writes #:auto]
              [stale-save-warned? #:auto])
   #:auto-value #f

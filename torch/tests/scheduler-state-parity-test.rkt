@@ -25,11 +25,19 @@
                                                 #:milestones '(2))))
       ("warm-restarts" ,(lambda (o) (cosine-annealing-warm-restarts o #:t-0 3 #:t-mult 2)))))
 
+  (define (keys-with-a-step-count torch)
+    (define keys (map symbol->string (hash-keys torch)))
+    (sort (if (member "last_epoch" keys) keys (cons "last_epoch" keys)) string<?))
+
   (define (check-state label ours torch)
-    (for ([(key v) (in-hash torch)])
+    (check-equal? (sort (hash-keys ours) string<?) (keys-with-a-step-count torch)
+                  (format "~a: the keys" label))
+    (for ([(key v) (in-hash torch)] #:when (hash-has-key? ours (symbol->string key)))
       (define name (symbol->string key))
-      (define mine (hash-ref ours name (lambda () (fail (format "~a: no ~a" label name)))))
+      (define mine (hash-ref ours name))
       (define where (format "~a: ~a" label name))
+      (when (list? v)
+        (check-equal? (length mine) (length v) (format "~a's length" where)))
       (cond
         [(equal? name "last_epoch") (check-equal? mine v where)]
         [(equal? name "_schedulers")

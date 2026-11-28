@@ -58,14 +58,14 @@
                      #:state-dict (lambda (_r) (generator-state g))
                      #:load-state! (lambda (_r state) (set-generator-state! g state))))
 
-  (define (kept-generator-world dir)
-    (define w (training-world dir #:generator? #t))
+  (define (kept-generator-world)
+    (define w (training-world #:generator? #t))
     (struct-copy world w
                  [callbacks (append (world-callbacks w)
                                     (map generator-keeper (world-generators w)))]))
 
   (define (check-saver-resume make-world splits)
-    (check-resume make-world #:split splits #:total 4 #:fit-args fixture-fit-args
+    (check-resume (lambda (_dir) (make-world)) #:split splits #:total 4 #:fit-args fixture-fit-args
                   #:saver epoch-end-saver #:resume-path last-epoch-file))
 
   (test-case "T3-L1: 2 epochs, resume, 2 more equals 4 straight, the loader on the default stream"

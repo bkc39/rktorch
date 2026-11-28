@@ -7,6 +7,7 @@
            (only-in racket/match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
+           (only-in "../main.rkt" tensor)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../private/util.rkt" with-temporary-directory)
            "../train.rkt"
@@ -22,7 +23,8 @@
     (define-init () (set! net (Linear 2 1)))
     (define-optimizers (sgd (parameters net) #:lr 0.1))
     (define-training-step (x y) (mse-loss (net x) y))
-    (define-validation-step (_x _y) (log! 'val-loss (list-ref scores (run-epoch run)))))
+    (define-validation-step (_x _y)
+      (log! 'val-loss (tensor (list-ref scores (run-epoch run)) #:dtype 'float32))))
 
   (define (name-of p) (and p (not (equal? p "")) (path->string (file-name-from-path p))))
 

@@ -2,6 +2,7 @@
 
 (require (only-in json jsexpr->string string->jsexpr)
          (only-in racket/file file->bytes make-temporary-file)
+         (only-in racket/match match match-define match-lambda)
          (only-in "../foreign.rkt" bytes->tensor dtype tensor->bytes tensor-shape))
 
 (provide (struct-out safetensors)
@@ -13,40 +14,56 @@
          tag-width
          write-safetensors!)
 
-;; safetensors' dtype tags and element sizes, for the dtypes rktorch has; the
-;; payload is the element bytes little-endian, which is the host's order on
-;; every platform the shim builds for
+;; tensor->bytes is host order, little-endian on every platform the shim builds for
 (define tags
   '((float32 "F32" 4) (float64 "F64" 8) (float16 "F16" 2) (bfloat16 "BF16" 2)
     (int64 "I64" 8) (bool "BOOL" 1) (uint8 "U8" 1)))
 
 (define (tag-entry tag)
-  (for/first ([e (in-list tags)] #:when (equal? (cadr e) tag)) e))
+  (findf (match-lambda [(list _ t _) (equal? t tag)]) tags))
 
 (define (tag-dtype tag)
-  (cond
-    [(tag-entry tag) => car]
-    [else #f]))
+  (match (tag-entry tag)
+    [(list dt _ _) dt]
+    [#f #f]))
 
 (define (tag-width tag)
-  (caddr (tag-entry tag)))
+  (match-define (list _ _ width) (tag-entry tag))
+  width)
 
 (define (encode who name t)
-  (define tag (assq (dtype t) tags))
-  (unless tag
-    (raise-arguments-error who "unsupported dtype"
-                           "entry" name
-                           "dtype" (dtype t)))
-  (values (cadr tag) (tensor->bytes t)))
+  (match (assq (dtype t) tags)
+    [(list _ tag _) (values tag (tensor->bytes t))]
+    [#f (raise-arguments-error who "unsupported dtype" "entry" name "dtype" (dtype t))]))
 
 (define (delete-if-there path)
   (when (file-exists? path)
     (delete-file path)))
 
+(define link-hops 40)
+
+(define (raise-filesystem-error message path)
+  (raise (exn:fail:filesystem
+          (format "call-with-atomic-output-file: ~a\n  path: ~a" message path)
+          (current-continuation-marks))))
+
+(define (link-target path)
+  (let follow ([p (path->complete-path path)] [hops 0])
+    (cond
+      [(not (link-exists? p)) p]
+      [(= hops link-hops) (raise-filesystem-error "too many levels of links" path)]
+      [else
+       (define-values (dir _name _must-be-dir?) (split-path p))
+       (follow (path->complete-path (resolve-path p) dir) (add1 hops))])))
+
 (define (call-with-atomic-output-file path write!)
-  (define-values (dir name _) (split-path (path->complete-path path)))
-  (define temporary
-    (make-temporary-file (string-append "." (path->string name) ".~a.tmp") #:base-dir dir))
+  (define target (link-target path))
+  (define-values (dir name _) (split-path target))
+  (unless (path? name)
+    (raise-filesystem-error "not a file path" path))
+  (define template
+    (string-append "." (regexp-replace* #rx"~" (path->string name) "~~") ".~a.tmp"))
+  (define temporary (make-temporary-file template #:base-dir dir))
   (with-handlers ([(lambda (_) #t)
                    (lambda (e)
                      (delete-if-there temporary)
@@ -55,17 +72,22 @@
       (lambda (out)
         (write! out)
         (flush-output out)))
-    (rename-file-or-directory temporary path #t)))
+    (rename-file-or-directory temporary target #t)))
 
-(define (write-safetensors! who path entries #:metadata [metadata #f] #:on-written [on-written void])
+(define (write-safetensors! who path entries
+                            #:metadata [metadata #f]
+                            #:on-header [on-header void]
+                            #:on-written [on-written void])
   (define-values (fields chunks)
-    (for/fold ([fields '()] [chunks '()] [offset 0] #:result (values fields chunks))
+    (for/fold ([fields '()] [chunks '()] [offset 0]
+               #:result (values (reverse fields) (reverse chunks)))
               ([e (in-list entries)])
-      (define-values (tag bs) (encode who (car e) (cdr e)))
+      (match-define (cons name t) e)
+      (define-values (tag bs) (encode who name t))
       (define end (+ offset (bytes-length bs)))
-      (values (cons (cons (string->symbol (car e))
+      (values (cons (cons (string->symbol name)
                           (hasheq 'dtype tag
-                                  'shape (tensor-shape (cdr e))
+                                  'shape (tensor-shape t)
                                   'data_offsets (list offset end)))
                     fields)
               (cons bs chunks)
@@ -75,20 +97,19 @@
      (if metadata
          (cons (cons '__metadata__ (for/hasheq ([(k v) (in-hash metadata)])
                                      (values (string->symbol k) v)))
-               (reverse fields))
-         (reverse fields))))
+               fields)
+         fields)))
   (define header-bytes (string->bytes/utf-8 (jsexpr->string header)))
+  (on-header header-bytes)
   (call-with-atomic-output-file
    path
    (lambda (out)
      (write-bytes (integer->integer-bytes (bytes-length header-bytes) 8 #f #f) out)
      (write-bytes header-bytes out)
-     (for ([bs (in-list (reverse chunks))])
+     (for ([bs (in-list chunks)])
        (write-bytes bs out))
      (on-written))))
 
-;; `header` maps each entry's name, a symbol, to its jsexpr; `metadata` is
-;; the `__metadata__` map with string keys, or #f
 (struct safetensors (header metadata raw data-start))
 
 (define (read-safetensors path)
@@ -96,12 +117,9 @@
   (define data-start (+ 8 (integer-bytes->integer raw #f #f 0 8)))
   (define all (string->jsexpr (bytes->string/utf-8 raw #f 8 data-start)))
   (safetensors (hash-remove all '__metadata__)
-               (cond
-                 [(hash-ref all '__metadata__ #f)
-                  => (lambda (m)
-                       (for/hash ([(k v) (in-hash m)])
-                         (values (symbol->string k) v)))]
-                 [else #f])
+               (match (hash-ref all '__metadata__ #f)
+                 [(? hash? m) (for/hash ([(k v) (in-hash m)]) (values (symbol->string k) v))]
+                 [_ #f])
                raw
                data-start))
 

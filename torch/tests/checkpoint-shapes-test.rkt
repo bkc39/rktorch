@@ -85,7 +85,7 @@
       (list (list optimizer-state? (hash "state" (hash) "param_groups" (list exact-group)))
             (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(1/10) "_last_lr" '(1/20)))
             (list scheduler-state? (hash "last_epoch" 0 "base_lrs" '(0.1) "_last_lr" '(0.1)
-                                         "T_cur" 1/2 "T_i" 3))
+                                         "T_cur" 1 "T_i" 3))
             (list grad-scaler-state? (hash "scale" 65536.0 "growth_factor" 2.0
                                            "backoff_factor" 0.5 "growth_interval" 2000
                                            "_growth_tracker" 0))))
@@ -108,6 +108,9 @@
     (check-false (scheduler-state? (hash-set composite "base_lrs" '(0.1))))
     (check-false (scheduler-state? (hash-set plain "T_cur" 1)) "T_cur without T_i")
     (check-false (scheduler-state? (hash-set* plain "T_cur" 1 "T_i" 0)))
+    (for ([t-cur (in-list '(1/2 1.5 2.0 -1))])
+      (check-false (scheduler-state? (hash-set* plain "T_cur" t-cur "T_i" 6))
+                   (format "T_cur ~a is not an exact count" t-cur)))
     (check-false (scheduler-state? (hash-set plain "last_epoch" 1.0)))
     (check-false (scheduler-state? (hash-remove plain "base_lrs")))
     (check-false (scheduler-state? (hash-set plain "_last_lr" '(a))))
@@ -123,7 +126,8 @@
     (check-false (grad-scaler-state? (make-hash)) "mutable")
     (check-false (grad-scaler-state? (hash-remove st "_growth_tracker")))
     (check-false (grad-scaler-state? (hash-set st "extra" 1)))
-    (check-false (grad-scaler-state? (hash-set st "scale" 0.0)))
+    (check-true (grad-scaler-state? (hash-set st "scale" 0.0)) "an underflowed scale")
+    (check-false (grad-scaler-state? (hash-set st "scale" -1.0)))
     (check-false (grad-scaler-state? (hash-set st "scale" 65536)) "a flonum scale")
     (check-false (grad-scaler-state? (hash-set st "growth_factor" 1.0)))
     (check-false (grad-scaler-state? (hash-set st "backoff_factor" 1.0)))
