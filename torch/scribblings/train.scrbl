@@ -368,7 +368,9 @@ changes what later saves see. The file is written to a temporary name and
 renamed, so a failed save leaves @racket[path] as it was. A run that has not
 started, as in @tt{on-load-checkpoint}, cannot be saved, as Lightning raises
 without a trainer attached; neither can a tree whose safetensors header would
-be over 100 MB. The run @racket[fit] returns can be saved, as Lightning's
+be over 100 MB, nor, with or without @racket[#:weights-only?], a run that logged
+two names spelled the same (an interned and an uninterned symbol), since the
+file keys metrics by name. The run @racket[fit] returns can be saved, as Lightning's
 @tt{save_checkpoint} after @tt{fit}: its counters, optimizer and callback state
 are the run's at the fit's end, its weights the trainer's current ones.
 
@@ -595,7 +597,8 @@ Lightning's @tt{self.log}. The values allowed for @racket[#:on-step?] and
 in a hook that logs only per epoch is a contract violation. An epoch
 @racket['mean] is weighted by @racket[#:batch-size], by default the leading
 dimension of the first tensor in the batch, searched through nested lists, or 1
-without one. The value is detached
+without one; a mean over weight 0 (only zero-row batches) is @racket[+nan.0], as
+in Lightning. The value is detached
 before it is accumulated, so a logged loss keeps no graph alive, and, as in
 Lightning, a tensor that is not @racket['float32] or @racket['float64] is
 converted to @racket['float32] first.}
