@@ -5,6 +5,7 @@
          (only-in threading ~>)
          (only-in "harness.rkt" list-median)
          (only-in "markdown.rkt" host num ref table whole)
+         (only-in "summary-blocks.rkt" arm-blocks complete-blocks outside-clean?)
          (only-in "summary-op-cost.rkt" k3-thread-scaling k6-gc-per-sample))
 
 (provide arm-rate
@@ -41,38 +42,24 @@
 (define (of-version records v)
   (filter (lambda (r) (equal? (ref r 'racket) v)) records))
 
-(define (block-key r)
-  (list (ref r 'run_id) (ref r 'round) (ref r 'block)))
-
 (define (block-arms pipeline workers)
   (if (or (zero? workers) (eq? pipeline 'train))
       '(rktorch pytorch)
       '(rktorch pytorch pytorch-persistent)))
 
 (define (cell-blocks records pipeline workers)
-  (define arms
-    (filter (lambda (r) (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)))
-            (m0-records records)))
-  (for/list ([key (in-list (remove-duplicates (map block-key arms)))])
-    (for/hash ([r (in-list arms)] #:when (equal? (block-key r) key))
-      (values (ref r 'arm) r))))
+  (arm-blocks
+   (filter (lambda (r) (and (equal? (ref r 'pipeline) pipeline) (equal? (ref r 'workers) workers)))
+           (m0-records records))))
 
 (define (clean-arm? r)
-  (define outside (ref r 'load_outside))
-  (define limit (ref r 'max_load))
-  (and (not (ref r 'error))
-       (real? (ref r (rate-key (ref r 'pipeline))))
-       (not (and (real? outside) (real? limit) (>= outside limit)))))
+  (and (outside-clean? r) (real? (ref r (rate-key (ref r 'pipeline))))))
 
 (define (valid-blocks records pipeline workers)
-  (define blocks (cell-blocks records pipeline workers))
   (define expected (map symbol->string (block-arms (string->symbol pipeline) workers)))
-  (define valid
-    (filter (lambda (b)
-              (and (andmap (lambda (arm) (hash-ref b arm #f)) expected)
-                   (andmap clean-arm? (hash-values b))))
-            blocks))
-  (values valid (- (length blocks) (length valid))))
+  (complete-blocks (cell-blocks records pipeline workers)
+                   #:expected (lambda (_b) expected)
+                   #:clean? clean-arm?))
 
 (define (accepted-blocks records pipeline workers)
   (define-values (valid _dropped) (valid-blocks records pipeline workers))

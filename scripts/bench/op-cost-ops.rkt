@@ -26,8 +26,12 @@
          (only-in "ops.rkt" settle-native-memory!)
          (only-in "workloads/pipelines.rkt" cifar-augment cifar-sources))
 
-(provide build-case
+(provide add-scalar/c
+         add/c
+         build-case
+         narrow/c
          op-cost-names
+         zeros-on/c
          ladder-ops
          (struct-out op-case)
          op-case-layer

@@ -2,7 +2,8 @@
 (require (only-in racket/system system)
          (only-in torch cuda-available? cuda-device-count cuda-memory-stats
                   cuda-device finalizer-failures mps-available? native-memory-use
-                  ones tensor-shape))
+                  ones tensor-shape)
+         (only-in torch/tests/private/platform host-platform))
 
 (printf "racket        : ~a ~a\n" (version) (system-type 'machine))
 (printf "os            : ~a / ~a\n" (system-type 'os*) (system-type 'arch))
@@ -18,6 +19,6 @@
 (display "staged native lib:\n")
 (void (system "ls -l torch/native-libs/ 2>/dev/null || true"))
 (display "\nlinkage:\n")
-(void (system (if (eq? (system-type 'os) 'macosx)
+(void (system (if (eq? host-platform 'macosx)
                   "otool -L torch/native-libs/libtorchrkt.dylib 2>/dev/null | head -8"
                   "ldd torch/native-libs/libtorchrkt.so 2>/dev/null | head -12")))

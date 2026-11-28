@@ -35,6 +35,7 @@
 
 (define (python-child-environment)
   (call-with-python-env
+   #:env `(("RKTORCH_RACKET_CACHE_DIR" . ,(path->string (find-system-path 'cache-dir))))
    (lambda () (environment-variables-copy (current-environment-variables)))))
 
 (define (twin-records script args #:time-limit [time-limit 3600] #:log [log (current-error-port)])

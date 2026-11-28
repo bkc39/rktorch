@@ -18,6 +18,7 @@
          one-line
          cell
          table
+         column-table
          median
          iqr
          median-of
@@ -84,6 +85,11 @@
            (for/list ([row (in-list rows)])
              (string-join (map cell row) " | " #:before-first "| " #:after-last " |")))
    "\n"))
+
+(define (column-table columns rows)
+  (table (map car columns)
+         (for/list ([row (in-list rows)])
+           (for/list ([c (in-list columns)]) ((cdr c) row)))))
 
 (define (median r) (ref r 'stats 'median))
 (define (iqr r) (ref r 'stats 'iqr))

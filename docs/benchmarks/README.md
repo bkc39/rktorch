@@ -750,3 +750,78 @@ version.
 A 9.1 run needs a checkout whose `compiled/` and `PLTUSERHOME` are 9.1's:
 a separate worktree with Racket 9.1 first on `PATH` and its packages
 installed as `nix/matrix/racket-cell.sh install` does.
+
+## M1: where the multi-worker loss goes (#555)
+
+`scripts/bench/m1.rkt` attributes the loss a loader takes at w workers
+against an ideal w0 ÷ w. It reuses M0's blocks, arms, outside-load rule
+and `cell-args`, with one rktorch arm per block that times itself
+(`scripts/bench/m1-cell.rkt`) and M0's PyTorch arms beside it at a
+default trip (`py` at w0, `py` and `py persistent` at w > 0):
+
+```bash
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+export RKTORCH_CIFAR10_PNG_DIR=~/.racket/rktorch/cifar10-png
+nix develop -c taskset -c 0-8 racket scripts/bench/m1.rkt --tree master --rounds 5
+nix develop -c taskset -c 0-8 racket scripts/bench/m1.rkt --rounds 2 --trips 32,64,128
+nix develop -c taskset -c 0-8 racket scripts/bench/m1-registration.rkt > registration.jsonl
+racket scripts/bench/m1.rkt m1-*.jsonl registration.jsonl > m1.md
+```
+
+- **Cells.** `cifar-png` and `jpeg` (M0's) at `--workers` (0, 4, 7) and
+  `--trips` (`-`, Racket's own collect trip, or whole MB). A trip cell has no
+  PyTorch arm. A block missing an arm is dropped, as M0 drops one.
+  `--out-dir` inside the checkout is refused, and so is more than one
+  ATen intra-op thread.
+- **Spans.** The rktorch arm wraps the dataset and the collate, and
+  steps the traversal itself, so every batch build, collate, `next` and
+  step is a span with its OS thread (`gettid`, `pthread_threadid_np` on
+  macOS; a host with neither refuses the cell), wall clock and that thread's CPU clock
+  (`CLOCK_THREAD_CPUTIME_ID`). Each collection comes from the `GC` log
+  topic with its mode, real interval, CPU and the ledger's published
+  live entries when the listener saw it (read without a flush, so up to
+  64 unflushed entries per thread behind). The log does not say which
+  thread collected.
+- **CPU, off-CPU and GC.** A collection runs on the OS thread that asked
+  for it, beside the collector's sweeper threads: the share that thread
+  sweeps is in its CPU clock and the rest of its wait is off CPU, and
+  every other thread waits for it off CPU. A span's off-CPU time is its wall less its CPU,
+  and its GC overlap is an annotation beside the two, never subtracted
+  from them.
+- **The split, per block.** Per sample, worker-summed and ÷ w: the
+  build's CPU and off-CPU time against w0's, less the build time outside
+  every timed epoch (a build straddling an epoch's end is clipped to it),
+  the workers' idle time before their first build, between builds,
+  after their last and for workers that built nothing, less main's
+  serial w0 work. Each block's loss less those terms is its residual,
+  zero when the spans cover each worker's epochs exactly; the table has
+  the median of each term and of the residual over the blocks, beside
+  the build GC overlap Δ and PyTorch's own loss for both of its arms.
+- **Counts.** One more traversal in each w0 arm counts registered
+  tensors, ledger charges and native crossings per sample, through the
+  race and crossing hooks; it is not timed.
+- **Registration.** `scripts/bench/m1-registration.rkt` runs a four-op
+  mix (narrow, add 8×8, scalar add, zeros 8×8) at 1, 2, 4 and 8 threads,
+  as `scripts/bench/op-cost.rkt`'s ladder does, at the layers kept
+  (handles freed off the measured thread, by one freeing thread in
+  batches of 16384 per measured thread and the rest after the window;
+  its record has `kept_pending_peak`, the most handles waiting on that
+  thread), raw (freed inline), guardian only,
+  `lifetimes` set only, registered (both), accounted and facade, and the
+  CIFAR chain. Each piece is a difference of two layers that pay the
+  same free on the measured thread (guardian and registered against
+  kept, `lifetimes` against raw, the inline free as raw against kept),
+  in µs per op with and without the real time of the collections inside
+  the timed window, and in KB per op. A record's window opens at
+  `window_start_ms`, the wall clock read as the timed loop starts, and
+  closes at `window_end_ms`, that plus `elapsed_ms`; `gc_real_ms` is the
+  union of the logged collections' real intervals clipped to it, so it
+  never exceeds `elapsed_ms`. Every measured thread waits through a
+  collection, so the net time takes `gc_real_ms` off each thread's. The free piece is net of kept's
+  own cost of reusing memory late and from another OS thread; a cell is
+  marked `(backlog)` where the freeing thread fell more than a batch per
+  measured thread behind.
+
+Records go to `--out-dir` as `m1-<tree>-<racket>-<stamp>.jsonl`; the
+summary has the split, GC against live entries per trip, and the
+registration pieces, one table per Racket version.
