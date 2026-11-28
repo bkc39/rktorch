@@ -6,7 +6,8 @@
            (only-in "../main.rkt"
                     ~> cuda-available? cuda-device mps-available? mps-device sum tensor to)
            (only-in "../train/private/book.rkt"
-                    host-reads make-book note-step! read-groups read-steps!))
+                    host-reads make-book note-epoch! note-step! read-epoch! read-groups
+                    read-steps!))
 
   (define kinds
     (hasheq 'a '(mps float32) 'b '(cpu float64) 'c '(cpu float32) 'd '(mps float32)))
@@ -44,4 +45,9 @@
       (define wide (scalar 0.25 'float64))
       (for ([order (in-list (list (list (list 'fast fast) (list 'wide wide))
                                   (list (list 'wide wide) (list 'fast fast))))])
-        (check-equal? (published order) (list (hasheq 'fast 2.5 'wide 0.25) 2))))))
+        (check-equal? (published order) (list (hasheq 'fast 2.5 'wide 0.25) 2)))))
+
+  (test-case "a mean over weight 0, as only zero-row batches give, reads as NaN"
+    (define b (make-book))
+    (note-epoch! b 'train 'empty 0.0 0 'mean #t #f)
+    (check-equal? (read-epoch! b 'train) (hasheq 'empty +nan.0))))

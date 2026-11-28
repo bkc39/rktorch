@@ -3,7 +3,7 @@
 (require (only-in racket/dict in-dict in-dict-keys)
          (only-in racket/function curry)
          (only-in racket/list check-duplicates remove-duplicates)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match* match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   * + cat detach device dtype max min numel reshape tensor->list tensor? to
@@ -116,7 +116,10 @@
     (if (tensor? v) (hash-ref read v) v)))
 
 (define (reduced e x)
-  (if (eq? (entry-reduce e) 'mean) (exact->inexact (/ x (entry-weight e))) x))
+  (match* ((entry-reduce e) (entry-weight e))
+    [('mean (? zero?)) +nan.0]
+    [('mean w) (exact->inexact (/ x w))]
+    [(_ _) x]))
 
 (define (cache! es)
   (define stale (filter (lambda (e) (not (entry-cached e))) es))

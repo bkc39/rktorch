@@ -224,9 +224,12 @@
 
   (test-case "a weight-0 book entry, as a zero-row batch writes, is resumed"
     (with-temporary-directory (dir #:template "weightless-~a")
-      (match-define (list keys v) (epoch-entry "weight" 0 "reduce" 'sum))
-      (define path (saved-with dir (list (reshaping "weightless" (edit-at keys v)))))
-      (check-pred run? (resume (Small) path))))
+      (for ([reduce (in-list '(sum mean))])
+        (match-define (list keys v) (epoch-entry "weight" 0 "reduce" reduce))
+        (define path
+          (saved-with dir (list (reshaping "weightless" (edit-at keys v)))
+                      #:name (format "~a.ckpt" reduce)))
+        (check-pred run? (resume (Small) path) (format "reduce ~a" reduce)))))
 
   (test-case "a saved current-generator state with no current-generator to go to warns"
     (with-temporary-directory (dir #:template "cleared-~a")
