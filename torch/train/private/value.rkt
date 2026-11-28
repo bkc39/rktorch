@@ -1,12 +1,14 @@
 #lang racket/base
 
-(require (only-in racket/match match)
+(require (only-in racket/list check-duplicates)
+         (only-in racket/match match)
          (only-in "../../foreign.rkt" tensor?)
          (only-in "../../foreign/raw/tensor.rkt" dtype-code->symbol tr-tensor-dtype/raw))
 
 (provide checkpoint-value?
          decode-value
          encode-value
+         string-keyed-state
          string-keyed?
          value-problem)
 
@@ -100,6 +102,19 @@
     [(hash-eq? h) "eq"]
     [(hash-eqv? h) "eqv"]
     [else "equal"]))
+
+(define (string-keyed-state table key-path [state-of values])
+  (define names (hash-keys table))
+  (match (check-duplicates names #:key symbol->string)
+    [#f (for/hash ([(k v) (in-hash table)]) (values (symbol->string k) (state-of v)))]
+    [twin
+     (define twins (filter (lambda (k) (equal? (symbol->string k) (symbol->string twin))) names))
+     (raise-arguments-error
+      'save-checkpoint!
+      "two names are spelled the same, so the checkpoint cannot hold both"
+      "key" key-path
+      "names" twins
+      "interned" (map symbol-interned? twins))]))
 
 (define (string-keyed? v)
   (and (hash? v) (for/and ([k (in-hash-keys v)]) (string? k))))

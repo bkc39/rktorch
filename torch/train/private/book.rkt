@@ -2,12 +2,13 @@
 
 (require (only-in racket/dict in-dict in-dict-keys)
          (only-in racket/function curry)
-         (only-in racket/list check-duplicates remove-duplicates)
+         (only-in racket/list remove-duplicates)
          (only-in racket/match match match* match-define)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   * + cat detach device dtype max min numel reshape tensor->list tensor? to
-                  zeros-like))
+                  zeros-like)
+         (only-in "value.rkt" string-keyed-state))
 
 (provide accumulators
          book-metric
@@ -242,19 +243,6 @@
           (for/and ([(name s) (in-dict slots)])
             (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
     [(leaf-shape ok?) (ok? saved)]))
-
-(define (string-keyed-state table key-path [state-of values])
-  (define names (hash-keys table))
-  (match (check-duplicates names #:key symbol->string)
-    [#f (for/hash ([(k v) (in-hash table)]) (values (symbol->string k) (state-of v)))]
-    [twin
-     (define twins (filter (lambda (k) (equal? (symbol->string k) (symbol->string twin))) names))
-     (raise-arguments-error
-      'save-checkpoint!
-      "two logged metric names are spelled the same, so the checkpoint cannot hold both"
-      "key" key-path
-      "names" twins
-      "interned" (map symbol-interned? twins))]))
 
 (define (ledger-state l loop)
   (for/hash ([field (in-list ledger-fields)])

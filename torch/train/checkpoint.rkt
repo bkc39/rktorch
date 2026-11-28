@@ -29,7 +29,8 @@
          (only-in "private/types.rkt"
                   callback-hook callback-state-key callback-type define-named-contract
                   scheduler-config-scheduler trainer-hook trainer-hparam-names trainer?)
-         (only-in "private/value.rkt" checkpoint-value? string-keyed? value-problem))
+         (only-in "private/value.rkt"
+                  checkpoint-value? string-keyed-state string-keyed? value-problem))
 
 (define-named-contract checkpoint-value/c checkpoint-value?)
 
@@ -66,9 +67,6 @@
     [("epoch-end" _) (hash-set counters "epoch_end_logged" (after-trainer-hook?))]
     [(_ _) counters]))
 
-(define (keys->strings h)
-  (for/hash ([(k v) (in-hash h)]) (values (symbol->string k) v)))
-
 (define (formal-entry shape)
   (match shape
     [(list 'keyword kw id)
@@ -79,7 +77,7 @@
   (define captured ((trainer-hook tr 'init-arguments) tr))
   (define kept (init-capture-kept captured))
   (define shapes (init-capture-shapes captured))
-  (hash "hyper_parameters" (keys->strings kept)
+  (hash "hyper_parameters" (string-keyed-state kept "hyper_parameters")
         "init_formals" (map formal-entry shapes)
         "init_dropped" (for/list ([shape (in-list shapes)]
                                   #:unless (hash-has-key? kept (formal-name shape)))
@@ -109,7 +107,7 @@
              "global_step" (run-global-step r)
              "state_dict" (make-immutable-hash (state-dict tr))
              "loops" (hash "fit_loop" (fit-loop r))
-             "trainer_hparams" (keys->strings (trainer-hparams tr))
+             "trainer_hparams" (string-keyed-state (trainer-hparams tr) "trainer_hparams")
              "callback_metrics" (book-metrics-state (run-book r))))
 
 (define (with-training-state r tree)
