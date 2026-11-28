@@ -22,6 +22,7 @@
          read-epoch!
          read-groups
          read-steps!
+         reducers
          restore-book-state!
          saved-book-checks)
 
@@ -185,6 +186,8 @@
 
 (struct record-shape (slots make))
 
+(struct leaf-shape (ok?))
+
 (struct slot (get ok?))
 
 (define reducers '(mean sum max min))
@@ -193,7 +196,7 @@
 
 (define (weight? w) (and (real? w) (not (negative? w))))
 
-(define (reducer? r) (and (memq r reducers) #t))
+(define (reducer? r) (memq r reducers))
 
 (define logged-slots
   (list (cons "logger" (slot logged-logger? boolean?)) (cons "both" (slot logged-both? boolean?))))
@@ -212,21 +215,21 @@
 (define ledger-fields
   (list (list "steps" ledger-steps pending-shape)
         (list "epoch" ledger-epoch entry-shape)
-        (list "stepped" ledger-stepped boolean?)
-        (list "latest" ledger-latest real?)
-        (list "closed" ledger-closed real?)))
+        (list "stepped" ledger-stepped (leaf-shape boolean?))
+        (list "latest" ledger-latest (leaf-shape real?))
+        (list "closed" ledger-closed (leaf-shape real?))))
 
 (define (shape-state shape v)
   (match shape
     [(record-shape slots _)
      (for/hash ([(name s) (in-dict slots)]) (values name ((slot-get s) v)))]
-    [_ v]))
+    [(leaf-shape _) v]))
 
 (define (state-shape shape saved)
   (match shape
     [(record-shape slots make)
      (apply make (for/list ([name (in-dict-keys slots)]) (hash-ref saved name)))]
-    [_ saved]))
+    [(leaf-shape _) saved]))
 
 (define (shape-state? shape saved)
   (match shape
@@ -234,7 +237,7 @@
      (and (hash? saved)
           (for/and ([(name s) (in-dict slots)])
             (and (hash-has-key? saved name) ((slot-ok? s) (hash-ref saved name)))))]
-    [ok? (ok? saved)]))
+    [(leaf-shape ok?) (ok? saved)]))
 
 (define (string-keyed-state table key-path state-of)
   (define names (hash-keys table))

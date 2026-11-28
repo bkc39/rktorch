@@ -75,27 +75,29 @@
   (when (and (after-trainer-hook?) (not (run-epoch-end-save-writes r)))
     (set-run-epoch-end-save-writes! r (book-writes (run-book r)))))
 
-(define (warn-stale-save! r cb #:own? own?)
+(define (warn-stale-save! r cb earlier-save-at)
   (unless (run-stale-save-warned? r)
     (set-run-stale-save-warned?! r #t)
-    (warn-train!
-     (format (string-append "fit: the ~a callback logged in on-train-epoch-end after "
-                            (if own? "saving a checkpoint" "a checkpoint was saved")
-                            " earlier in this hook, so that file does not hold the value and a"
-                            " resume from it is not exact; "
-                            (if own? "log before saving" "list the saving callback last"))
-             (callback-type cb)))))
+    (define message
+      (match earlier-save-at
+        [#f (string-append "fit: the ~a callback logged in on-train-epoch-end after saving a"
+                           " checkpoint earlier in this hook, so that file does not hold the"
+                           " value and a resume from it is not exact; log before saving")]
+        [_ (string-append "fit: the ~a callback logged in on-train-epoch-end after a checkpoint"
+                          " was saved earlier in this hook, so that file does not hold the value"
+                          " and a resume from it is not exact; list the saving callback last")]))
+    (warn-train! (format message (callback-type cb)))))
 
 (define (call-late-callbacks r name cbs args)
   (set-run-epoch-end-save-writes! r #f)
   (parameterize ([after-trainer-hook? #t])
     (for ([cb (in-list cbs)])
-      (define saved-before? (run-epoch-end-save-writes r))
+      (define earlier-save-at (run-epoch-end-save-writes r))
       (call-callback r cb name args)
       (define at (run-epoch-end-save-writes r))
       (when (and at (> (book-writes (run-book r)) at))
         (set-run-epoch-end-save-writes! r #f)
-        (warn-stale-save! r cb #:own? (not saved-before?))))))
+        (warn-stale-save! r cb earlier-save-at)))))
 
 (define (call-hooks r name . args)
   (define h (hook-named name))
